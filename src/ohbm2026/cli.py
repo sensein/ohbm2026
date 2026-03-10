@@ -36,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     voyage_parser = subparsers.add_parser("embed-voyage", help="Generate Voyage embeddings")
     _copy_actions(voyage_parser, neuroscape.build_voyage_parser())
 
+    stage2_parser = subparsers.add_parser("embed-stage2", help="Train and apply a local NeuroScape stage-2 model")
+    _copy_actions(stage2_parser, neuroscape.build_stage2_parser())
+
     manifest_parser = subparsers.add_parser("write-manifest", help="Write the NeuroScape handoff manifest")
     _copy_actions(manifest_parser, neuroscape.build_manifest_parser())
 
@@ -70,6 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         return neuroscape.minilm_main(subcommand_argv)
     if command == "embed-voyage":
         return neuroscape.voyage_main(subcommand_argv)
+    if command == "embed-stage2":
+        return neuroscape.stage2_main(subcommand_argv)
     if command == "write-manifest":
         return neuroscape.manifest_main(subcommand_argv)
 

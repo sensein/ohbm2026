@@ -12,6 +12,7 @@ ohbm-enrich = "ohbm2026.enrichment:enrich_main"
 ohbm-analyze-figures = "ohbm2026.enrichment:analyze_figures_main"
 ohbm-embed-minilm = "ohbm2026.neuroscape:minilm_main"
 ohbm-embed-voyage = "ohbm2026.neuroscape:voyage_main"
+ohbm-embed-stage2 = "ohbm2026.neuroscape:stage2_main"
 ohbm-write-manifest = "ohbm2026.neuroscape:manifest_main"
 ohbmcli = "ohbm2026.cli:main"
 

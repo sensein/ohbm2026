@@ -56,6 +56,13 @@ class CLITest(unittest.TestCase):
         self.assertEqual(result, 19)
         voyage_main.assert_called_once_with(["--voyage-model", "test-model"])
 
+    def test_embed_stage2_subcommand_delegates_to_stage2_main(self) -> None:
+        with mock.patch.object(cli.neuroscape, "stage2_main", return_value=21) as stage2_main:
+            result = cli.main(["embed-stage2", "--epochs", "5"])
+
+        self.assertEqual(result, 21)
+        stage2_main.assert_called_once_with(["--epochs", "5"])
+
     def test_write_manifest_subcommand_delegates_to_manifest_main(self) -> None:
         with mock.patch.object(cli.neuroscape, "manifest_main", return_value=23) as manifest_main:
             result = cli.main(["write-manifest", "--output", "manifest.json"])
