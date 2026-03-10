@@ -14,15 +14,6 @@ from urllib.request import Request, urlopen
 
 from ohbm2026.assets import extract_target_figure_urls
 from ohbm2026.graphql_api import fetch_author_details, get_api_key
-from ohbm2026.neuroscape import (
-    DEFAULT_MINILM_MODEL,
-    DEFAULT_VOYAGE_MODEL,
-    compute_neighbors,
-    minilm_embed,
-    voyage_embed,
-    write_embedding_bundle,
-    write_neuroscape_manifest,
-)
 
 SECTION_ORDER = [
     ("introduction", "Introduction"),
@@ -432,89 +423,103 @@ def enrich_database(
     }
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Phase 2 enrichment pipeline for OHBM 2026 abstracts")
+def build_authors_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Export author metadata for OHBM 2026 abstracts")
     parser.add_argument("--input", default="data/abstracts.json")
     parser.add_argument("--authors-output", default="data/authors.json")
-    parser.add_argument("--enriched-output", default="data/abstracts_enriched.json")
-    parser.add_argument("--image-analyses-output", default="data/image_analyses.json")
-    parser.add_argument("--embeddings-dir", default="data/embeddings")
-    parser.add_argument("--vision-model", default=DEFAULT_VISION_MODEL)
-    parser.add_argument("--vision-max-images", type=int, default=None)
-    parser.add_argument("--voyage-model", default=DEFAULT_VOYAGE_MODEL)
-    parser.add_argument("--minilm-model", default=DEFAULT_MINILM_MODEL)
-    parser.add_argument("--skip-authors", action="store_true")
-    parser.add_argument("--skip-enrich", action="store_true")
-    parser.add_argument("--skip-figure-analysis", action="store_true")
-    parser.add_argument("--skip-voyage", action="store_true")
-    parser.add_argument("--skip-minilm", action="store_true")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--ohbm-api-var", default="OHBM2026_API")
-    parser.add_argument("--voyage-api-var", default="VOYAGE_API")
+    return parser
+
+
+def parse_authors_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_authors_parser().parse_args(argv)
+
+
+def authors_main(argv: list[str] | None = None) -> int:
+    args = parse_authors_args(argv)
+    base_database = load_json(Path(args.input))
+    author_database = build_author_database(base_database, get_api_key(Path(args.env_file), args.ohbm_api_var))
+    write_json(Path(args.authors_output), author_database)
+    print(
+        json.dumps(
+            {
+                "input": args.input,
+                "authors_output": args.authors_output,
+                "author_count": author_database["author_count"],
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def build_enrich_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Build enriched OHBM 2026 abstracts from local databases")
+    parser.add_argument("--input", default="data/abstracts.json")
+    parser.add_argument("--authors-input", default="data/authors.json")
+    parser.add_argument("--image-analyses-input", default="data/image_analyses.json")
+    parser.add_argument("--enriched-output", default="data/abstracts_enriched.json")
+    return parser
+
+
+def parse_enrich_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_enrich_parser().parse_args(argv)
+
+
+def enrich_main(argv: list[str] | None = None) -> int:
+    args = parse_enrich_args(argv)
+    base_database = load_json(Path(args.input))
+    author_database = load_json(Path(args.authors_input))
+    image_cache = load_image_analysis_cache(Path(args.image_analyses_input))
+    enriched_database = enrich_database(base_database, author_database, image_cache)
+    write_json(Path(args.enriched_output), enriched_database)
+    print(
+        json.dumps(
+            {
+                "input": args.input,
+                "authors_input": args.authors_input,
+                "image_analyses_input": args.image_analyses_input,
+                "enriched_output": args.enriched_output,
+                "abstract_count": enriched_database["abstract_count"],
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def build_figure_analysis_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Analyze local OHBM 2026 figure assets with Ollama")
+    parser.add_argument("--input", default="data/abstracts_enriched.json")
+    parser.add_argument("--image-analyses-output", default="data/image_analyses.json")
+    parser.add_argument("--vision-model", default=DEFAULT_VISION_MODEL)
+    parser.add_argument("--vision-max-images", type=int, default=None)
     parser.add_argument("--pull-missing-vision-model", action="store_true")
     return parser
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_parser().parse_args(argv)
+def parse_figure_analysis_args(argv: list[str] | None = None) -> argparse.Namespace:
+    return build_figure_analysis_parser().parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    base_database = load_json(Path(args.input))
-
-    if args.skip_authors:
-        author_database = load_json(Path(args.authors_output))
-    else:
-        author_database = build_author_database(base_database, get_api_key(Path(args.env_file), args.ohbm_api_var))
-        write_json(Path(args.authors_output), author_database)
-
-    image_cache = load_image_analysis_cache(Path(args.image_analyses_output))
-    if args.skip_enrich:
-        enriched_database = load_json(Path(args.enriched_output))
-    else:
-        enriched_database = enrich_database(base_database, author_database, image_cache)
-        write_json(Path(args.enriched_output), enriched_database)
-
-    if not args.skip_figure_analysis:
-        image_cache = analyze_figures(
-            enriched_database,
-            Path(args.image_analyses_output),
-            model=args.vision_model,
-            pull_model_if_missing=args.pull_missing_vision_model,
-            max_images=args.vision_max_images,
-        )
-        enriched_database = enrich_database(base_database, author_database, image_cache)
-        write_json(Path(args.enriched_output), enriched_database)
-
-    abstracts = enriched_database.get("abstracts", [])
-    embedding_texts = [abstract.get("embedding_text", "") for abstract in abstracts]
-    embeddings_dir = Path(args.embeddings_dir)
-    embeddings_dir.mkdir(parents=True, exist_ok=True)
-
-    if not args.skip_voyage:
-        voyage_vectors = voyage_embed(
-            embedding_texts,
-            get_api_key(Path(args.env_file), args.voyage_api_var),
-            model=args.voyage_model,
-        )
-        bundle = write_embedding_bundle(embeddings_dir / "voyage_stage1", "voyage_stage1", args.voyage_model, abstracts, voyage_vectors)
-        write_json(embeddings_dir / "voyage_stage1" / "neighbors.json", compute_neighbors(bundle["ids"], bundle["matrix"]))
-
-    if not args.skip_minilm:
-        minilm_vectors = minilm_embed(embedding_texts, model_name=args.minilm_model)
-        bundle = write_embedding_bundle(embeddings_dir / "minilm_stage1", "minilm_stage1", args.minilm_model, abstracts, minilm_vectors)
-        write_json(embeddings_dir / "minilm_stage1" / "neighbors.json", compute_neighbors(bundle["ids"], bundle["matrix"]))
-
-    write_neuroscape_manifest(embeddings_dir / "neuroscape_stage2_manifest.json")
+def analyze_figures_main(argv: list[str] | None = None) -> int:
+    args = parse_figure_analysis_args(argv)
+    enriched_database = load_json(Path(args.input))
+    image_cache = analyze_figures(
+        enriched_database,
+        Path(args.image_analyses_output),
+        model=args.vision_model,
+        pull_model_if_missing=args.pull_missing_vision_model,
+        max_images=args.vision_max_images,
+    )
     print(
         json.dumps(
             {
-                "authors_output": args.authors_output,
-                "enriched_output": args.enriched_output,
+                "input": args.input,
                 "image_analyses_output": args.image_analyses_output,
-                "embeddings_dir": args.embeddings_dir,
-                "abstract_count": len(abstracts),
+                "vision_model": args.vision_model,
+                "analysis_count": len(image_cache.get("analyses", {})),
             },
             indent=2,
         )

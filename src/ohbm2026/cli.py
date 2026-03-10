@@ -3,7 +3,12 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ohbm2026 import assets, enrichment
+from ohbm2026 import assets, enrichment, neuroscape
+
+
+def _copy_actions(target: argparse.ArgumentParser, source: argparse.ArgumentParser) -> None:
+    for action in source._actions[1:]:
+        target._add_action(action)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -11,19 +16,28 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     ingest_parser = subparsers.add_parser("ingest", help="Fetch abstracts and figure assets from Oxford Abstracts")
-    for action in assets.build_parser()._actions[1:]:
-        ingest_parser._add_action(action)
-    ingest_parser.set_defaults(_runner=assets.main)
+    _copy_actions(ingest_parser, assets.build_parser())
 
     refresh_parser = subparsers.add_parser("refresh-assets", help="Refresh local figure assets from existing abstracts.json")
-    for action in assets.build_parser()._actions[1:]:
-        refresh_parser._add_action(action)
-    refresh_parser.set_defaults(_runner=_run_refresh_assets)
+    _copy_actions(refresh_parser, assets.build_parser())
 
-    phase2_parser = subparsers.add_parser("phase2", help="Run phase 2 enrichment and embedding steps")
-    for action in enrichment.build_parser()._actions[1:]:
-        phase2_parser._add_action(action)
-    phase2_parser.set_defaults(_runner=enrichment.main)
+    authors_parser = subparsers.add_parser("authors", help="Export author metadata from the local abstract database")
+    _copy_actions(authors_parser, enrichment.build_authors_parser())
+
+    enrich_parser = subparsers.add_parser("enrich", help="Build enriched abstracts from local databases")
+    _copy_actions(enrich_parser, enrichment.build_enrich_parser())
+
+    figure_parser = subparsers.add_parser("analyze-figures", help="Analyze local figures with Ollama")
+    _copy_actions(figure_parser, enrichment.build_figure_analysis_parser())
+
+    minilm_parser = subparsers.add_parser("embed-minilm", help="Generate local MiniLM embeddings")
+    _copy_actions(minilm_parser, neuroscape.build_minilm_parser())
+
+    voyage_parser = subparsers.add_parser("embed-voyage", help="Generate Voyage embeddings")
+    _copy_actions(voyage_parser, neuroscape.build_voyage_parser())
+
+    manifest_parser = subparsers.add_parser("write-manifest", help="Write the NeuroScape handoff manifest")
+    _copy_actions(manifest_parser, neuroscape.build_manifest_parser())
 
     return parser
 
@@ -46,8 +60,18 @@ def main(argv: list[str] | None = None) -> int:
         return assets.main(subcommand_argv)
     if command == "refresh-assets":
         return _run_refresh_assets(subcommand_argv)
-    if command == "phase2":
-        return enrichment.main(subcommand_argv)
+    if command == "authors":
+        return enrichment.authors_main(subcommand_argv)
+    if command == "enrich":
+        return enrichment.enrich_main(subcommand_argv)
+    if command == "analyze-figures":
+        return enrichment.analyze_figures_main(subcommand_argv)
+    if command == "embed-minilm":
+        return neuroscape.minilm_main(subcommand_argv)
+    if command == "embed-voyage":
+        return neuroscape.voyage_main(subcommand_argv)
+    if command == "write-manifest":
+        return neuroscape.manifest_main(subcommand_argv)
 
     raise AssertionError(f"Unhandled command: {command}")
 

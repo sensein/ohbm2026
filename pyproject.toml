@@ -7,7 +7,12 @@ requires-python = ">=3.11"
 
 [project.scripts]
 ohbm-ingest = "ohbm2026.assets:main"
-ohbm-phase2 = "ohbm2026.enrichment:main"
+ohbm-authors = "ohbm2026.enrichment:authors_main"
+ohbm-enrich = "ohbm2026.enrichment:enrich_main"
+ohbm-analyze-figures = "ohbm2026.enrichment:analyze_figures_main"
+ohbm-embed-minilm = "ohbm2026.neuroscape:minilm_main"
+ohbm-embed-voyage = "ohbm2026.neuroscape:voyage_main"
+ohbm-write-manifest = "ohbm2026.neuroscape:manifest_main"
 ohbmcli = "ohbm2026.cli:main"
 
 [build-system]

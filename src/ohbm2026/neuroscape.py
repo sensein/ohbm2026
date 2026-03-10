@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -132,3 +133,89 @@ def write_neuroscape_manifest(output_path: Path) -> None:
             ),
         },
     )
+
+
+def load_embedding_inputs(path: Path) -> list[dict[str, Any]]:
+    database = json.loads(path.read_text(encoding="utf-8"))
+    return database.get("abstracts", [])
+
+
+def build_minilm_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate local MiniLM embeddings for OHBM 2026 abstracts")
+    parser.add_argument("--input", default="data/abstracts_enriched.json")
+    parser.add_argument("--embeddings-dir", default="data/embeddings")
+    parser.add_argument("--minilm-model", default=DEFAULT_MINILM_MODEL)
+    return parser
+
+
+def minilm_main(argv: list[str] | None = None) -> int:
+    args = build_minilm_parser().parse_args(argv)
+    abstracts = load_embedding_inputs(Path(args.input))
+    embedding_texts = [abstract.get("embedding_text", "") for abstract in abstracts]
+    output_dir = Path(args.embeddings_dir) / "minilm_stage1"
+    vectors = minilm_embed(embedding_texts, model_name=args.minilm_model)
+    bundle = write_embedding_bundle(output_dir, "minilm_stage1", args.minilm_model, abstracts, vectors)
+    write_json(output_dir / "neighbors.json", compute_neighbors(bundle["ids"], bundle["matrix"]))
+    print(
+        json.dumps(
+            {
+                "input": args.input,
+                "embeddings_dir": str(output_dir),
+                "model_name": args.minilm_model,
+                "abstract_count": len(abstracts),
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def build_voyage_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate Voyage embeddings for OHBM 2026 abstracts")
+    parser.add_argument("--input", default="data/abstracts_enriched.json")
+    parser.add_argument("--embeddings-dir", default="data/embeddings")
+    parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--voyage-api-var", default="VOYAGE_API")
+    parser.add_argument("--voyage-model", default=DEFAULT_VOYAGE_MODEL)
+    return parser
+
+
+def voyage_main(argv: list[str] | None = None) -> int:
+    from ohbm2026.graphql_api import get_api_key
+
+    args = build_voyage_parser().parse_args(argv)
+    abstracts = load_embedding_inputs(Path(args.input))
+    embedding_texts = [abstract.get("embedding_text", "") for abstract in abstracts]
+    output_dir = Path(args.embeddings_dir) / "voyage_stage1"
+    vectors = voyage_embed(
+        embedding_texts,
+        get_api_key(Path(args.env_file), args.voyage_api_var),
+        model=args.voyage_model,
+    )
+    bundle = write_embedding_bundle(output_dir, "voyage_stage1", args.voyage_model, abstracts, vectors)
+    write_json(output_dir / "neighbors.json", compute_neighbors(bundle["ids"], bundle["matrix"]))
+    print(
+        json.dumps(
+            {
+                "input": args.input,
+                "embeddings_dir": str(output_dir),
+                "model_name": args.voyage_model,
+                "abstract_count": len(abstracts),
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+def build_manifest_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Write the NeuroScape handoff manifest for OHBM 2026 embeddings")
+    parser.add_argument("--output", default="data/embeddings/neuroscape_stage2_manifest.json")
+    return parser
+
+
+def manifest_main(argv: list[str] | None = None) -> int:
+    args = build_manifest_parser().parse_args(argv)
+    write_neuroscape_manifest(Path(args.output))
+    print(json.dumps({"output": args.output}, indent=2))
+    return 0

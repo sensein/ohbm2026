@@ -30,7 +30,7 @@ Environment variables are read from `.env`. A safe template is provided in
 - `OHBM2026_API`
   - required for abstract ingest and author metadata fetches from Oxford Abstracts
 - `VOYAGE_API`
-  - optional, only required if running phase 2 without `--skip-voyage`
+  - optional, only required if running `embed-voyage`
 
 No API token is required for local Ollama usage.
 
@@ -63,7 +63,11 @@ The main entrypoint is `ohbmcli`.
 ```bash
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli ingest
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli refresh-assets --reuse-existing-assets-only
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli phase2 --skip-voyage
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli authors
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli enrich
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-figures --vision-max-images 10
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-minilm
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli write-manifest
 ```
 
 Subcommands:
@@ -72,8 +76,18 @@ Subcommands:
   - fetch abstracts and methods/results figures from Oxford Abstracts
 - `refresh-assets`
   - rebuild `local_assets` from `data/abstracts.json` without rerunning abstract extraction
-- `phase2`
-  - export authors, build markdown sections, run local figure analysis, and generate embeddings
+- `authors`
+  - export author metadata from the local abstract database
+- `enrich`
+  - build `data/abstracts_enriched.json` from abstracts, authors, and any cached image analyses
+- `analyze-figures`
+  - analyze local figure files with Ollama and update `data/image_analyses.json`
+- `embed-minilm`
+  - generate local MiniLM embeddings and nearest neighbors
+- `embed-voyage`
+  - generate Voyage embeddings and nearest neighbors
+- `write-manifest`
+  - write the NeuroScape handoff manifest
 
 ## Module Layout
 

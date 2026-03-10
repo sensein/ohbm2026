@@ -51,8 +51,18 @@ This is the operational planning document for the repository.
   - fetch abstracts and figure assets from the API
 - `ohbmcli refresh-assets`
   - rebuild `local_assets` from the local JSON database without rerunning abstract extraction
-- `ohbmcli phase2`
-  - run author export, enrichment, figure analysis, and embedding stages
+- `ohbmcli authors`
+  - export author metadata
+- `ohbmcli enrich`
+  - build enriched abstracts from local databases
+- `ohbmcli analyze-figures`
+  - analyze local figures with Ollama
+- `ohbmcli embed-minilm`
+  - generate local MiniLM embeddings
+- `ohbmcli embed-voyage`
+  - generate Voyage embeddings
+- `ohbmcli write-manifest`
+  - write the NeuroScape handoff manifest
 
 ## Execution Order
 
