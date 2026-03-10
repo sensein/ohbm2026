@@ -1,0 +1,21 @@
+[project]
+name = "ohbm2026"
+version = "0.1.0"
+description = "Local ingestion pipeline for OHBM 2026 Oxford Abstracts data"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+ohbm-ingest = "ohbm2026.assets:main"
+ohbm-phase2 = "ohbm2026.enrichment:main"
+ohbmcli = "ohbm2026.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
