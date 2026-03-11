@@ -10,10 +10,11 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ohbm2026.assets import extract_target_figure_urls
-from ohbm2026.graphql_api import fetch_author_details, get_api_key
+from ohbm2026.graphql_api import fetch_author_details, get_api_key, load_dotenv
 
 SECTION_ORDER = [
     ("introduction", "Introduction"),
@@ -43,6 +44,8 @@ NORMALIZED_CONTENT_QUESTION_NAMES = {normalize.lower() for normalize in CONTENT_
 
 OLLAMA_API = "http://127.0.0.1:11434/api"
 DEFAULT_VISION_MODEL = "qwen3.5:35b"
+DEFAULT_OPENAI_VISION_MODEL = "gpt-4.1-mini"
+OPENAI_CHAT_API = "https://api.openai.com/v1/chat/completions"
 
 
 class EnrichmentError(RuntimeError):
@@ -260,12 +263,23 @@ def build_section_markdown_fields(sections_markdown: dict[str, str]) -> dict[str
     }
 
 
+def content_question_sort_key(item: dict[str, str]) -> tuple[int, str]:
+    question_name = str(item.get("question_name") or "")
+    normalized = normalize_question_name(question_name)
+    if normalized == normalize_question_name("Which processing packages did you use for your study?"):
+        return (100, question_name)
+    if normalized == normalize_question_name("If other, please specify:"):
+        return (101, question_name)
+    return (0, question_name)
+
+
 def filter_content_questions_markdown(items: list[dict[str, str]]) -> list[dict[str, str]]:
-    return [
+    filtered = [
         item
         for item in items
         if is_content_question(item.get("question_name")) and item.get("markdown")
     ]
+    return sorted(filtered, key=content_question_sort_key)
 
 
 def render_abstract_markdown(title: str, sections_markdown: dict[str, str]) -> str:
@@ -286,6 +300,19 @@ def load_image_analysis_cache(path: Path) -> dict[str, Any]:
 def save_image_analysis_cache(path: Path, payload: dict[str, Any]) -> None:
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
     write_json(path, payload)
+
+
+def analysis_entry_succeeded(entry: dict[str, Any] | None) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    analysis = entry.get("analysis")
+    return isinstance(analysis, dict) and bool(analysis)
+
+
+def refresh_analysis_cache_stats(cache: dict[str, Any]) -> None:
+    analyses = cache.get("analyses") or {}
+    cache["processed_count"] = len(analyses)
+    cache["error_count"] = sum(1 for entry in analyses.values() if isinstance(entry, dict) and entry.get("error"))
 
 
 def ollama_model_status(model: str) -> OllamaModelStatus:
@@ -347,16 +374,90 @@ def ollama_chat_multimodal(model: str, prompt: str, image_path: Path) -> dict[st
         raise EnrichmentError(f"Ollama response was not valid JSON for {image_path}") from exc
 
 
+def openai_chat_multimodal(
+    model: str,
+    prompt: str,
+    image_path: Path,
+    api_key: str,
+) -> dict[str, Any]:
+    image_bytes = image_path.read_bytes()
+    data_url = f"data:image/{image_path.suffix.lstrip('.') or 'png'};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    request_payload = json.dumps(
+        {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": data_url,
+                                "detail": "high",
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+    ).encode("utf-8")
+    request = Request(
+        OPENAI_CHAT_API,
+        data=request_payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=600) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise EnrichmentError(f"OpenAI vision request failed with HTTP {exc.code}: {body}") from exc
+    except URLError as exc:
+        raise EnrichmentError(f"OpenAI vision request failed: {exc.reason}") from exc
+    content = payload.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if isinstance(content, list):
+        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    try:
+        return parse_jsonish_content(content)
+    except json.JSONDecodeError as exc:
+        raise EnrichmentError(f"OpenAI response was not valid JSON for {image_path}") from exc
+
+
+def resolve_openai_api_key(env_file: Path, api_var: str) -> str:
+    env_values = load_dotenv(env_file)
+    api_key = env_values.get(api_var)
+    if not api_key:
+        raise EnrichmentError(f"Missing OpenAI API key '{api_var}' in {env_file}")
+    return api_key
+
+
 def analyze_figures(
-    enriched_database: dict[str, Any],
+    base_database: dict[str, Any],
     analysis_cache_path: Path,
+    backend: str = "ollama",
     model: str = DEFAULT_VISION_MODEL,
+    openai_api_key: str | None = None,
     pull_model_if_missing: bool = False,
     max_images: int | None = None,
+    save_every: int = 1,
+    enriched_output_path: Path | None = None,
+    enrich_every: int = 25,
 ) -> dict[str, Any]:
-    ensure_ollama_model(model, pull_if_missing=pull_model_if_missing)
+    if backend == "ollama":
+        ensure_ollama_model(model, pull_if_missing=pull_model_if_missing)
+    elif backend == "openai":
+        if not openai_api_key:
+            raise EnrichmentError("openai_api_key is required when backend='openai'")
+    else:
+        raise EnrichmentError(f"Unsupported vision backend: {backend}")
     cache = load_image_analysis_cache(analysis_cache_path)
     analyses = cache.setdefault("analyses", {})
+    refresh_analysis_cache_stats(cache)
     prompt = (
         "Analyze this scientific figure and return strict JSON with keys: "
         "caption_guess (string), rich_markdown (string), ocr_text (string), "
@@ -364,33 +465,59 @@ def analyze_figures(
     )
 
     candidate_assets = []
-    for abstract in enriched_database.get("abstracts", []):
+    for abstract in base_database.get("abstracts", []):
         for asset in abstract.get("local_assets", []):
             local_path = asset.get("local_path")
             if local_path:
                 candidate_assets.append((Path(local_path), asset.get("source_question_name"), abstract["id"]))
 
     processed = 0
+    errors = 0
     for image_path, question_name, abstract_id in candidate_assets:
         cache_key = str(image_path)
-        if cache_key in analyses:
+        if analysis_entry_succeeded(analyses.get(cache_key)):
             continue
-        analyses[cache_key] = {
-            "abstract_id": abstract_id,
-            "question_name": question_name,
-            "local_path": cache_key,
-            "model": model,
-            "analysis": ollama_chat_multimodal(model, prompt, image_path),
-        }
+        try:
+            if backend == "ollama":
+                analysis = ollama_chat_multimodal(model, prompt, image_path)
+            else:
+                analysis = openai_chat_multimodal(model, prompt, image_path, openai_api_key or "")
+            analyses[cache_key] = {
+                "abstract_id": abstract_id,
+                "question_name": question_name,
+                "local_path": cache_key,
+                "model": model,
+                "backend": backend,
+                "analysis": analysis,
+            }
+        except Exception as exc:
+            errors += 1
+            analyses[cache_key] = {
+                "abstract_id": abstract_id,
+                "question_name": question_name,
+                "local_path": cache_key,
+                "model": model,
+                "backend": backend,
+                "analysis": {},
+                "error": str(exc),
+            }
         processed += 1
-        if processed % 5 == 0:
+        refresh_analysis_cache_stats(cache)
+        if processed % max(save_every, 1) == 0:
             cache["model"] = model
+            cache["backend"] = backend
             save_image_analysis_cache(analysis_cache_path, cache)
+        if enriched_output_path is not None and processed % max(enrich_every, 1) == 0:
+            write_json(enriched_output_path, enrich_database(base_database, cache))
         if max_images is not None and processed >= max_images:
             break
 
     cache["model"] = model
+    cache["backend"] = backend
+    refresh_analysis_cache_stats(cache)
     save_image_analysis_cache(analysis_cache_path, cache)
+    if enriched_output_path is not None:
+        write_json(enriched_output_path, enrich_database(base_database, cache))
     return cache
 
 
@@ -507,11 +634,18 @@ def enrich_main(argv: list[str] | None = None) -> int:
 
 def build_figure_analysis_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Analyze local OHBM 2026 figure assets with Ollama")
-    parser.add_argument("--input", default="data/abstracts_enriched.json")
+    parser.add_argument("--input", default="data/abstracts.json")
     parser.add_argument("--image-analyses-output", default="data/image_analyses.json")
+    parser.add_argument("--vision-backend", choices=["ollama", "openai"], default="ollama")
     parser.add_argument("--vision-model", default=DEFAULT_VISION_MODEL)
+    parser.add_argument("--openai-model", default=DEFAULT_OPENAI_VISION_MODEL)
+    parser.add_argument("--env-file", default=".env")
+    parser.add_argument("--openai-api-var", default="OPENAI_API_KEY")
     parser.add_argument("--vision-max-images", type=int, default=None)
     parser.add_argument("--pull-missing-vision-model", action="store_true")
+    parser.add_argument("--save-every", type=int, default=1)
+    parser.add_argument("--enriched-output", default=None)
+    parser.add_argument("--enrich-every", type=int, default=25)
     return parser
 
 
@@ -521,21 +655,34 @@ def parse_figure_analysis_args(argv: list[str] | None = None) -> argparse.Namesp
 
 def analyze_figures_main(argv: list[str] | None = None) -> int:
     args = parse_figure_analysis_args(argv)
-    enriched_database = load_json(Path(args.input))
+    base_database = load_json(Path(args.input))
+    model = args.vision_model if args.vision_backend == "ollama" else args.openai_model
+    openai_api_key = (
+        resolve_openai_api_key(Path(args.env_file), args.openai_api_var)
+        if args.vision_backend == "openai"
+        else None
+    )
     image_cache = analyze_figures(
-        enriched_database,
+        base_database,
         Path(args.image_analyses_output),
-        model=args.vision_model,
+        backend=args.vision_backend,
+        model=model,
+        openai_api_key=openai_api_key,
         pull_model_if_missing=args.pull_missing_vision_model,
         max_images=args.vision_max_images,
+        save_every=args.save_every,
+        enriched_output_path=Path(args.enriched_output) if args.enriched_output else None,
+        enrich_every=args.enrich_every,
     )
     print(
         json.dumps(
             {
                 "input": args.input,
                 "image_analyses_output": args.image_analyses_output,
-                "vision_model": args.vision_model,
+                "vision_backend": args.vision_backend,
+                "vision_model": model,
                 "analysis_count": len(image_cache.get("analyses", {})),
+                "enriched_output": args.enriched_output,
             },
             indent=2,
         )

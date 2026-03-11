@@ -126,6 +126,20 @@ class CLITest(unittest.TestCase):
         self.assertEqual(result, 24)
         openalex_main.assert_called_once_with(["--use-title-search"])
 
+    def test_export_ui_subcommand_delegates_to_ui_export_main(self) -> None:
+        with mock.patch.object(cli.ui, "export_ui_main", return_value=29) as export_ui_main:
+            result = cli.main(["export-ui", "--output-dir", "tmp/site-data"])
+
+        self.assertEqual(result, 29)
+        export_ui_main.assert_called_once_with(["--output-dir", "tmp/site-data"])
+
+    def test_build_ui_subcommand_delegates_to_ui_build_main(self) -> None:
+        with mock.patch.object(cli.ui, "build_ui_main", return_value=30) as build_ui_main:
+            result = cli.main(["build-ui", "--site-output-dir", "tmp/site"])
+
+        self.assertEqual(result, 30)
+        build_ui_main.assert_called_once_with(["--site-output-dir", "tmp/site"])
+
     def test_write_manifest_subcommand_delegates_to_manifest_main(self) -> None:
         with mock.patch.object(cli.neuroscape, "manifest_main", return_value=25) as manifest_main:
             result = cli.main(["write-manifest", "--output", "manifest.json"])

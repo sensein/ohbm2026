@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ohbm2026 import assets, enrichment, neuroscape, openalex
+from ohbm2026 import assets, enrichment, neuroscape, openalex, ui
 
 
 def _copy_actions(target: argparse.ArgumentParser, source: argparse.ArgumentParser) -> None:
@@ -90,6 +90,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _copy_actions(references_parser, openalex.build_parser())
 
+    export_ui_parser = subparsers.add_parser(
+        "export-ui",
+        help="Build the static JSON data bundle for the standalone abstract search UI",
+    )
+    _copy_actions(export_ui_parser, ui.build_export_parser())
+
+    build_ui_parser = subparsers.add_parser(
+        "build-ui",
+        help="Build the standalone static abstract search site bundle",
+    )
+    _copy_actions(build_ui_parser, ui.build_ui_parser())
+
     manifest_parser = subparsers.add_parser("write-manifest", help="Write the NeuroScape handoff manifest")
     _copy_actions(manifest_parser, neuroscape.build_manifest_parser())
 
@@ -144,6 +156,10 @@ def main(argv: list[str] | None = None) -> int:
         return neuroscape.stage2_analysis_main(subcommand_argv)
     if command == "reference-metadata":
         return openalex.main(subcommand_argv)
+    if command == "export-ui":
+        return ui.export_ui_main(subcommand_argv)
+    if command == "build-ui":
+        return ui.build_ui_main(subcommand_argv)
     if command == "write-manifest":
         return neuroscape.manifest_main(subcommand_argv)
 

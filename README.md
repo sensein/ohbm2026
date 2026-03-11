@@ -25,6 +25,10 @@ Optional for embedding generation:
 - OpenAI API access if you want to run the OpenAI embedding path
 - Voyage API access if you want to run the Voyage embedding path
 
+Optional for alternate hosted figure analysis:
+
+- OpenAI API access if you want to run the hosted multimodal figure-analysis path instead of local Ollama
+
 ## Token Requirements
 
 Environment variables are read from `.env`. A safe template is provided in
@@ -39,7 +43,7 @@ Environment variables are read from `.env`. A safe template is provided in
 - `HF_TOKEN`
   - optional, used for authenticated Hugging Face model downloads
 - `OPENAI_API_KEY`
-  - optional, required if running `embed-openai`
+  - optional, required if running `embed-openai` or `analyze-figures --vision-backend openai`
 
 No API token is required for local Ollama usage.
 
@@ -81,11 +85,14 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli refresh-assets --reuse-existing-
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli authors
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli enrich
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-figures --vision-max-images 10
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-figures --vision-backend openai --image-analyses-output data/image_analyses_openai.json --enriched-output data/abstracts_enriched_openai.json
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-minilm
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-hf --model neuml/pubmedbert-base-embeddings
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-openai
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli semantic-analysis
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli umap-plot
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli export-ui
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli build-ui
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli write-manifest
 ```
 
@@ -100,7 +107,7 @@ Subcommands:
 - `enrich`
   - build `data/abstracts_enriched.json` from abstracts and any cached image analyses
 - `analyze-figures`
-  - analyze local figure files with Ollama and update `data/image_analyses.json`
+  - analyze local figure files with either local Ollama or hosted OpenAI vision and update an image-analysis cache incrementally
 - `embed-minilm`
   - generate local MiniLM embeddings and nearest neighbors
 - `embed-hf`
@@ -113,6 +120,10 @@ Subcommands:
   - build a semantic similarity graph, community assignments, and cluster summaries from a local embedding bundle
 - `umap-plot`
   - project a local embedding bundle to 2D UMAP and write an interactive Plotly HTML with hover metadata
+- `export-ui`
+  - build the static JSON data bundle for the standalone abstract search UI
+- `build-ui`
+  - copy the standalone UI assets and write a deployable static-site bundle
 - `write-manifest`
   - write the NeuroScape handoff manifest
 
@@ -142,6 +153,8 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-minilm --fields title meth
   - author resolution, HTML-to-markdown conversion, figure analysis, and enrichment assembly
 - `src/ohbm2026/neuroscape.py`
   - local embedding generation, semantic graph analysis, and NeuroScape handoff metadata
+- `src/ohbm2026/ui.py`
+  - static UI export/build pipeline for client-side search, facets, and relations
 - `src/ohbm2026/cli.py`
   - unified CLI entrypoint
 
@@ -152,8 +165,8 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-minilm --fields title meth
 - `data/authors.json`
 - `data/abstracts_enriched.json`
 - `data/image_analyses.json`
+- `data/image_analyses_openai.json`
 - `data/embeddings/minilm_stage1/`
 - `data/embeddings/minilm_stage1/semantic_analysis/`
-- `data/embeddings/minilm_stage1/umap_2d.html`
-- `data/embeddings/minilm_stage1/umap_2d.json`
+- `export/ui-site/`
 - `data/embeddings/neuroscape_stage2_manifest.json`

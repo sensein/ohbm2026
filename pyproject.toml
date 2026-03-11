@@ -22,6 +22,8 @@ ohbm-compare-projections = "ohbm2026.neuroscape:projection_compare_main"
 ohbm-optimize-projections = "ohbm2026.neuroscape:projection_optimize_main"
 ohbm-analyze-stage2 = "ohbm2026.neuroscape:stage2_analysis_main"
 ohbm-reference-metadata = "ohbm2026.openalex:main"
+ohbm-export-ui = "ohbm2026.ui:export_ui_main"
+ohbm-build-ui = "ohbm2026.ui:build_ui_main"
 ohbm-write-manifest = "ohbm2026.neuroscape:manifest_main"
 ohbmcli = "ohbm2026.cli:main"
 

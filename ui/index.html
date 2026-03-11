@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OHBM 2026 Abstract Atlas</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <p class="eyebrow">OHBM 2026</p>
+          <h1>Abstract Atlas</h1>
+          <p class="subtitle">Static search, facets, and semantic relations for the accepted abstract corpus.</p>
+        </div>
+        <div class="search-area">
+          <label class="search-label" for="search-input">Search abstracts</label>
+          <div class="search-row">
+            <input
+              id="search-input"
+              class="search-input"
+              type="search"
+              placeholder="Try: pain, fMRI, TMS, connectivity, aging"
+              autocomplete="off"
+            />
+            <button id="clear-search" class="clear-button" type="button">Clear</button>
+          </div>
+          <div class="search-tools">
+            <div class="mode-toggle" id="search-mode-toggle"></div>
+            <div class="semantic-threshold">
+              <label class="search-label" for="semantic-threshold-input">Semantic similarity threshold</label>
+              <div class="semantic-threshold__row">
+                <input id="semantic-threshold-input" type="range" min="0" max="1" step="0.01" value="0" />
+                <span id="semantic-threshold-value" class="semantic-threshold__value">0.00</span>
+              </div>
+            </div>
+            <p class="search-help">
+              Default lexical search uses AND. Use quotes for phrases, <code>OR</code> between clauses, and
+              <code>-term</code> to exclude.
+            </p>
+            <p id="semantic-status" class="search-help search-help--status"></p>
+          </div>
+          <div class="cluster-toggle" id="cluster-toggle"></div>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar">
+          <div class="sidebar-section sidebar-section--sticky">
+            <div class="sidebar-heading-row">
+              <h2>Facets</h2>
+              <button id="clear-filters" class="ghost-button" type="button">Reset</button>
+            </div>
+            <p id="summary-text" class="sidebar-summary">Loading corpus…</p>
+          </div>
+          <div class="sidebar-scroll">
+            <div id="active-filters" class="active-filters"></div>
+            <div id="facet-groups" class="facet-groups"></div>
+          </div>
+        </aside>
+
+        <section class="results-panel">
+          <section class="projection-panel">
+            <div class="results-header">
+              <div>
+                <p class="eyebrow">Map</p>
+                <h2>UMAP Projection</h2>
+              </div>
+              <button id="clear-projection-selection" class="ghost-button" type="button">Clear selection</button>
+            </div>
+            <p id="projection-meta" class="results-meta">Loading projection…</p>
+            <div id="projection-plot" class="projection-plot"></div>
+            <div id="projection-hover" class="projection-hover">
+              Hover a point to inspect its title, topic, and keywords without covering the plot.
+            </div>
+          </section>
+          <div class="results-header">
+            <div>
+              <p class="eyebrow">Results</p>
+              <h2 id="results-title">Loading…</h2>
+            </div>
+            <p id="results-meta" class="results-meta"></p>
+          </div>
+          <div id="results-list" class="results-list"></div>
+        </section>
+
+        <section class="detail-panel">
+          <div id="detail-empty" class="detail-empty">
+            <p class="eyebrow">Detail</p>
+            <h2>Select an abstract</h2>
+            <p>Choose a result to inspect sections, references, figure notes, and related abstracts.</p>
+          </div>
+          <div id="detail-view" class="detail-view hidden"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="result-template">
+      <article class="result-card">
+        <button class="result-card__button" type="button">
+          <div class="result-card__header">
+            <div>
+              <p class="result-card__meta"></p>
+              <h3 class="result-card__title"></h3>
+            </div>
+            <p class="result-card__score"></p>
+          </div>
+          <p class="result-card__topic"></p>
+          <div class="chip-row"></div>
+        </button>
+      </article>
+    </template>
+
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
