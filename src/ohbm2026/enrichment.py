@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -319,8 +320,28 @@ def refresh_analysis_cache_stats(cache: dict[str, Any]) -> None:
 
 
 def image_to_data_url(image_path: Path) -> str:
-    image_bytes = image_path.read_bytes()
-    return f"data:image/{image_path.suffix.lstrip('.') or 'png'};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    suffix = image_path.suffix.lower()
+    direct_mime_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }
+    mime_type = direct_mime_types.get(suffix)
+    if mime_type:
+        image_bytes = image_path.read_bytes()
+        return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    if suffix in {".tif", ".tiff"}:
+        try:
+            from PIL import Image
+        except ImportError as exc:
+            raise EnrichmentError(f"TIFF figure requires Pillow conversion: {image_path}") from exc
+        with Image.open(image_path) as image:
+            converted = BytesIO()
+            image.save(converted, format="PNG")
+        return f"data:image/png;base64,{base64.b64encode(converted.getvalue()).decode('ascii')}"
+    raise EnrichmentError(f"Unsupported local image format for OpenAI vision: {image_path.suffix or '<none>'}")
 
 
 def estimate_openai_payload_bytes(data_url: str) -> int:
@@ -579,8 +600,14 @@ def iter_openai_batch_assets(
             continue
         if max_images is not None and pending_count >= max_images:
             break
-        data_url = image_to_data_url(image_path)
-        estimated_bytes = estimate_openai_payload_bytes(data_url)
+        try:
+            data_url = image_to_data_url(image_path)
+            estimated_bytes = estimate_openai_payload_bytes(data_url)
+            prep_error = None
+        except Exception as exc:
+            data_url = ""
+            estimated_bytes = 0
+            prep_error = str(exc)
         asset = {
             "image_path": image_path,
             "question_name": question_name,
@@ -588,7 +615,17 @@ def iter_openai_batch_assets(
             "cache_key": cache_key,
             "data_url": data_url,
             "estimated_bytes": estimated_bytes,
+            "prep_error": prep_error,
         }
+
+        if prep_error:
+            if current:
+                yield current
+                current = []
+                current_bytes = 0
+            yield [asset]
+            pending_count += 1
+            continue
 
         if estimated_bytes > max_request_bytes:
             if current:
@@ -693,6 +730,9 @@ def analyze_figures(
 
     def process_openai_batch(batch_assets: list[dict[str, Any]]) -> None:
         if not batch_assets:
+            return
+        if len(batch_assets) == 1 and batch_assets[0].get("prep_error"):
+            store_analysis_entry(batch_assets[0], error=str(batch_assets[0]["prep_error"]))
             return
         try:
             batch_results = openai_chat_multimodal_batch(

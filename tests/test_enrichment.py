@@ -14,6 +14,7 @@ from ohbm2026.enrichment import (
     enrich_database,
     filter_content_questions_markdown,
     html_to_markdown,
+    image_to_data_url,
     is_content_question,
     load_json,
     parse_jsonish_content,
@@ -141,6 +142,15 @@ class EnrichmentHelpersTest(unittest.TestCase):
             api_key = resolve_openai_api_key(env_path, "OPENAI_API_KEY")
 
         self.assertEqual(api_key, "test-key")
+
+    def test_image_to_data_url_normalizes_jpg_to_jpeg(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "figure.jpg"
+            image_path.write_bytes(b"jpeg-bytes")
+
+            data_url = image_to_data_url(image_path)
+
+        self.assertTrue(data_url.startswith("data:image/jpeg;base64,"))
 
     def test_analyze_figures_openai_writes_incremental_cache_and_enriched_output(self) -> None:
         with TemporaryDirectory() as temp_dir:
