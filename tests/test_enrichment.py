@@ -9,6 +9,7 @@ from ohbm2026.enrichment import (
     DEFAULT_OPENAI_REQUEST_TIMEOUT_SECONDS,
     EnrichmentError,
     analyze_figures,
+    build_enrich_parser,
     build_figure_analysis_parser,
     build_sections_markdown,
     enrich_database,
@@ -25,6 +26,13 @@ from ohbm2026.enrichment import (
 
 
 class EnrichmentHelpersTest(unittest.TestCase):
+    def test_build_enrich_parser_defaults_to_openai_cache(self) -> None:
+        args = build_enrich_parser().parse_args([])
+
+        self.assertEqual(args.input, "data/abstracts.json")
+        self.assertEqual(args.image_analyses_input, "data/image_analyses_openai.json")
+        self.assertEqual(args.enriched_output, "data/abstracts_enriched.json")
+
     def test_html_to_markdown_handles_lists_and_emphasis(self) -> None:
         html = "<p>Hello <strong>world</strong></p><ol><li>One</li><li>Two</li></ol>"
         markdown = html_to_markdown(html)

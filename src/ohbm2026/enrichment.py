@@ -884,7 +884,7 @@ def authors_main(argv: list[str] | None = None) -> int:
 def build_enrich_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build enriched OHBM 2026 abstracts from local databases")
     parser.add_argument("--input", default="data/abstracts.json")
-    parser.add_argument("--image-analyses-input", default="data/image_analyses.json")
+    parser.add_argument("--image-analyses-input", default="data/image_analyses_openai.json")
     parser.add_argument("--enriched-output", default="data/abstracts_enriched.json")
     return parser
 

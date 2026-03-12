@@ -17,7 +17,7 @@ from ohbm2026.neuroscape import parse_string_list_value
 DEFAULT_RAW_INPUT = "data/abstracts.json"
 DEFAULT_ENRICHED_INPUT = "data/abstracts_enriched.json"
 DEFAULT_REFERENCES_INPUT = "data/reference_metadata.json"
-DEFAULT_IMAGE_ANALYSES_INPUT = "data/image_analyses.json"
+DEFAULT_IMAGE_ANALYSES_INPUT = "data/image_analyses_openai.json"
 DEFAULT_NEIGHBORS_INPUT = "data/embeddings/voyage_stage2_published/neighbors.json"
 DEFAULT_CLUSTER_15_DIR = "data/embeddings/voyage_stage2_published/semantic_analysis_15-communities"
 DEFAULT_CLUSTER_21_DIR = "data/embeddings/voyage_stage2_published/semantic_analysis_21-communities"
@@ -236,6 +236,27 @@ def simplify_image_analysis(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_figure_text_blob(enriched_abstract: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for record in enriched_abstract.get("figure_analyses", []) or []:
+        analysis = record.get("analysis") or {}
+        for value in (
+            analysis.get("caption_guess"),
+            analysis.get("notes"),
+            analysis.get("ocr_text"),
+        ):
+            text = str(value or "").strip()
+            if text:
+                parts.append(text)
+        rich_markdown = str(analysis.get("rich_markdown") or "").strip()
+        if rich_markdown:
+            parts.append(markdown_to_plain_text(rich_markdown))
+        keywords = [str(keyword).strip() for keyword in analysis.get("keywords", []) if str(keyword).strip()]
+        if keywords:
+            parts.append(" ".join(keywords))
+    return "\n".join(part for part in parts if part)
+
+
 def load_image_analysis_lookup(path: Path) -> dict[int, list[dict[str, Any]]]:
     if not path.exists():
         return {}
@@ -362,6 +383,7 @@ def find_pattern_matches(text: str, pattern_map: dict[str, tuple[str, ...]]) -> 
 
 
 def build_domain_facets(raw_abstract: dict[str, Any], enriched_abstract: dict[str, Any], metadata: dict[str, Any]) -> dict[str, list[str]]:
+    figure_text = build_figure_text_blob(enriched_abstract)
     text = "\n".join(
         part
         for part in (
@@ -369,6 +391,7 @@ def build_domain_facets(raw_abstract: dict[str, Any], enriched_abstract: dict[st
             enriched_abstract.get("methods_markdown") or "",
             enriched_abstract.get("results_markdown") or "",
             render_additional_content_markdown(enriched_abstract.get("additional_content_questions_markdown")),
+            figure_text,
             " ".join(metadata.get("keywords") or []),
             " ".join(metadata.get("figure_keywords") or []),
             " ".join(metadata.get("methods") or []),
@@ -411,6 +434,7 @@ def build_metadata(raw_abstract: dict[str, Any], enriched_abstract: dict[str, An
 
 
 def build_search_blob(raw_abstract: dict[str, Any], enriched_abstract: dict[str, Any], metadata: dict[str, Any]) -> str:
+    figure_text = build_figure_text_blob(enriched_abstract)
     parts = [
         raw_abstract.get("title") or "",
         enriched_abstract.get("introduction_markdown") or "",
@@ -418,6 +442,7 @@ def build_search_blob(raw_abstract: dict[str, Any], enriched_abstract: dict[str,
         enriched_abstract.get("results_markdown") or "",
         enriched_abstract.get("conclusion_markdown") or "",
         render_additional_content_markdown(enriched_abstract.get("additional_content_questions_markdown")),
+        figure_text,
         " ".join(metadata.get("keywords") or []),
         " ".join(metadata.get("figure_keywords") or []),
         metadata.get("primary_topic") or "",

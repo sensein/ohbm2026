@@ -38,6 +38,7 @@ class UIHelpersTest(unittest.TestCase):
 
         self.assertEqual(args.output_dir, "export/ui-site/data")
         self.assertEqual(args.top_neighbors, 8)
+        self.assertEqual(args.image_analyses_input, "data/image_analyses_openai.json")
         self.assertEqual(args.cluster_25_dir, "data/embeddings/voyage_stage2_published/clustering_benchmark")
         self.assertEqual(args.semantic_vectors_input, "data/embeddings/minilm_stage1/vectors.npy")
         self.assertEqual(args.umap_input, "data/embeddings/minilm_stage1/umap_title-introduction-methods-results-conclusion.json")
@@ -101,6 +102,17 @@ class UIHelpersTest(unittest.TestCase):
                                 "results_markdown": "Hippocampus connectivity increased in the default mode network.",
                                 "conclusion_markdown": "Conclusion text",
                                 "figure_keywords": ["Flowchart"],
+                                "figure_analyses": [
+                                    {
+                                        "analysis": {
+                                            "caption_guess": "Flowchart of hippocampus MRI processing",
+                                            "notes": "Shows memory cohort filtering",
+                                            "ocr_text": "hippocampus default mode network MRI",
+                                            "rich_markdown": "Figure describes **hippocampus** filtering",
+                                            "keywords": ["hippocampus", "MRI"],
+                                        }
+                                    }
+                                ],
                             }
                         ]
                     }
@@ -244,6 +256,7 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(payload["manifest"]["semantic_search"]["dimension"], 2)
         self.assertEqual(payload["manifest"]["semantic_search"]["browser_model"], "Xenova/all-MiniLM-L6-v2")
         self.assertEqual(payload["projection"]["umap"]["count"], 1)
+        self.assertIn("Flowchart of hippocampus MRI processing", payload["search"]["abstracts"][0]["search_blob"])
 
     def test_build_ui_main_copies_static_assets_and_data(self) -> None:
         with TemporaryDirectory() as temp_dir:
