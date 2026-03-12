@@ -143,6 +143,11 @@ def primary_topic_from_questions(questions: dict[str, Any]) -> str:
     return values[0] if values else "Unknown"
 
 
+def secondary_topic_from_questions(questions: dict[str, Any]) -> str:
+    values = parse_string_list_value(questions.get("Secondary Parent Category & Sub-Category"))
+    return values[0] if values else "Unknown"
+
+
 def markdown_to_plain_text(text: str | None) -> str:
     value = str(text or "")
     value = re.sub(r"`([^`]+)`", r"\1", value)
@@ -249,7 +254,7 @@ def load_reference_lookup(path: Path) -> dict[int, dict[str, Any]]:
     lookup: dict[int, dict[str, Any]] = {}
     for abstract in data.get("abstracts", []):
         matched_items: list[dict[str, Any]] = []
-        unmatched_count = 0
+        unmatched_items: list[dict[str, Any]] = []
         for ref in abstract.get("references", []):
             ref_data = reference_map.get(ref.get("reference_key") or "")
             if ref.get("matched") and ref_data and ref_data.get("openalex"):
@@ -265,11 +270,17 @@ def load_reference_lookup(path: Path) -> dict[int, dict[str, Any]]:
                     }
                 )
             else:
-                unmatched_count += 1
+                unmatched_items.append(
+                    {
+                        "title": ref_data.get("title_guess") or ref.get("title_guess") or "",
+                        "raw_text": ref_data.get("raw_text") or ref.get("raw_text") or "",
+                    }
+                )
         lookup[int(abstract["id"])] = {
             "matched_count": len(matched_items),
-            "unmatched_count": unmatched_count,
+            "unmatched_count": len(unmatched_items),
             "items": matched_items[:10],
+            "unmatched_items": unmatched_items[:10],
         }
     return lookup
 
@@ -375,6 +386,7 @@ def build_metadata(raw_abstract: dict[str, Any], enriched_abstract: dict[str, An
     metadata = {
         "accepted_for": raw_abstract.get("accepted_for") or "Unknown",
         "primary_topic": primary_topic_from_questions(questions),
+        "secondary_topic": secondary_topic_from_questions(questions),
         "keywords": parse_string_list_value(questions.get("Keywords")),
         "figure_keywords": list(enriched_abstract.get("figure_keywords") or []),
         "methods": parse_string_list_value(questions.get(QUESTION_MAP["methods"])),
@@ -404,6 +416,7 @@ def build_search_blob(raw_abstract: dict[str, Any], enriched_abstract: dict[str,
         " ".join(metadata.get("keywords") or []),
         " ".join(metadata.get("figure_keywords") or []),
         metadata.get("primary_topic") or "",
+        metadata.get("secondary_topic") or "",
         " ".join(metadata.get("methods") or []),
         " ".join(metadata.get("study_type") or []),
         " ".join(metadata.get("population") or []),
@@ -532,6 +545,7 @@ def build_ui_payload(
             "title": title,
             "accepted_for": metadata["accepted_for"][0] if isinstance(metadata["accepted_for"], list) else metadata["accepted_for"],
             "primary_topic": metadata["primary_topic"],
+            "secondary_topic": metadata["secondary_topic"],
             "keywords": metadata["keywords"],
             "figure_keywords": metadata["figure_keywords"],
             "facets": {
@@ -560,6 +574,7 @@ def build_ui_payload(
             "title": title,
             "accepted_for": metadata["accepted_for"],
             "primary_topic": metadata["primary_topic"],
+            "secondary_topic": metadata["secondary_topic"],
             "keywords": metadata["keywords"],
             "figure_keywords": metadata["figure_keywords"],
             "methods": metadata["methods"],

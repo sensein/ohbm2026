@@ -90,6 +90,15 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function formatTopicSummary(primaryTopic, secondaryTopic) {
+  const primary = String(primaryTopic || "").trim();
+  const secondary = String(secondaryTopic || "").trim();
+  if (!secondary || secondary === "Unknown" || secondary.toLowerCase() === primary.toLowerCase()) {
+    return primary;
+  }
+  return `${primary} · ${secondary}`;
+}
+
 function loadUrlState() {
   const params = new URLSearchParams(window.location.search);
   state.query = params.get("q") || "";
@@ -455,12 +464,7 @@ function dynamicFacetOptions(group) {
   }
   return [...counts.entries()]
     .map(([value, count]) => ({ value, count }))
-    .sort((left, right) => {
-      if (right.count !== left.count) {
-        return right.count - left.count;
-      }
-      return left.value.localeCompare(right.value);
-    });
+    .sort((left, right) => left.value.localeCompare(right.value, undefined, { sensitivity: "base" }));
 }
 
 function setSelectedId(id) {
@@ -785,8 +789,7 @@ function renderFacets() {
     section.appendChild(headingButton);
     const optionsList = document.createElement("div");
     optionsList.className = "facet-options";
-    const visibleOptions = options.slice(0, 18);
-    for (const option of visibleOptions) {
+    for (const option of options) {
       const label = document.createElement("label");
       label.className = "facet-option";
       const checkbox = document.createElement("input");
@@ -841,7 +844,10 @@ function renderResults(items) {
     button.addEventListener("click", () => setSelectedId(record.id));
     node.querySelector(".result-card__meta").textContent = `#${record.id} · ${record.accepted_for}`;
     node.querySelector(".result-card__title").textContent = record.title;
-    node.querySelector(".result-card__topic").textContent = record.primary_topic;
+    node.querySelector(".result-card__topic").textContent = formatTopicSummary(
+      record.primary_topic,
+      record.secondary_topic
+    );
     node.querySelector(".result-card__score").textContent = state.query ? score.toFixed(3) : "";
 
     const chipRow = node.querySelector(".chip-row");
@@ -877,7 +883,7 @@ function renderDetail() {
     <div>
       <p class="eyebrow">${escapeHtml(detail.accepted_for)} · #${escapeHtml(detail.id)}</p>
       <h2>${escapeHtml(detail.title)}</h2>
-      <p class="detail-meta">${escapeHtml(detail.primary_topic)}</p>
+      <p class="detail-meta">${escapeHtml(formatTopicSummary(detail.primary_topic, detail.secondary_topic))}</p>
     </div>
   `;
   view.appendChild(header);
@@ -1000,7 +1006,7 @@ function renderDetail() {
   const referencesBlock = document.createElement("section");
   referencesBlock.className = "detail-block";
   referencesBlock.innerHTML = "<h3>Reference matches</h3>";
-  const referenceSummary = detail.reference_summary || { matched_count: 0, unmatched_count: 0, items: [] };
+  const referenceSummary = detail.reference_summary || { matched_count: 0, unmatched_count: 0, items: [], unmatched_items: [] };
   const headerNote = document.createElement("p");
   headerNote.className = "reference-note";
   headerNote.textContent = `${referenceSummary.matched_count} matched · ${referenceSummary.unmatched_count} unmatched`;
@@ -1024,6 +1030,23 @@ function renderDetail() {
     referencesBlock.appendChild(list);
   } else {
     referencesBlock.innerHTML += `<div class="empty-state">No OpenAlex-matched references are cached for this abstract.</div>`;
+  }
+  if ((referenceSummary.unmatched_items || []).length > 0) {
+    const unmatchedHeading = document.createElement("h4");
+    unmatchedHeading.textContent = "Unmatched references";
+    referencesBlock.appendChild(unmatchedHeading);
+    const unmatchedList = document.createElement("div");
+    unmatchedList.className = "link-list";
+    for (const item of referenceSummary.unmatched_items) {
+      const container = document.createElement("div");
+      container.className = "detail-card";
+      container.innerHTML = `
+        <h4>${escapeHtml(item.title || "Unmatched reference")}</h4>
+        <p class="reference-note">${escapeHtml(item.raw_text || "No reference text available.")}</p>
+      `;
+      unmatchedList.appendChild(container);
+    }
+    referencesBlock.appendChild(unmatchedList);
   }
   view.appendChild(referencesBlock);
 }
