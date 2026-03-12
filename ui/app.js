@@ -465,7 +465,12 @@ function dynamicFacetOptions(group) {
   }
   return [...counts.entries()]
     .map(([value, count]) => ({ value, count }))
-    .sort((left, right) => left.value.localeCompare(right.value, undefined, { sensitivity: "base" }));
+    .sort((left, right) =>
+      left.value.localeCompare(right.value, undefined, {
+        sensitivity: "base",
+        numeric: true,
+      })
+    );
 }
 
 function setSelectedId(id) {
