@@ -8,49 +8,35 @@
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <div class="brand">
-          <p class="eyebrow">OHBM 2026</p>
-          <h1>Abstract Atlas</h1>
-          <p class="subtitle">Static search, facets, and semantic relations for the accepted abstract corpus.</p>
-        </div>
-        <div class="search-area">
-          <label class="search-label" for="search-input">Search abstracts</label>
-          <div class="search-row">
-            <input
-              id="search-input"
-              class="search-input"
-              type="search"
-              placeholder="Try: pain, fMRI, TMS, connectivity, aging"
-              autocomplete="off"
-            />
-            <button id="clear-search" class="clear-button" type="button">Clear</button>
-          </div>
-          <div class="search-tools">
-            <div class="mode-toggle" id="search-mode-toggle"></div>
-            <div class="semantic-threshold">
-              <label class="search-label" for="semantic-threshold-input">Semantic similarity threshold</label>
-              <div class="semantic-threshold__row">
-                <input id="semantic-threshold-input" type="range" min="0" max="1" step="0.01" value="0" />
-                <span id="semantic-threshold-value" class="semantic-threshold__value">0.00</span>
-              </div>
-            </div>
-            <p class="search-help">
-              Default lexical search uses AND. Use quotes for phrases, <code>OR</code> between clauses, and
-              <code>-term</code> to exclude.
-            </p>
-            <p id="semantic-status" class="search-help search-help--status"></p>
-          </div>
-          <div class="cluster-toggle" id="cluster-toggle"></div>
-        </div>
-      </header>
-
-      <main class="layout">
-        <aside class="sidebar">
+      <div class="workspace">
+        <aside class="sidebar" id="sidebar">
           <div class="sidebar-section sidebar-section--sticky">
+            <div class="sidebar-brand">
+              <p class="eyebrow">OHBM 2026</p>
+              <h1>Abstract Atlas</h1>
+              <p class="subtitle">Static search, facets, and semantic relations for the accepted abstract corpus.</p>
+            </div>
             <div class="sidebar-heading-row">
-              <h2>Facets</h2>
-              <button id="clear-filters" class="ghost-button" type="button">Reset</button>
+              <div class="sidebar-heading-actions">
+                <h2>Facets</h2>
+                <button id="clear-filters" class="ghost-button" type="button">Reset</button>
+              </div>
+              <button
+                id="toggle-sidebar"
+                class="ghost-button sidebar-toggle"
+                type="button"
+                aria-expanded="true"
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+              >
+                <span class="sidebar-toggle__icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5"></rect>
+                    <path d="M9.5 7.5V16.5"></path>
+                    <path d="M15.5 8.5L12.5 12L15.5 15.5"></path>
+                  </svg>
+                </span>
+              </button>
             </div>
             <p id="summary-text" class="sidebar-summary">Loading corpus…</p>
           </div>
@@ -60,40 +46,93 @@
           </div>
         </aside>
 
-        <section class="results-panel">
-          <section class="projection-panel">
-            <div class="results-header">
-              <div>
-                <p class="eyebrow">Map</p>
-                <h2>UMAP Projection</h2>
+        <main class="content-shell">
+          <div class="content-primary">
+            <section class="search-area">
+              <div class="search-area__header">
+                <div>
+                  <label class="search-label" for="search-input">Search abstracts</label>
+                </div>
+                <button
+                  id="toggle-sidebar-mobile"
+                  class="ghost-button sidebar-toggle sidebar-toggle--mobile"
+                  type="button"
+                  aria-expanded="true"
+                  aria-label="Toggle sidebar"
+                  title="Toggle sidebar"
+                >
+                  <span class="sidebar-toggle__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <rect x="3.5" y="4.5" width="17" height="15" rx="2.5"></rect>
+                      <path d="M9.5 7.5V16.5"></path>
+                      <path d="M15.5 8.5L12.5 12L15.5 15.5"></path>
+                    </svg>
+                  </span>
+                </button>
               </div>
-              <button id="clear-projection-selection" class="ghost-button" type="button">Clear selection</button>
-            </div>
-            <p id="projection-meta" class="results-meta">Loading projection…</p>
-            <div id="projection-plot" class="projection-plot"></div>
-            <div id="projection-hover" class="projection-hover">
-              Hover a point to inspect its title, topic, and keywords without covering the plot.
-            </div>
-          </section>
-          <div class="results-header">
-            <div>
-              <p class="eyebrow">Results</p>
-              <h2 id="results-title">Loading…</h2>
-            </div>
-            <p id="results-meta" class="results-meta"></p>
-          </div>
-          <div id="results-list" class="results-list"></div>
-        </section>
+              <div class="search-row">
+                <input
+                  id="search-input"
+                  class="search-input"
+                  type="search"
+                  placeholder="Try: pain, fMRI, TMS, connectivity, aging"
+                  autocomplete="off"
+                />
+                <button id="clear-search" class="clear-button" type="button">Clear</button>
+              </div>
+              <div class="search-tools">
+                <div class="mode-toggle" id="search-mode-toggle"></div>
+                <div class="semantic-threshold">
+                  <label class="search-label" for="semantic-threshold-input">Semantic similarity threshold</label>
+                  <div class="semantic-threshold__row">
+                    <input id="semantic-threshold-input" type="range" min="0" max="1" step="0.01" value="0" />
+                    <span id="semantic-threshold-value" class="semantic-threshold__value">0.00</span>
+                  </div>
+                </div>
+                <p class="search-help">
+                  Default lexical search uses AND. Use quotes for phrases, <code>OR</code> between clauses, and
+                  <code>-term</code> to exclude.
+                </p>
+                <p id="semantic-status" class="search-help search-help--status"></p>
+              </div>
+              <div class="cluster-toggle" id="cluster-toggle"></div>
+            </section>
 
-        <section class="detail-panel">
-          <div id="detail-empty" class="detail-empty">
-            <p class="eyebrow">Detail</p>
-            <h2>Select an abstract</h2>
-            <p>Choose a result to inspect sections, references, figure notes, and related abstracts.</p>
+            <section class="results-panel">
+              <section class="projection-panel">
+                <div class="results-header">
+                  <div>
+                    <p class="eyebrow">Map</p>
+                    <h2>UMAP Projection</h2>
+                  </div>
+                  <button id="clear-projection-selection" class="ghost-button" type="button">Clear selection</button>
+                </div>
+                <p id="projection-meta" class="results-meta">Loading projection…</p>
+                <div id="projection-plot" class="projection-plot"></div>
+                <div id="projection-hover" class="projection-hover">
+                  Hover a point to inspect its title, topic, and keywords without covering the plot.
+                </div>
+              </section>
+              <div class="results-header">
+                <div>
+                  <p class="eyebrow">Results</p>
+                  <h2 id="results-title">Loading…</h2>
+                </div>
+                <p id="results-meta" class="results-meta"></p>
+              </div>
+              <div id="results-list" class="results-list"></div>
+            </section>
           </div>
-          <div id="detail-view" class="detail-view hidden"></div>
-        </section>
-      </main>
+          <section class="detail-panel">
+            <div id="detail-empty" class="detail-empty">
+              <p class="eyebrow">Detail</p>
+              <h2>Select an abstract</h2>
+              <p>Choose a result to inspect sections, references, figure notes, and related abstracts.</p>
+            </div>
+            <div id="detail-view" class="detail-view hidden"></div>
+          </section>
+        </main>
+      </div>
     </div>
 
     <template id="result-template">

@@ -44,15 +44,13 @@ label {
   padding: 24px;
 }
 
-.topbar {
+.workspace {
   display: grid;
-  grid-template-columns: minmax(280px, 1.2fr) minmax(420px, 1.8fr);
+  grid-template-columns: minmax(84px, 320px) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
-  margin-bottom: 24px;
 }
 
-.brand,
 .search-area,
 .sidebar,
 .results-panel,
@@ -63,10 +61,6 @@ label {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
-}
-
-.brand,
-.search-area {
   padding: 24px;
 }
 
@@ -79,7 +73,7 @@ label {
   text-transform: uppercase;
 }
 
-.brand h1,
+.sidebar-brand h1,
 .results-header h2,
 .detail-empty h2 {
   margin: 0;
@@ -88,7 +82,7 @@ label {
   line-height: 1.05;
 }
 
-.brand h1 {
+.sidebar-brand h1 {
   font-size: clamp(2rem, 5vw, 3.4rem);
 }
 
@@ -97,10 +91,6 @@ label {
   color: var(--muted);
   max-width: 64ch;
   line-height: 1.5;
-}
-
-.brand {
-  align-self: start;
 }
 
 .search-label {
@@ -197,13 +187,22 @@ label {
   color: white;
 }
 
-.layout {
+.content-shell {
   display: grid;
-  grid-template-columns: minmax(260px, 0.75fr) minmax(360px, 1fr) minmax(380px, 1.1fr);
+  grid-template-columns: minmax(420px, 1fr) minmax(520px, 1.15fr);
   gap: 20px;
   align-items: start;
+  min-width: 0;
 }
 
+.content-primary {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  min-width: 0;
+}
+
+.search-area,
 .sidebar,
 .results-panel,
 .detail-panel {
@@ -220,6 +219,86 @@ label {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.app-shell.is-sidebar-collapsed .workspace {
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+
+.app-shell.is-sidebar-collapsed .sidebar {
+  padding: 16px 12px;
+}
+
+.app-shell.is-sidebar-collapsed .sidebar-scroll,
+.app-shell.is-sidebar-collapsed .sidebar-summary,
+.app-shell.is-sidebar-collapsed .sidebar-brand h1,
+.app-shell.is-sidebar-collapsed .sidebar-brand .subtitle,
+.app-shell.is-sidebar-collapsed .sidebar-heading-actions {
+  display: none;
+}
+
+.app-shell.is-sidebar-collapsed .sidebar-brand {
+  margin-bottom: 12px;
+}
+
+.app-shell.is-sidebar-collapsed .sidebar-brand .eyebrow {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  margin: 0;
+}
+
+.app-shell.is-sidebar-collapsed .sidebar-heading-row {
+  justify-content: center;
+}
+
+.sidebar-brand {
+  margin-bottom: 18px;
+}
+
+.sidebar-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.sidebar-toggle {
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.sidebar-toggle--mobile {
+  display: none;
+}
+
+.sidebar-toggle__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-toggle__icon svg {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 160ms ease;
+}
+
+.sidebar-toggle.is-collapsed .sidebar-toggle__icon svg {
+  transform: scaleX(-1);
+}
+
+.search-area {
+  min-height: auto;
 }
 
 .sidebar-scroll {
@@ -243,6 +322,13 @@ label {
 .results-header,
 .detail-header,
 .detail-subheader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.search-area__header {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -567,30 +653,28 @@ a {
 }
 
 @media (max-width: 1280px) {
-  .layout {
-    grid-template-columns: minmax(250px, 0.72fr) minmax(360px, 1fr);
-  }
-
-  .detail-panel {
-    grid-column: 1 / -1;
-    min-height: auto;
-  }
-}
-
-@media (max-width: 900px) {
-  .app-shell {
-    padding: 14px;
-  }
-
-  .topbar,
-  .layout {
-    grid-template-columns: 1fr;
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sidebar {
     position: static;
     min-height: auto;
     max-height: none;
+  }
+
+  .content-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar-toggle--mobile {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    padding: 14px;
   }
 
   .sidebar-scroll {
@@ -602,5 +686,11 @@ a {
   .mode-toggle,
   .cluster-toggle {
     flex-direction: column;
+  }
+
+  .search-area,
+  .results-panel,
+  .detail-panel {
+    min-height: auto;
   }
 }

@@ -48,6 +48,7 @@ const state = {
   clusterLayer: "semantic_15",
   searchMode: "lexical",
   semanticThreshold: 0,
+  sidebarCollapsed: false,
   facets: {},
   expandedFacets: new Set(DEFAULT_OPEN_FACETS),
   projectionSelection: new Set(),
@@ -532,6 +533,26 @@ function renderClusterToggle() {
   }
 }
 
+function renderSidebarToggle() {
+  const shell = document.querySelector(".app-shell");
+  const sidebar = document.getElementById("sidebar");
+  const toggle = document.getElementById("toggle-sidebar");
+  const mobileToggle = document.getElementById("toggle-sidebar-mobile");
+  if (!shell || !sidebar || !toggle || !mobileToggle) {
+    return;
+  }
+  shell.classList.toggle("is-sidebar-collapsed", state.sidebarCollapsed);
+  sidebar.classList.toggle("is-collapsed", state.sidebarCollapsed);
+  toggle.classList.toggle("is-collapsed", state.sidebarCollapsed);
+  toggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+  toggle.setAttribute("aria-label", state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+  toggle.setAttribute("title", state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+  mobileToggle.classList.toggle("is-collapsed", state.sidebarCollapsed);
+  mobileToggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+  mobileToggle.setAttribute("aria-label", state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+  mobileToggle.setAttribute("title", state.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+}
+
 function renderSearchModeToggle() {
   const root = document.getElementById("search-mode-toggle");
   root.replaceChildren();
@@ -647,6 +668,7 @@ function renderProjection() {
   const traces = [{
     type: "scattergl",
     mode: "markers",
+    showlegend: false,
     x: points.map((point) => point.x),
     y: points.map((point) => point.y),
     text: points.map((point) => point.title),
@@ -678,6 +700,7 @@ function renderProjection() {
       y: [focusedPoint.y],
       text: [focusedPoint.title],
       hoverinfo: "skip",
+      showlegend: false,
       marker: {
         size: 13,
         color: "rgba(180, 70, 120, 0.95)",
@@ -687,7 +710,6 @@ function renderProjection() {
         },
         symbol: "circle-open-dot",
       },
-      showlegend: false,
     });
   }
 
@@ -1054,6 +1076,7 @@ function renderDetail() {
 function render() {
   const items = filteredResults();
   document.getElementById("summary-text").textContent = `${store.manifest.abstract_count.toLocaleString()} abstracts loaded`;
+  renderSidebarToggle();
   renderSearchModeToggle();
   renderClusterToggle();
   renderSemanticStatus();
@@ -1127,6 +1150,14 @@ function attachEvents() {
   });
   document.getElementById("clear-projection-selection").addEventListener("click", () => {
     clearProjectionSelection();
+  });
+  document.getElementById("toggle-sidebar").addEventListener("click", () => {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    render();
+  });
+  document.getElementById("toggle-sidebar-mobile").addEventListener("click", () => {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    render();
   });
   document.getElementById("semantic-threshold-input").addEventListener("input", (event) => {
     state.semanticThreshold = Number(event.target.value || "0") || 0;
