@@ -1,30 +1,40 @@
 from __future__ import annotations
 
+import asyncio
 import argparse
 import hashlib
 import json
 import os
 import re
 import time
+from collections import deque
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 from urllib.request import Request
 
+from openai import APIStatusError, AsyncOpenAI, RateLimitError
+
 from ohbm2026.enrichment import html_to_markdown
 from ohbm2026.graphql_api import load_dotenv, urlopen_with_retries
 
 OPENALEX_API = "https://api.openalex.org/works"
+OPENALEX_RATE_LIMIT_API = "https://api.openalex.org/rate-limit"
 OPENALEX_API_ENV = "OPENALEX_API"
 OPENAI_RESPONSES_API = "https://api.openai.com/v1/responses"
 OLLAMA_API = "http://127.0.0.1:11434/api"
 DEFAULT_REFERENCE_SPLIT_BACKEND = "openai"
 DEFAULT_REFERENCE_SPLIT_MODEL = "gpt-5-nano"
 DEFAULT_REFERENCE_SPLIT_MAX_ATTEMPTS = 3
+DEFAULT_REFERENCE_SPLIT_CONCURRENCY = 1
+DEFAULT_REFERENCE_SPLIT_MAX_REQUEUES = 5
+DEFAULT_OPENALEX_TITLE_CONCURRENCY = 20
+DEFAULT_OPENALEX_TITLE_MAX_RPS = 90.0
 SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper/search"
 SEMANTIC_SCHOLAR_API_ENV = "SEMANTIC_SCHOLAR_API_KEY"
 CROSSREF_API = "https://api.crossref.org/works"
@@ -37,12 +47,77 @@ class OpenAlexError(RuntimeError):
     """Raised when OpenAlex reference enrichment cannot continue."""
 
 
+def reference_split_system_prompt() -> str:
+    return (
+        "Estimate how many distinct bibliographic references are present in the input before producing output. "
+        "Then split the block into separate references. "
+        "Return JSON with keys estimated_reference_count and references. "
+        "Each object must include reference, title, and doi keys. "
+        "The reference value must copy text from the input only; do not paraphrase, reorder, or invent content. "
+        "The title must be copied from the reference text itself. "
+        "The doi must be copied from the reference text when available, otherwise set it to null. "
+        "Normalize whitespace only when needed."
+    )
+
+
+def reference_split_response_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "estimated_reference_count": {"type": "integer", "minimum": 0},
+            "references": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "reference": {"type": "string"},
+                        "title": {"type": ["string", "null"]},
+                        "doi": {"type": ["string", "null"]},
+                    },
+                    "required": ["reference", "title", "doi"],
+                },
+            },
+        },
+        "required": ["estimated_reference_count", "references"],
+    }
+
+
+def openai_reference_split_payload(reference_text: str, *, model: str) -> dict[str, Any]:
+    return {
+        "model": model,
+        "store": False,
+        "reasoning": {"effort": "minimal"},
+        "input": [
+            {
+                "role": "system",
+                "content": [{"type": "input_text", "text": reference_split_system_prompt()}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": reference_text}],
+            },
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "reference_split",
+                "strict": True,
+                "schema": reference_split_response_schema(),
+            }
+        },
+    }
+
+
 def default_request_counts() -> dict[str, int]:
     return {
         "doi_requests": 0,
         "pmid_requests": 0,
         "title_requests": 0,
         "reference_split_requests": 0,
+        "reference_split_requeues": 0,
+        "reference_split_rate_limit_requeues": 0,
         "semantic_scholar_requests": 0,
     }
 
@@ -121,6 +196,31 @@ def normalize_reference_split_candidate(candidate: Any) -> dict[str, str | None]
     return {"reference": reference, "title": title, "doi": doi}
 
 
+def normalize_reference_split_response(response: Any) -> dict[str, Any]:
+    if isinstance(response, list):
+        return {
+            "estimated_reference_count": None,
+            "references": response,
+        }
+    if not isinstance(response, dict):
+        raise OpenAlexError("Reference split returned an unsupported payload")
+    estimated_count = response.get("estimated_reference_count")
+    if estimated_count is not None:
+        try:
+            estimated_count = int(estimated_count)
+        except (TypeError, ValueError) as exc:
+            raise OpenAlexError("Reference split returned a non-integer estimated_reference_count") from exc
+        if estimated_count < 0:
+            raise OpenAlexError("Reference split returned a negative estimated_reference_count")
+    references = response.get("references")
+    if not isinstance(references, list):
+        raise OpenAlexError("Reference split returned no references array")
+    return {
+        "estimated_reference_count": estimated_count,
+        "references": references,
+    }
+
+
 def validate_reference_candidate_metadata(candidate: dict[str, str | None]) -> bool:
     reference = candidate.get("reference") or ""
     normalized_reference = normalize_reference_match_text(reference)
@@ -177,22 +277,28 @@ def split_reference_markdown(
             "reference_split_error": None,
             "reference_split_fallback_reason": None,
             "reference_split_candidate_count": 0,
+            "reference_split_estimated_count": 0,
         }
 
     last_error: str | None = None
+    estimated_count: int | None = None
     for attempt in range(1, max(1, max_attempts) + 1):
         try:
-            llm_candidates = llm_reference_split_request(
-                reference_text,
-                backend=backend,
-                model=model,
-                env_path=env_path,
-                openai_api_var=openai_api_var,
+            llm_response = normalize_reference_split_response(
+                llm_reference_split_request(
+                    reference_text,
+                    backend=backend,
+                    model=model,
+                    env_path=env_path,
+                    openai_api_var=openai_api_var,
+                )
             )
         except OpenAlexError as exc:
             last_error = str(exc)
             continue
 
+        estimated_count = llm_response.get("estimated_reference_count")
+        llm_candidates = llm_response.get("references") or []
         normalized_candidates = [normalize_reference_split_candidate(candidate) for candidate in llm_candidates]
         normalized_candidates = [candidate for candidate in normalized_candidates if candidate is not None]
         if validate_reference_split_structured_candidates(reference_text, normalized_candidates):
@@ -202,6 +308,7 @@ def split_reference_markdown(
                 "reference_split_error": None,
                 "reference_split_fallback_reason": None,
                 "reference_split_candidate_count": len(normalized_candidates),
+                "reference_split_estimated_count": estimated_count,
             }
         last_error = "Structured split failed lexical validation"
 
@@ -213,6 +320,7 @@ def split_reference_markdown(
         "reference_split_error": last_error,
         "reference_split_fallback_reason": fallback_reason,
         "reference_split_candidate_count": len(fallback_candidates),
+        "reference_split_estimated_count": estimated_count,
     }
 
 
@@ -335,13 +443,25 @@ def scholarly_request(
     headers: dict[str, str] | None = None,
     error_label: str,
 ) -> dict[str, Any]:
+    payload, _ = scholarly_request_with_headers(url, headers=headers, error_label=error_label)
+    return payload
+
+
+def scholarly_request_with_headers(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    error_label: str,
+) -> tuple[dict[str, Any], dict[str, str]]:
     request_headers = {"User-Agent": "ohbm2026-reference-enrichment/0.1", "Accept": "application/json"}
     if headers:
         request_headers.update(headers)
     request = Request(url, headers=request_headers)
     try:
         with urlopen_with_retries(request) as response:
-            return json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read().decode("utf-8"))
+            response_headers = dict(getattr(response, "headers", {}).items()) if getattr(response, "headers", None) else {}
+            return payload, response_headers
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         raise OpenAlexError(f"{error_label} failed with HTTP {exc.code}: {body}") from exc
@@ -350,10 +470,15 @@ def scholarly_request(
 
 
 def openalex_request(url: str) -> dict[str, Any]:
+    payload, _ = openalex_request_with_headers(url)
+    return payload
+
+
+def openalex_request_with_headers(url: str) -> tuple[dict[str, Any], dict[str, str]]:
     api_key = get_openalex_api_key()
     if api_key:
         url = add_query_parameter(url, "api_key", api_key)
-    return scholarly_request(url, error_label="OpenAlex request")
+    return scholarly_request_with_headers(url, error_label="OpenAlex request")
 
 
 def semantic_scholar_request(url: str) -> dict[str, Any]:
@@ -374,7 +499,7 @@ def ollama_reference_split_request(
     reference_text: str,
     *,
     model: str = DEFAULT_REFERENCE_SPLIT_MODEL,
-) -> list[dict[str, str | None]]:
+) -> dict[str, Any]:
     payload = {
         "model": model,
         "stream": False,
@@ -383,15 +508,7 @@ def ollama_reference_split_request(
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "Split bibliographic reference blocks into separate references. "
-                    "Return JSON with a single key named references containing an array of objects. "
-                    "Each object must include reference, title, and doi keys. "
-                    "The reference value must copy text from the input only; do not paraphrase, reorder, or invent content. "
-                    "The title must be copied from the reference text itself. "
-                    "The doi must be copied from the reference text when available, otherwise set it to null. "
-                    "Normalize whitespace only when needed."
-                ),
+                "content": reference_split_system_prompt(),
             },
             {
                 "role": "user",
@@ -424,11 +541,12 @@ def ollama_reference_split_request(
         content_payload = json.loads(content)
     except json.JSONDecodeError as exc:
         raise OpenAlexError(f"Ollama reference split returned invalid JSON: {content}") from exc
-    references = content_payload.get("references")
-    if not isinstance(references, list):
-        raise OpenAlexError("Ollama reference split returned no references array")
-    normalized_references = [normalize_reference_split_candidate(reference) for reference in references]
-    return [reference for reference in normalized_references if reference is not None]
+    normalized_payload = normalize_reference_split_response(content_payload)
+    normalized_references = [normalize_reference_split_candidate(reference) for reference in normalized_payload["references"]]
+    return {
+        "estimated_reference_count": normalized_payload["estimated_reference_count"],
+        "references": [reference for reference in normalized_references if reference is not None],
+    }
 
 
 def openai_reference_split_request(
@@ -437,66 +555,12 @@ def openai_reference_split_request(
     env_path: str = ".env",
     openai_api_var: str = "OPENAI_API_KEY",
     model: str = DEFAULT_REFERENCE_SPLIT_MODEL,
-) -> list[dict[str, str | None]]:
+) -> dict[str, Any]:
     api_key = get_openai_api_key(env_path, openai_api_var)
     if not api_key:
         raise OpenAlexError(f"Missing OpenAI API key in {openai_api_var}")
 
-    payload = {
-        "model": model,
-        "store": False,
-        "reasoning": {"effort": "minimal"},
-        "input": [
-            {
-                "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "Split bibliographic reference blocks into separate references. "
-                            "Return JSON with a single key named references containing an array of objects. "
-                            "Each object must include reference, title, and doi keys. "
-                            "The reference value must copy text from the input only; do not paraphrase, reorder, or invent content. "
-                            "The title must be copied from the reference text itself. "
-                            "The doi must be copied from the reference text when available, otherwise set it to null. "
-                            "Normalize whitespace only when needed."
-                        ),
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [{"type": "input_text", "text": reference_text}],
-            },
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "reference_split",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "references": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "properties": {
-                                    "reference": {"type": "string"},
-                                    "title": {"type": ["string", "null"]},
-                                    "doi": {"type": ["string", "null"]},
-                                },
-                                "required": ["reference", "title", "doi"],
-                            },
-                        }
-                    },
-                    "required": ["references"],
-                },
-            }
-        },
-    }
+    payload = openai_reference_split_payload(reference_text, model=model)
     request = Request(
         OPENAI_RESPONSES_API,
         data=json.dumps(payload).encode("utf-8"),
@@ -533,11 +597,50 @@ def openai_reference_split_request(
         content_payload = json.loads(content)
     except json.JSONDecodeError as exc:
         raise OpenAlexError(f"OpenAI reference split returned invalid JSON: {content}") from exc
-    references = content_payload.get("references")
-    if not isinstance(references, list):
-        raise OpenAlexError("OpenAI reference split returned no references array")
-    normalized_references = [normalize_reference_split_candidate(reference) for reference in references]
-    return [reference for reference in normalized_references if reference is not None]
+    normalized_payload = normalize_reference_split_response(content_payload)
+    normalized_references = [normalize_reference_split_candidate(reference) for reference in normalized_payload["references"]]
+    return {
+        "estimated_reference_count": normalized_payload["estimated_reference_count"],
+        "references": [reference for reference in normalized_references if reference is not None],
+    }
+
+
+async def openai_reference_split_request_async(
+    client: AsyncOpenAI,
+    reference_text: str,
+    *,
+    model: str = DEFAULT_REFERENCE_SPLIT_MODEL,
+) -> dict[str, Any]:
+    try:
+        response = await client.responses.create(**openai_reference_split_payload(reference_text, model=model))
+    except Exception as exc:  # pragma: no cover - SDK/network wrapper
+        raise exc
+
+    content = getattr(response, "output_text", None) or ""
+    if not content:
+        for item in getattr(response, "output", []) or []:
+            if getattr(item, "type", None) != "message":
+                continue
+            for entry in getattr(item, "content", []) or []:
+                entry_type = getattr(entry, "type", None)
+                text = getattr(entry, "text", None)
+                if entry_type in {"output_text", "text"} and text:
+                    content = text
+                    break
+            if content:
+                break
+    if not content:
+        raise OpenAlexError("OpenAI reference split returned no content")
+    try:
+        content_payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise OpenAlexError(f"OpenAI reference split returned invalid JSON: {content}") from exc
+    normalized_payload = normalize_reference_split_response(content_payload)
+    normalized_references = [normalize_reference_split_candidate(reference) for reference in normalized_payload["references"]]
+    return {
+        "estimated_reference_count": normalized_payload["estimated_reference_count"],
+        "references": [reference for reference in normalized_references if reference is not None],
+    }
 
 
 def llm_reference_split_request(
@@ -547,7 +650,7 @@ def llm_reference_split_request(
     model: str = DEFAULT_REFERENCE_SPLIT_MODEL,
     env_path: str = ".env",
     openai_api_var: str = "OPENAI_API_KEY",
-) -> list[dict[str, str | None]]:
+) -> dict[str, Any]:
     if backend == "ollama":
         return ollama_reference_split_request(reference_text, model=model)
     if backend == "openai":
@@ -575,10 +678,18 @@ def fetch_openalex_work_by_pmid(pmid: str) -> dict[str, Any] | None:
 
 
 def search_openalex_work_by_title(title: str, min_similarity: float = 0.75) -> dict[str, Any] | None:
+    work, _ = search_openalex_work_by_title_with_headers(title, min_similarity=min_similarity)
+    return work
+
+
+def search_openalex_work_by_title_with_headers(
+    title: str,
+    min_similarity: float = 0.75,
+) -> tuple[dict[str, Any] | None, dict[str, str]]:
     if not title.strip():
-        return None
+        return None, {}
     url = f"{OPENALEX_API}?search={quote(title)}&per-page=5"
-    parsed = openalex_request(url)
+    parsed, headers = openalex_request_with_headers(url)
     best_match: dict[str, Any] | None = None
     best_score = 0.0
     for result in parsed.get("results", []):
@@ -587,8 +698,13 @@ def search_openalex_work_by_title(title: str, min_similarity: float = 0.75) -> d
             best_score = score
             best_match = result
     if best_match and best_score >= min_similarity:
-        return best_match
-    return None
+        return best_match, headers
+    return None, headers
+
+
+def fetch_openalex_rate_limit_status() -> dict[str, Any]:
+    payload, _ = openalex_request_with_headers(OPENALEX_RATE_LIMIT_API)
+    return payload
 
 
 def extract_semantic_scholar_doi(result: dict[str, Any]) -> str | None:
@@ -782,6 +898,77 @@ def build_reference_record(
     }
 
 
+def merge_reference_candidates_into_cache(
+    reference_candidates: list[dict[str, str | None]],
+    reference_cache: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    references: list[dict[str, Any]] = []
+    for reference_candidate in reference_candidates:
+        reference = build_reference_record(
+            reference_candidate["reference"] or "",
+            title_guess_override=reference_candidate.get("title"),
+            doi_override=reference_candidate.get("doi"),
+        )
+        cached = reference_cache.get(reference["reference_key"])
+        if cached is None:
+            cached = {
+                **reference,
+                "matched": False,
+                "match_method": "pending",
+                "openalex": None,
+                "source_count": 0,
+                "raw_text_examples": [],
+                "doi_lookup_completed": False,
+                "doi_discovery_completed": False,
+                "doi_discovery_source": None,
+                "doi_discovery_title_score": None,
+                "pmid_lookup_completed": False,
+                "title_lookup_completed": False,
+            }
+            reference_cache[reference["reference_key"]] = cached
+        else:
+            if not cached.get("doi") and reference.get("doi"):
+                cached["doi"] = reference["doi"]
+            if not cached.get("pmid") and reference.get("pmid"):
+                cached["pmid"] = reference["pmid"]
+            if not cached.get("title_guess") and reference.get("title_guess"):
+                cached["title_guess"] = reference["title_guess"]
+            if not cached.get("reference_year") and reference.get("reference_year"):
+                cached["reference_year"] = reference["reference_year"]
+            cached.setdefault("matched", False)
+            cached.setdefault("match_method", "pending")
+            cached.setdefault("openalex", None)
+            cached.setdefault("source_count", 0)
+            cached.setdefault("raw_text_examples", [])
+            cached.setdefault("doi_lookup_completed", False)
+            cached.setdefault("doi_discovery_completed", False)
+            cached.setdefault("doi_discovery_source", None)
+            cached.setdefault("doi_discovery_title_score", None)
+            cached.setdefault("pmid_lookup_completed", False)
+            cached.setdefault("title_lookup_completed", False)
+
+        cached["source_count"] = int(cached.get("source_count", 0)) + 1
+        raw_text_examples = list(cached.get("raw_text_examples", []))
+        if reference["raw_text"] not in raw_text_examples and len(raw_text_examples) < 3:
+            raw_text_examples.append(reference["raw_text"])
+        cached["raw_text_examples"] = raw_text_examples
+        references.append(reference)
+    return references
+
+
+def build_abstract_reference_record(
+    abstract_id: int,
+    reference_candidates: list[dict[str, str | None]],
+    reference_cache: dict[str, dict[str, Any]],
+    split_diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "id": abstract_id,
+        "references": merge_reference_candidates_into_cache(reference_candidates, reference_cache),
+        **split_diagnostics,
+    }
+
+
 def load_existing_reference_cache(output_path: Path) -> dict[str, dict[str, Any]]:
     if not output_path.exists():
         return {}
@@ -824,6 +1011,31 @@ def chunked_values(values: list[str], chunk_size: int) -> list[list[str]]:
     return [values[index : index + chunk_size] for index in range(0, len(values), chunk_size)]
 
 
+def is_rate_limit_error_message(message: str) -> bool:
+    lowered = message.lower()
+    return (
+        "rate limit" in lowered
+        or "requests per min" in lowered
+        or "requests per minute" in lowered
+        or "tokens per min" in lowered
+        or "tokens per minute" in lowered
+        or "429" in lowered
+    )
+
+
+def rate_limit_retry_delay_seconds(error: Exception, attempt: int) -> float:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers:
+        retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        if retry_after:
+            try:
+                return max(1.0, float(retry_after))
+            except ValueError:
+                pass
+    return min(60.0, max(1.0, 2**attempt))
+
+
 def fetch_openalex_works_by_field(field_name: str, values: list[str]) -> dict[str, dict[str, Any]]:
     if not values:
         return {}
@@ -855,17 +1067,241 @@ def fetch_openalex_works_by_field(field_name: str, values: list[str]) -> dict[st
     return mapping
 
 
+async def collect_reference_cache_openai_async(
+    abstracts_database: dict[str, Any],
+    output_path: Path,
+    *,
+    use_title_search: bool,
+    reference_splitting_model: str,
+    env_path: str,
+    openai_api_var: str,
+    request_counts: dict[str, int] | None,
+    collect_checkpoint_every_abstracts: int,
+    split_concurrency: int,
+    split_max_requeues: int,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    api_key = get_openai_api_key(env_path, openai_api_var)
+    if not api_key:
+        raise OpenAlexError(f"Missing OpenAI API key in {openai_api_var}")
+
+    reference_cache = {
+        key: normalize_cached_reference(value)
+        for key, value in load_existing_reference_cache(output_path).items()
+    }
+    stats = request_counts if request_counts is not None else default_request_counts()
+    abstracts = list(abstracts_database.get("abstracts", []))
+    pending: asyncio.Queue[tuple[int, dict[str, Any], int]] = asyncio.Queue()
+    completed: asyncio.Queue[tuple[int, dict[str, Any]]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    rate_limit_lock = asyncio.Lock()
+    blocked_until = 0.0
+
+    async def wait_for_capacity() -> None:
+        nonlocal blocked_until
+        while True:
+            async with rate_limit_lock:
+                delay = blocked_until - loop.time()
+            if delay <= 0:
+                return
+            await asyncio.sleep(min(delay, 1.0))
+
+    async def extend_backoff(delay_seconds: float) -> None:
+        nonlocal blocked_until
+        async with rate_limit_lock:
+            blocked_until = max(blocked_until, loop.time() + delay_seconds)
+
+    def fallback_diagnostics(attempt: int, error_message: str, estimated_count: int | None, *, rate_limited: bool) -> dict[str, Any]:
+        fallback_reason = "rate_limited" if rate_limited else "validation_failed" if error_message == "Structured split failed lexical validation" else "llm_error"
+        return {
+            "reference_split_strategy": "fallback_single_block",
+            "reference_split_attempts": attempt,
+            "reference_split_error": error_message,
+            "reference_split_fallback_reason": fallback_reason,
+            "reference_split_candidate_count": 1,
+            "reference_split_estimated_count": estimated_count,
+        }
+
+    async def worker(client: AsyncOpenAI) -> None:
+        while True:
+            index, abstract, attempt = await pending.get()
+            if index < 0:
+                pending.task_done()
+                return
+
+            raw_reference_value = ""
+            for response in abstract.get("responses", []):
+                if response.get("question_name") == "References/Citations":
+                    raw_reference_value = response.get("value") or ""
+                    break
+            markdown = html_to_markdown(raw_reference_value or "")
+            if not markdown.strip():
+                await completed.put(
+                    (
+                        index,
+                        {
+                            "id": abstract["id"],
+                            "reference_candidates": [],
+                            "diagnostics": {
+                                "reference_split_strategy": "empty",
+                                "reference_split_attempts": 0,
+                                "reference_split_error": None,
+                                "reference_split_fallback_reason": None,
+                                "reference_split_candidate_count": 0,
+                                "reference_split_estimated_count": 0,
+                            },
+                        },
+                    )
+                )
+                pending.task_done()
+                continue
+
+            estimated_count: int | None = None
+            await wait_for_capacity()
+            stats["reference_split_requests"] = int(stats.get("reference_split_requests", 0)) + 1
+            try:
+                response_payload = await openai_reference_split_request_async(
+                    client,
+                    markdown,
+                    model=reference_splitting_model,
+                )
+                estimated_count = response_payload.get("estimated_reference_count")
+                normalized_candidates = [normalize_reference_split_candidate(candidate) for candidate in response_payload.get("references") or []]
+                normalized_candidates = [candidate for candidate in normalized_candidates if candidate is not None]
+                if validate_reference_split_structured_candidates(markdown, normalized_candidates):
+                    await completed.put(
+                        (
+                            index,
+                            {
+                                "id": abstract["id"],
+                                "reference_candidates": normalized_candidates,
+                                "diagnostics": {
+                                    "reference_split_strategy": "llm",
+                                    "reference_split_attempts": attempt,
+                                    "reference_split_error": None,
+                                    "reference_split_fallback_reason": None,
+                                    "reference_split_candidate_count": len(normalized_candidates),
+                                    "reference_split_estimated_count": estimated_count,
+                                },
+                            },
+                        )
+                    )
+                else:
+                    error_message = "Structured split failed lexical validation"
+                    if attempt < split_max_requeues:
+                        stats["reference_split_requeues"] = int(stats.get("reference_split_requeues", 0)) + 1
+                        await pending.put((index, abstract, attempt + 1))
+                    else:
+                        await completed.put(
+                            (
+                                index,
+                                {
+                                    "id": abstract["id"],
+                                    "reference_candidates": fallback_reference_candidates(markdown),
+                                    "diagnostics": fallback_diagnostics(attempt, error_message, estimated_count, rate_limited=False),
+                                },
+                            )
+                        )
+            except Exception as exc:  # pragma: no cover - exercised via live runs
+                error_message = str(exc)
+                rate_limited = isinstance(exc, (RateLimitError, APIStatusError)) or is_rate_limit_error_message(error_message)
+                if attempt < split_max_requeues:
+                    stats["reference_split_requeues"] = int(stats.get("reference_split_requeues", 0)) + 1
+                    if rate_limited:
+                        stats["reference_split_rate_limit_requeues"] = int(stats.get("reference_split_rate_limit_requeues", 0)) + 1
+                        await extend_backoff(rate_limit_retry_delay_seconds(exc, attempt))
+                    await pending.put((index, abstract, attempt + 1))
+                else:
+                    await completed.put(
+                        (
+                            index,
+                            {
+                                "id": abstract["id"],
+                                "reference_candidates": fallback_reference_candidates(markdown),
+                                "diagnostics": fallback_diagnostics(attempt, error_message, estimated_count, rate_limited=rate_limited),
+                            },
+                        )
+                    )
+            finally:
+                pending.task_done()
+
+    for index, abstract in enumerate(abstracts):
+        pending.put_nowait((index, abstract, 1))
+
+    client = AsyncOpenAI(api_key=api_key, timeout=120.0)
+    workers = [asyncio.create_task(worker(client)) for _ in range(max(1, split_concurrency))]
+    completed_records: dict[int, dict[str, Any]] = {}
+    try:
+        while len(completed_records) < len(abstracts):
+            index, result = await completed.get()
+            completed_records[index] = build_abstract_reference_record(
+                result["id"],
+                result["reference_candidates"],
+                reference_cache,
+                result["diagnostics"],
+            )
+            if collect_checkpoint_every_abstracts > 0 and len(completed_records) % collect_checkpoint_every_abstracts == 0:
+                ordered_records = [completed_records[idx] for idx in sorted(completed_records)]
+                write_reference_metadata_snapshot(
+                    output_path,
+                    ordered_records,
+                    reference_cache,
+                    use_title_search=use_title_search,
+                    request_counts=stats,
+                    status="running",
+                    phase="collect",
+                )
+                print(
+                    json.dumps(
+                        {
+                            "phase": "collect",
+                            "completed_abstracts": len(completed_records),
+                            "reference_split_requests": stats.get("reference_split_requests", 0),
+                            "reference_split_requeues": stats.get("reference_split_requeues", 0),
+                            "reference_split_rate_limit_requeues": stats.get("reference_split_rate_limit_requeues", 0),
+                        }
+                    )
+                )
+    finally:
+        await pending.join()
+        for _ in workers:
+            pending.put_nowait((-1, {}, 0))
+        await asyncio.gather(*workers, return_exceptions=True)
+        await client.close()
+
+    return [completed_records[idx] for idx in sorted(completed_records)], reference_cache
+
+
 def collect_reference_cache(
     abstracts_database: dict[str, Any],
     output_path: Path,
     *,
+    use_title_search: bool = False,
     use_llm_reference_splitting: bool = False,
     reference_splitting_backend: str = DEFAULT_REFERENCE_SPLIT_BACKEND,
     reference_splitting_model: str = DEFAULT_REFERENCE_SPLIT_MODEL,
     env_path: str = ".env",
     openai_api_var: str = "OPENAI_API_KEY",
     request_counts: dict[str, int] | None = None,
+    collect_checkpoint_every_abstracts: int = 25,
+    split_concurrency: int = DEFAULT_REFERENCE_SPLIT_CONCURRENCY,
+    split_max_requeues: int = DEFAULT_REFERENCE_SPLIT_MAX_REQUEUES,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    if use_llm_reference_splitting and reference_splitting_backend == "openai" and split_concurrency > 1:
+        return asyncio.run(
+            collect_reference_cache_openai_async(
+                abstracts_database,
+                output_path,
+                use_title_search=use_title_search,
+                reference_splitting_model=reference_splitting_model,
+                env_path=env_path,
+                openai_api_var=openai_api_var,
+                request_counts=request_counts,
+                collect_checkpoint_every_abstracts=collect_checkpoint_every_abstracts,
+                split_concurrency=split_concurrency,
+                split_max_requeues=split_max_requeues,
+            )
+        )
+
     reference_cache = {
         key: normalize_cached_reference(value)
         for key, value in load_existing_reference_cache(output_path).items()
@@ -880,7 +1316,6 @@ def collect_reference_cache(
                 raw_reference_value = response.get("value") or ""
                 break
 
-        references: list[dict[str, Any]] = []
         markdown = html_to_markdown(raw_reference_value or "")
         if use_llm_reference_splitting and markdown.strip():
             stats["reference_split_requests"] = int(stats.get("reference_split_requests", 0)) + 1
@@ -901,66 +1336,36 @@ def collect_reference_cache(
                 "reference_split_error": None,
                 "reference_split_fallback_reason": None,
                 "reference_split_candidate_count": len(reference_candidates),
+                "reference_split_estimated_count": None,
             }
-
-        for reference_candidate in reference_candidates:
-            reference = build_reference_record(
-                reference_candidate["reference"] or "",
-                title_guess_override=reference_candidate.get("title"),
-                doi_override=reference_candidate.get("doi"),
-            )
-            cached = reference_cache.get(reference["reference_key"])
-            if cached is None:
-                cached = {
-                    **reference,
-                    "matched": False,
-                    "match_method": "pending",
-                    "openalex": None,
-                    "source_count": 0,
-                    "raw_text_examples": [],
-                    "doi_lookup_completed": False,
-                    "doi_discovery_completed": False,
-                    "doi_discovery_source": None,
-                    "doi_discovery_title_score": None,
-                    "pmid_lookup_completed": False,
-                    "title_lookup_completed": False,
-                }
-                reference_cache[reference["reference_key"]] = cached
-            else:
-                if not cached.get("doi") and reference.get("doi"):
-                    cached["doi"] = reference["doi"]
-                if not cached.get("pmid") and reference.get("pmid"):
-                    cached["pmid"] = reference["pmid"]
-                if not cached.get("title_guess") and reference.get("title_guess"):
-                    cached["title_guess"] = reference["title_guess"]
-                if not cached.get("reference_year") and reference.get("reference_year"):
-                    cached["reference_year"] = reference["reference_year"]
-                cached.setdefault("matched", False)
-                cached.setdefault("match_method", "pending")
-                cached.setdefault("openalex", None)
-                cached.setdefault("source_count", 0)
-                cached.setdefault("raw_text_examples", [])
-                cached.setdefault("doi_lookup_completed", False)
-                cached.setdefault("doi_discovery_completed", False)
-                cached.setdefault("doi_discovery_source", None)
-                cached.setdefault("doi_discovery_title_score", None)
-                cached.setdefault("pmid_lookup_completed", False)
-                cached.setdefault("title_lookup_completed", False)
-
-            cached["source_count"] = int(cached.get("source_count", 0)) + 1
-            raw_text_examples = list(cached.get("raw_text_examples", []))
-            if reference["raw_text"] not in raw_text_examples and len(raw_text_examples) < 3:
-                raw_text_examples.append(reference["raw_text"])
-            cached["raw_text_examples"] = raw_text_examples
-            references.append(reference)
 
         abstract_reference_records.append(
-            {
-                "id": abstract["id"],
-                "references": references,
-                **split_diagnostics,
-            }
+            build_abstract_reference_record(
+                abstract["id"],
+                reference_candidates,
+                reference_cache,
+                split_diagnostics,
+            )
         )
+        if collect_checkpoint_every_abstracts > 0 and len(abstract_reference_records) % collect_checkpoint_every_abstracts == 0:
+            write_reference_metadata_snapshot(
+                output_path,
+                abstract_reference_records,
+                reference_cache,
+                use_title_search=use_title_search,
+                request_counts=stats,
+                status="running",
+                phase="collect",
+            )
+            print(
+                json.dumps(
+                    {
+                        "phase": "collect",
+                        "completed_abstracts": len(abstract_reference_records),
+                        "reference_split_requests": stats.get("reference_split_requests", 0),
+                    }
+                )
+            )
 
     return abstract_reference_records, reference_cache
 
@@ -1000,6 +1405,7 @@ def build_reference_metadata_payload(
                 "reference_split_error": abstract.get("reference_split_error"),
                 "reference_split_fallback_reason": abstract.get("reference_split_fallback_reason"),
                 "reference_split_candidate_count": abstract.get("reference_split_candidate_count"),
+                "reference_split_estimated_count": abstract.get("reference_split_estimated_count"),
             }
         )
 
@@ -1051,6 +1457,179 @@ def write_reference_metadata_snapshot(
             phase=phase,
         ),
     )
+
+
+def reference_split_needs_repair(abstract: dict[str, Any]) -> bool:
+    if abstract.get("reference_split_strategy") != "llm":
+        return True
+    if abstract.get("reference_split_fallback_reason") or abstract.get("reference_split_error"):
+        return True
+    estimated_count = abstract.get("reference_split_estimated_count")
+    candidate_count = abstract.get("reference_split_candidate_count")
+    if isinstance(estimated_count, int) and isinstance(candidate_count, int) and estimated_count > candidate_count:
+        return True
+    return False
+
+
+def failed_reference_split_ids(reference_metadata_payload: dict[str, Any]) -> list[int]:
+    return [
+        int(abstract["id"])
+        for abstract in reference_metadata_payload.get("abstracts", [])
+        if isinstance(abstract.get("id"), int) and reference_split_needs_repair(abstract)
+    ]
+
+
+def refresh_reference_source_counts(
+    abstracts_out: list[dict[str, Any]],
+    references_by_key: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    for reference in references_by_key.values():
+        reference["source_count"] = 0
+        reference["raw_text_examples"] = []
+
+    referenced_keys: set[str] = set()
+    for abstract in abstracts_out:
+        for reference in abstract.get("references", []):
+            reference_key = reference.get("reference_key")
+            if not isinstance(reference_key, str):
+                continue
+            referenced_keys.add(reference_key)
+            resolved = references_by_key.get(reference_key)
+            if resolved is None:
+                resolved = normalize_cached_reference(
+                    {
+                        "reference_key": reference_key,
+                        "raw_text": reference.get("raw_text") or "",
+                        "doi": reference.get("doi"),
+                        "pmid": reference.get("pmid"),
+                        "title_guess": reference.get("title_guess"),
+                        "matched": bool(reference.get("matched")),
+                        "match_method": reference.get("match_method") or "pending",
+                        "openalex": None,
+                    }
+                )
+                references_by_key[reference_key] = resolved
+            resolved["source_count"] = int(resolved.get("source_count", 0)) + 1
+            raw_text = normalize_reference_text(str(reference.get("raw_text") or ""))
+            examples = list(resolved.get("raw_text_examples", []))
+            if raw_text and raw_text not in examples and len(examples) < 3:
+                examples.append(raw_text)
+            resolved["raw_text_examples"] = examples
+
+    return {
+        key: value
+        for key, value in references_by_key.items()
+        if key in referenced_keys
+    }
+
+
+def merge_reference_metadata_payloads(
+    existing_payload: dict[str, Any],
+    repaired_payload: dict[str, Any],
+) -> dict[str, Any]:
+    repaired_abstracts = {
+        int(abstract["id"]): abstract
+        for abstract in repaired_payload.get("abstracts", [])
+        if isinstance(abstract.get("id"), int)
+    }
+    merged_abstracts: list[dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    for abstract in existing_payload.get("abstracts", []):
+        abstract_id = abstract.get("id")
+        if isinstance(abstract_id, int) and abstract_id in repaired_abstracts:
+            merged_abstracts.append(repaired_abstracts[abstract_id])
+            seen_ids.add(abstract_id)
+        else:
+            merged_abstracts.append(abstract)
+            if isinstance(abstract_id, int):
+                seen_ids.add(abstract_id)
+    for abstract_id, abstract in repaired_abstracts.items():
+        if abstract_id not in seen_ids:
+            merged_abstracts.append(abstract)
+
+    references_by_key = {
+        reference["reference_key"]: normalize_cached_reference(reference)
+        for reference in existing_payload.get("references", [])
+        if isinstance(reference.get("reference_key"), str)
+    }
+    for reference in repaired_payload.get("references", []):
+        reference_key = reference.get("reference_key")
+        if isinstance(reference_key, str):
+            references_by_key[reference_key] = normalize_cached_reference(reference)
+    references_by_key = refresh_reference_source_counts(merged_abstracts, references_by_key)
+    request_counts = default_request_counts()
+    request_counts.update(existing_payload.get("request_counts") or {})
+    request_counts.update(repaired_payload.get("request_counts") or {})
+    use_title_search = bool(repaired_payload.get("use_title_search", existing_payload.get("use_title_search", False)))
+    return build_reference_metadata_payload(
+        merged_abstracts,
+        references_by_key,
+        use_title_search=use_title_search,
+        request_counts=request_counts,
+        status="completed",
+        phase="completed",
+    )
+
+
+def repair_failed_reference_splits(
+    abstracts_database: dict[str, Any],
+    existing_payload: dict[str, Any],
+    *,
+    output_path: Path,
+    use_llm_reference_splitting: bool = True,
+    reference_splitting_backend: str = DEFAULT_REFERENCE_SPLIT_BACKEND,
+    reference_splitting_model: str = DEFAULT_REFERENCE_SPLIT_MODEL,
+    env_path: str = ".env",
+    openai_api_var: str = "OPENAI_API_KEY",
+    use_doi_discovery: bool = True,
+    use_title_search: bool = False,
+    doi_discovery_similarity_threshold: float = 0.8,
+    title_similarity_threshold: float = 0.75,
+    delay_seconds: float = 1.05,
+    exact_batch_size: int = 50,
+    checkpoint_every_batches: int = 5,
+    collect_checkpoint_every_abstracts: int = 25,
+    split_concurrency: int = DEFAULT_REFERENCE_SPLIT_CONCURRENCY,
+    split_max_requeues: int = DEFAULT_REFERENCE_SPLIT_MAX_REQUEUES,
+    title_concurrency: int = DEFAULT_OPENALEX_TITLE_CONCURRENCY,
+    title_max_rps: float = DEFAULT_OPENALEX_TITLE_MAX_RPS,
+) -> dict[str, Any]:
+    target_ids = set(failed_reference_split_ids(existing_payload))
+    if not target_ids:
+        return existing_payload
+    subset_database = {
+        "abstracts": [
+            abstract
+            for abstract in abstracts_database.get("abstracts", [])
+            if abstract.get("id") in target_ids
+        ]
+    }
+    with TemporaryDirectory() as temp_dir:
+        temp_output_path = Path(temp_dir) / "reference_metadata.repair.json"
+        repaired_payload = build_reference_metadata_database(
+            subset_database,
+            output_path=temp_output_path,
+            use_llm_reference_splitting=use_llm_reference_splitting,
+            reference_splitting_backend=reference_splitting_backend,
+            reference_splitting_model=reference_splitting_model,
+            env_path=env_path,
+            openai_api_var=openai_api_var,
+            use_doi_discovery=use_doi_discovery,
+            use_title_search=use_title_search,
+            doi_discovery_similarity_threshold=doi_discovery_similarity_threshold,
+            title_similarity_threshold=title_similarity_threshold,
+            delay_seconds=delay_seconds,
+            exact_batch_size=exact_batch_size,
+            checkpoint_every_batches=checkpoint_every_batches,
+            collect_checkpoint_every_abstracts=collect_checkpoint_every_abstracts,
+            split_concurrency=split_concurrency,
+            split_max_requeues=split_max_requeues,
+            title_concurrency=title_concurrency,
+            title_max_rps=title_max_rps,
+        )
+    merged_payload = merge_reference_metadata_payloads(existing_payload, repaired_payload)
+    write_json(output_path, merged_payload)
+    return merged_payload
 
 
 def resolve_reference_cache_doi_discovery(
@@ -1280,7 +1859,23 @@ def resolve_reference_cache_title_matches(
     title_similarity_threshold: float = 0.75,
     delay_seconds: float = 0.0,
     request_counts: dict[str, int] | None = None,
+    title_concurrency: int = DEFAULT_OPENALEX_TITLE_CONCURRENCY,
+    title_max_rps: float = DEFAULT_OPENALEX_TITLE_MAX_RPS,
 ) -> dict[str, int]:
+    if title_concurrency > 1:
+        return asyncio.run(
+            resolve_reference_cache_title_matches_async(
+                abstract_reference_records,
+                reference_cache,
+                output_path=output_path,
+                use_title_search=use_title_search,
+                title_similarity_threshold=title_similarity_threshold,
+                delay_seconds=delay_seconds,
+                request_counts=request_counts,
+                title_concurrency=title_concurrency,
+                title_max_rps=title_max_rps,
+            )
+        )
     stats = default_request_counts()
     stats.update(request_counts or {})
     stats.setdefault("title_errors", 0)
@@ -1353,6 +1948,145 @@ def resolve_reference_cache_title_matches(
     return stats
 
 
+async def resolve_reference_cache_title_matches_async(
+    abstract_reference_records: list[dict[str, Any]],
+    reference_cache: dict[str, dict[str, Any]],
+    *,
+    output_path: Path,
+    use_title_search: bool,
+    title_similarity_threshold: float = 0.75,
+    delay_seconds: float = 0.0,
+    request_counts: dict[str, int] | None = None,
+    title_concurrency: int = DEFAULT_OPENALEX_TITLE_CONCURRENCY,
+    title_max_rps: float = DEFAULT_OPENALEX_TITLE_MAX_RPS,
+) -> dict[str, int]:
+    stats = default_request_counts()
+    stats.update(request_counts or {})
+    stats.setdefault("title_errors", 0)
+    stats.setdefault("openalex_budget_exhausted", 0)
+    candidates = [
+        reference
+        for reference in reference_cache.values()
+        if not reference.get("title_lookup_completed")
+        and not reference.get("matched")
+        and reference.get("title_guess")
+    ]
+    skipped = [
+        reference
+        for reference in reference_cache.values()
+        if not reference.get("title_lookup_completed")
+        and (reference.get("matched") or not reference.get("title_guess"))
+    ]
+    for reference in skipped:
+        reference["title_lookup_completed"] = True
+
+    try:
+        rate_limit_payload = await asyncio.to_thread(fetch_openalex_rate_limit_status)
+        if isinstance(rate_limit_payload, dict):
+            for key in (
+                "limit",
+                "interval",
+                "requests_limit",
+                "requests_remaining",
+                "daily_limit_usd",
+                "daily_remaining_usd",
+                "prepaid_remaining_usd",
+            ):
+                if key in rate_limit_payload:
+                    stats[f"openalex_{key}"] = rate_limit_payload.get(key)
+    except OpenAlexError:
+        pass
+
+    request_times: deque[float] = deque()
+    limiter_lock = asyncio.Lock()
+    stop_event = asyncio.Event()
+
+    async def acquire_request_slot() -> None:
+        if title_max_rps <= 0:
+            return
+        while True:
+            async with limiter_lock:
+                now = asyncio.get_running_loop().time()
+                while request_times and now - request_times[0] >= 1.0:
+                    request_times.popleft()
+                if len(request_times) < max(1, int(title_max_rps)):
+                    request_times.append(now)
+                    return
+                wait_seconds = max(0.01, 1.0 - (now - request_times[0]))
+            await asyncio.sleep(wait_seconds)
+
+    pending: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    completed_count = 0
+    for reference in candidates:
+        pending.put_nowait(reference)
+
+    async def worker() -> None:
+        nonlocal completed_count
+        while True:
+            reference = await pending.get()
+            if reference is None:
+                pending.task_done()
+                return
+            if stop_event.is_set():
+                pending.task_done()
+                continue
+            await acquire_request_slot()
+            stats["title_requests"] += 1
+            try:
+                work, _headers = await asyncio.to_thread(
+                    search_openalex_work_by_title_with_headers,
+                    str(reference["title_guess"]),
+                    title_similarity_threshold,
+                )
+            except OpenAlexError as exc:
+                stats["title_errors"] = int(stats.get("title_errors", 0)) + 1
+                reference["last_error"] = str(exc)
+                if "Insufficient budget" in str(exc) or "HTTP 429" in str(exc):
+                    stats["openalex_budget_exhausted"] = 1
+                    stop_event.set()
+            else:
+                if work is not None:
+                    reference["matched"] = True
+                    reference["match_method"] = "title"
+                    reference["openalex"] = normalize_openalex_work(work)
+                    reference.pop("last_error", None)
+                elif reference.get("match_method") == "pending":
+                    reference["match_method"] = "unmatched"
+                reference["title_lookup_completed"] = True
+                completed_count += 1
+                if completed_count % 50 == 0:
+                    write_reference_metadata_snapshot(
+                        output_path,
+                        abstract_reference_records,
+                        reference_cache,
+                        use_title_search=use_title_search,
+                        request_counts=stats,
+                        status="running",
+                        phase="title",
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "phase": "title",
+                                "title_requests": stats["title_requests"],
+                                "title_errors": stats.get("title_errors", 0),
+                                "title_completed": completed_count,
+                            }
+                        )
+                    )
+            finally:
+                pending.task_done()
+
+    workers = [asyncio.create_task(worker()) for _ in range(max(1, title_concurrency))]
+    try:
+        await pending.join()
+    finally:
+        for _ in workers:
+            pending.put_nowait(None)
+        await asyncio.gather(*workers, return_exceptions=True)
+    return stats
+
+
 def build_reference_metadata_database(
     abstracts_database: dict[str, Any],
     *,
@@ -1369,18 +2103,27 @@ def build_reference_metadata_database(
     delay_seconds: float = 1.05,
     exact_batch_size: int = 50,
     checkpoint_every_batches: int = 5,
+    collect_checkpoint_every_abstracts: int = 25,
+    split_concurrency: int = DEFAULT_REFERENCE_SPLIT_CONCURRENCY,
+    split_max_requeues: int = DEFAULT_REFERENCE_SPLIT_MAX_REQUEUES,
+    title_concurrency: int = DEFAULT_OPENALEX_TITLE_CONCURRENCY,
+    title_max_rps: float = DEFAULT_OPENALEX_TITLE_MAX_RPS,
 ) -> dict[str, Any]:
     effective_use_title_search = True
     request_counts = default_request_counts()
     abstract_reference_records, reference_cache = collect_reference_cache(
         abstracts_database,
         output_path,
+        use_title_search=effective_use_title_search,
         use_llm_reference_splitting=use_llm_reference_splitting,
         reference_splitting_backend=reference_splitting_backend,
         reference_splitting_model=reference_splitting_model,
         env_path=env_path,
         openai_api_var=openai_api_var,
         request_counts=request_counts,
+        collect_checkpoint_every_abstracts=collect_checkpoint_every_abstracts,
+        split_concurrency=split_concurrency,
+        split_max_requeues=split_max_requeues,
     )
     write_reference_metadata_snapshot(
         output_path,
@@ -1409,6 +2152,8 @@ def build_reference_metadata_database(
         title_similarity_threshold=title_similarity_threshold,
         delay_seconds=delay_seconds,
         request_counts=request_counts,
+        title_concurrency=title_concurrency,
+        title_max_rps=title_max_rps,
     )
     if use_doi_discovery:
         request_counts = resolve_reference_cache_doi_discovery(
@@ -1435,6 +2180,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Resolve abstract references against OpenAlex and persist citation metadata")
     parser.add_argument("--input", default="data/abstracts.json")
     parser.add_argument("--output", default="data/reference_metadata.json")
+    parser.add_argument("--repair-failed-splits-from")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--openai-api-var", default="OPENAI_API_KEY")
     parser.add_argument("--no-llm-reference-splitting", action="store_true")
@@ -1442,6 +2188,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reference-splitting-model", default=DEFAULT_REFERENCE_SPLIT_MODEL)
     parser.add_argument("--exact-batch-size", type=int, default=50)
     parser.add_argument("--checkpoint-every-batches", type=int, default=5)
+    parser.add_argument("--collect-checkpoint-every-abstracts", type=int, default=25)
+    parser.add_argument("--split-concurrency", type=int, default=DEFAULT_REFERENCE_SPLIT_CONCURRENCY)
+    parser.add_argument("--split-max-requeues", type=int, default=DEFAULT_REFERENCE_SPLIT_MAX_REQUEUES)
+    parser.add_argument("--title-concurrency", type=int, default=DEFAULT_OPENALEX_TITLE_CONCURRENCY)
+    parser.add_argument("--title-max-rps", type=float, default=DEFAULT_OPENALEX_TITLE_MAX_RPS)
     parser.add_argument("--no-doi-discovery", action="store_true")
     parser.add_argument("--doi-discovery-similarity-threshold", type=float, default=0.8)
     parser.add_argument("--use-title-search", action="store_true")
@@ -1454,28 +2205,59 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     database = load_json(Path(args.input))
     output_path = Path(args.output)
-    result = build_reference_metadata_database(
-        database,
-        output_path=output_path,
-        use_llm_reference_splitting=not args.no_llm_reference_splitting,
-        reference_splitting_backend=args.reference_splitting_backend,
-        reference_splitting_model=args.reference_splitting_model,
-        env_path=args.env_file,
-        openai_api_var=args.openai_api_var,
-        use_doi_discovery=not args.no_doi_discovery,
-        use_title_search=args.use_title_search,
-        doi_discovery_similarity_threshold=args.doi_discovery_similarity_threshold,
-        title_similarity_threshold=args.title_similarity_threshold,
-        delay_seconds=args.delay_seconds,
-        exact_batch_size=args.exact_batch_size,
-        checkpoint_every_batches=args.checkpoint_every_batches,
-    )
+    if args.repair_failed_splits_from:
+        existing_payload = load_json(Path(args.repair_failed_splits_from))
+        result = repair_failed_reference_splits(
+            database,
+            existing_payload,
+            output_path=output_path,
+            use_llm_reference_splitting=not args.no_llm_reference_splitting,
+            reference_splitting_backend=args.reference_splitting_backend,
+            reference_splitting_model=args.reference_splitting_model,
+            env_path=args.env_file,
+            openai_api_var=args.openai_api_var,
+            use_doi_discovery=not args.no_doi_discovery,
+            use_title_search=args.use_title_search,
+            doi_discovery_similarity_threshold=args.doi_discovery_similarity_threshold,
+            title_similarity_threshold=args.title_similarity_threshold,
+            delay_seconds=args.delay_seconds,
+            exact_batch_size=args.exact_batch_size,
+            checkpoint_every_batches=args.checkpoint_every_batches,
+            collect_checkpoint_every_abstracts=args.collect_checkpoint_every_abstracts,
+            split_concurrency=args.split_concurrency,
+            split_max_requeues=args.split_max_requeues,
+            title_concurrency=args.title_concurrency,
+            title_max_rps=args.title_max_rps,
+        )
+    else:
+        result = build_reference_metadata_database(
+            database,
+            output_path=output_path,
+            use_llm_reference_splitting=not args.no_llm_reference_splitting,
+            reference_splitting_backend=args.reference_splitting_backend,
+            reference_splitting_model=args.reference_splitting_model,
+            env_path=args.env_file,
+            openai_api_var=args.openai_api_var,
+            use_doi_discovery=not args.no_doi_discovery,
+            use_title_search=args.use_title_search,
+            doi_discovery_similarity_threshold=args.doi_discovery_similarity_threshold,
+            title_similarity_threshold=args.title_similarity_threshold,
+            delay_seconds=args.delay_seconds,
+            exact_batch_size=args.exact_batch_size,
+            checkpoint_every_batches=args.checkpoint_every_batches,
+            collect_checkpoint_every_abstracts=args.collect_checkpoint_every_abstracts,
+            split_concurrency=args.split_concurrency,
+            split_max_requeues=args.split_max_requeues,
+            title_concurrency=args.title_concurrency,
+            title_max_rps=args.title_max_rps,
+        )
     write_json(output_path, result)
     print(
         json.dumps(
             {
                 "input": args.input,
                 "output": args.output,
+                "repair_failed_split_count": len(failed_reference_split_ids(result)),
                 "abstract_count": result["abstract_count"],
                 "unique_reference_count": result["unique_reference_count"],
                 "matched_reference_count": result["matched_reference_count"],
@@ -1483,6 +2265,10 @@ def main(argv: list[str] | None = None) -> int:
                 "use_llm_reference_splitting": not args.no_llm_reference_splitting,
                 "reference_splitting_backend": args.reference_splitting_backend,
                 "reference_splitting_model": args.reference_splitting_model,
+                "split_concurrency": args.split_concurrency,
+                "split_max_requeues": args.split_max_requeues,
+                "title_concurrency": args.title_concurrency,
+                "title_max_rps": args.title_max_rps,
                 "use_doi_discovery": not args.no_doi_discovery,
                 "use_title_search": args.use_title_search,
                 "request_counts": result["request_counts"],

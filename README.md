@@ -46,9 +46,7 @@ The latest end state of the project is:
    - browser-side semantic search
    - facets
    - UMAP selection
-   - three semantic cluster lenses:
-     - `15-cluster view`
-     - `21-cluster view`
+   - a single semantic cluster lens:
      - `25-cluster benchmark`
 
 ## External Requirements
@@ -271,6 +269,13 @@ Reference resolution now follows this order:
 - direct OpenAlex title search for references with a title
 - Semantic Scholar full-reference search only for references that still have neither DOI nor title
 
+Current operational notes:
+
+- the OpenAI splitter runs one request per abstract attempt and can be driven concurrently
+- failed or invalid splits can be requeued and retried before falling back to a single-block record
+- OpenAlex title search can also run concurrently with an explicit requests-per-second cap
+- OpenAlex `/rate-limit` is the best way to inspect current search budget before a long rerun
+
 Useful options:
 
 - `--no-doi-discovery`
@@ -283,10 +288,31 @@ Useful options:
   - model used for reference structuring; defaults to `gpt-5-nano`
   - the OpenAI backend uses the Responses API with a strict JSON schema for `{"references": [{"reference", "title", "doi"}]}` output
   - extracted `title` and `doi` values are only used downstream if they are lexically present in the returned reference text
+- `--split-concurrency 500`
+  - number of in-flight OpenAI reference-splitting requests during collect
+- `--split-max-requeues 5`
+  - maximum retries for failed or invalid split attempts before falling back to a single merged block
+- `--title-concurrency 50`
+  - number of concurrent OpenAlex title-search workers
+- `--title-max-rps 90`
+  - soft request-rate cap for OpenAlex title search; useful for staying below OpenAlex short-window throttle limits
 - `--doi-discovery-similarity-threshold 0.8`
   - minimum title similarity required before accepting a discovered DOI
 - `--delay-seconds 1.05`
-  - default pacing is tuned for a 1 request/second Semantic Scholar key and also spaces direct OpenAlex title lookups
+  - pacing for sequential fallback phases such as Semantic Scholar DOI discovery
+
+If a completed reference map still contains fallback split cases, rerun only those
+abstracts and merge the repaired results back into the existing output:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli reference-metadata \
+  --input data/abstracts.json \
+  --output data/reference_metadata.json \
+  --repair-failed-splits-from data/reference_metadata.json \
+  --use-title-search \
+  --reference-splitting-backend openai \
+  --reference-splitting-model gpt-5-nano
+```
 
 ### 8. Optional Claim Extraction
 
@@ -425,10 +451,14 @@ The current default UI build uses:
 - `data/abstracts_enriched.json`
 - `data/reference_metadata.json`
 - `data/image_analyses_openai.json`
-- `data/embeddings/voyage_stage2_published/semantic_analysis_15-communities`
-- `data/embeddings/voyage_stage2_published/semantic_analysis_21-communities`
 - `data/embeddings/voyage_stage2_published/clustering_benchmark`
 - `data/embeddings/minilm_stage1/umap_title-introduction-methods-results-conclusion.json`
+
+The exported detail payload now includes:
+
+- merged `claim_extraction` from `data/abstracts_enriched.json`
+- `reference_summary` from `data/reference_metadata.json`
+- a single `semantic_25` cluster lens in the facet and detail metadata
 
 Then serve it locally:
 
