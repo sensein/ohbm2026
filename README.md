@@ -46,8 +46,9 @@ The latest end state of the project is:
    - browser-side semantic search
    - facets
    - UMAP selection
-   - a single semantic cluster lens:
+   - two semantic cluster lenses:
      - `25-cluster benchmark`
+     - `claims 28-cluster benchmark`
 
 ## External Requirements
 
@@ -383,6 +384,7 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-hf \
 Embedding text is built on demand from:
 
 - `title`
+- `claims`
 - `introduction`
 - `methods`
 - `results`
@@ -394,6 +396,16 @@ You can override the fields at runtime, for example:
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-minilm \
   --fields title methods results
 ```
+
+To build a claims-only embedding bundle:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-minilm \
+  --fields claims \
+  --output-name minilm_claims
+```
+
+This uses `claim_extraction.claims` from `data/abstracts_enriched.json` and formats each extracted claim as a short bullet containing the claim statement itself.
 
 ### 9. Apply Or Train Stage 2
 
@@ -428,6 +440,18 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli cluster-benchmark \
   --output-dir data/embeddings/voyage_stage2_published/clustering_benchmark
 ```
 
+To benchmark a claims-only bundle around `25-30` clusters:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli cluster-benchmark \
+  --embeddings-dir data/embeddings/minilm_claims \
+  --output-dir data/embeddings/minilm_claims/clustering_benchmark_25_30 \
+  --k-min 25 \
+  --k-max 30
+```
+
+This is the current claims-cluster artifact consumed by the UI. The latest run selected a `28`-cluster k-means solution inside that benchmark output.
+
 Projection outputs:
 
 ```bash
@@ -452,13 +476,23 @@ The current default UI build uses:
 - `data/reference_metadata.json`
 - `data/image_analyses_openai.json`
 - `data/embeddings/voyage_stage2_published/clustering_benchmark`
+- `data/embeddings/minilm_claims/clustering_benchmark_25_30`
 - `data/embeddings/minilm_stage1/umap_title-introduction-methods-results-conclusion.json`
+
+Useful explicit form if you want to point the UI at a different claims-cluster run:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli build-ui \
+  --site-output-dir export/ui-site \
+  --cluster-25-dir data/embeddings/voyage_stage2_published/clustering_benchmark \
+  --claims-cluster-dir data/embeddings/minilm_claims/clustering_benchmark_25_30
+```
 
 The exported detail payload now includes:
 
 - merged `claim_extraction` from `data/abstracts_enriched.json`
 - `reference_summary` from `data/reference_metadata.json`
-- a single `semantic_25` cluster lens in the facet and detail metadata
+- `semantic_25` and `claims_28` cluster lenses in the facet and detail metadata
 
 Then serve it locally:
 
@@ -493,6 +527,12 @@ If you already have embeddings but want new cluster evaluations:
 
 - rerun `cluster-benchmark`
 - optionally rerun `build-ui`
+
+If you specifically want to refresh the claims-based semantic lens:
+
+- rerun `embed-minilm --fields claims --output-name minilm_claims`
+- rerun `cluster-benchmark --embeddings-dir data/embeddings/minilm_claims --output-dir data/embeddings/minilm_claims/clustering_benchmark_25_30 --k-min 25 --k-max 30`
+- rerun `build-ui`
 
 ## Module Layout
 

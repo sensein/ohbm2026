@@ -11,6 +11,7 @@ const DATA_FILES = {
 const FACET_LABELS = {
   accepted_for: "Accepted for",
   semantic_25: "Semantic cluster",
+  claims_28: "Claims cluster",
   primary_topic: "Primary topic",
   secondary_topic: "Subcategory",
   keywords: "Keywords",
@@ -27,6 +28,7 @@ const FACET_LABELS = {
 
 const CLUSTER_LAYER_LABELS = {
   semantic_25: "25-cluster benchmark",
+  claims_28: "Claims 28-cluster benchmark",
 };
 
 const DEFAULT_CLUSTER_LAYER = "semantic_25";
@@ -948,6 +950,20 @@ function createDisclosureCard(title, bodyHtml, options = {}) {
   return details;
 }
 
+function createDetailSection(title, options = {}) {
+  const section = document.createElement("section");
+  section.className = "detail-block";
+  const disclosure = createDisclosureShell(title, {
+    open: options.open,
+    meta: options.meta,
+    compact: options.compact,
+    bodyClassName: options.bodyClassName,
+  });
+  disclosure.details.classList.add("is-section-group");
+  section.appendChild(disclosure.details);
+  return { section, details: disclosure.details, body: disclosure.body };
+}
+
 function renderDetail() {
   const empty = document.getElementById("detail-empty");
   const view = document.getElementById("detail-view");
@@ -987,9 +1003,7 @@ function renderDetail() {
   }
   view.appendChild(chips);
 
-  const metadataBlock = document.createElement("section");
-  metadataBlock.className = "detail-block";
-  metadataBlock.innerHTML = "<h3>Metadata</h3>";
+  const metadataBlock = createDetailSection("Metadata", { open: false });
   const metadataGrid = document.createElement("div");
   metadataGrid.className = "detail-grid";
   const metadataItems = [
@@ -1009,11 +1023,9 @@ function renderDetail() {
     card.innerHTML = `<h4>${escapeHtml(label)}</h4><p>${escapeHtml(arrayValue(values).join(", ") || "Not specified")}</p>`;
     metadataGrid.appendChild(card);
   }
-  metadataBlock.appendChild(metadataGrid);
+  metadataBlock.body.appendChild(metadataGrid);
 
-  const claimBlock = document.createElement("section");
-  claimBlock.className = "detail-block";
-  claimBlock.innerHTML = "<h3>Claim extraction</h3>";
+  const claimBlock = createDetailSection("Claim extraction", { open: false });
   const claimExtraction = detail.claim_extraction || { claims: [] };
   if ((claimExtraction.claims || []).length > 0) {
     const claimNote = document.createElement("p");
@@ -1022,16 +1034,16 @@ function renderDetail() {
       `${claimExtraction.claim_count || claimExtraction.claims.length} claims` +
       (claimExtraction.llm_provider ? ` · ${claimExtraction.llm_provider}` : "") +
       (claimExtraction.llm_model ? ` · ${claimExtraction.llm_model}` : "");
-    claimBlock.appendChild(claimNote);
+    claimBlock.body.appendChild(claimNote);
     for (const claim of claimExtraction.claims) {
-      const meta = [claim.claim_type, claim.source_type, claim.evidence_type].filter(Boolean).join(" · ");
+      const meta = [claim.claim_id, claim.claim_type, claim.source_type, claim.evidence_type].filter(Boolean).join(" · ");
       const bodyHtml = `
         <p>${escapeHtml(claim.claim || "")}</p>
         <p class="reference-note"><strong>Source:</strong> ${escapeHtml(claim.source || "Not provided")}</p>
         <p class="reference-note"><strong>Evidence:</strong> ${escapeHtml(claim.evidence || "Not provided")}</p>
       `;
-      claimBlock.appendChild(
-        createDisclosureCard(claim.claim_id || "Claim", bodyHtml, {
+      claimBlock.body.appendChild(
+        createDisclosureCard(claim.claim || claim.claim_id || "Claim", bodyHtml, {
           meta,
           open: false,
           bodyClassName: "section-html",
@@ -1039,13 +1051,11 @@ function renderDetail() {
       );
     }
   } else if (claimExtraction.error) {
-    claimBlock.innerHTML += `<div class="empty-state">Claim extraction failed: ${escapeHtml(claimExtraction.error)}</div>`;
+    claimBlock.body.innerHTML = `<div class="empty-state">Claim extraction failed: ${escapeHtml(claimExtraction.error)}</div>`;
   } else {
-    claimBlock.innerHTML += `<div class="empty-state">No cached claim extraction is available for this abstract.</div>`;
+    claimBlock.body.innerHTML = `<div class="empty-state">No cached claim extraction is available for this abstract.</div>`;
   }
-  const clusterBlock = document.createElement("section");
-  clusterBlock.className = "detail-block";
-  clusterBlock.innerHTML = "<h3>Semantic context</h3>";
+  const clusterBlock = createDetailSection("Semantic context", { open: false });
   const semanticDisclosure = createDisclosureShell(CLUSTER_LAYER_LABELS[state.clusterLayer], {
     open: false,
     meta: activeCluster ? `Cluster ${activeCluster.cluster_id}` : "No assignment",
@@ -1071,12 +1081,10 @@ function renderDetail() {
   } else {
     semanticDisclosure.body.innerHTML = `<div class="empty-state">No cluster assignment found for the active semantic layer.</div>`;
   }
-  clusterBlock.appendChild(semanticDisclosure.details);
-  view.appendChild(clusterBlock);
+  clusterBlock.body.appendChild(semanticDisclosure.details);
+  view.appendChild(clusterBlock.section);
 
-  const relationsBlock = document.createElement("section");
-  relationsBlock.className = "detail-block";
-  relationsBlock.innerHTML = "<h3>Related abstracts</h3>";
+  const relationsBlock = createDetailSection("Related abstracts", { open: false });
   const relatedDisclosure = createDisclosureShell("Nearest neighbors", {
     open: false,
     meta: `${(relation.neighbors || []).length} abstracts`,
@@ -1100,14 +1108,12 @@ function renderDetail() {
   } else {
     relatedDisclosure.body.innerHTML = `<div class="empty-state">No precomputed nearest neighbors available.</div>`;
   }
-  relationsBlock.appendChild(relatedDisclosure.details);
-  view.appendChild(relationsBlock);
+  relationsBlock.body.appendChild(relatedDisclosure.details);
+  view.appendChild(relationsBlock.section);
 
-  const sectionsBlock = document.createElement("section");
-  sectionsBlock.className = "detail-block";
-  sectionsBlock.innerHTML = "<h3>Abstract content</h3>";
+  const sectionsBlock = createDetailSection("Abstract content", { open: true });
   for (const [index, section] of (detail.sections || []).entries()) {
-    sectionsBlock.appendChild(
+    sectionsBlock.body.appendChild(
       createDisclosureCard(section.label, section.html, {
         meta: readingMeta(section.markdown),
         open: index === 0,
@@ -1116,16 +1122,14 @@ function renderDetail() {
     );
   }
   if ((detail.sections || []).length === 0) {
-    sectionsBlock.innerHTML += `<div class="empty-state">No abstract markdown sections are available for this abstract.</div>`;
+    sectionsBlock.body.innerHTML = `<div class="empty-state">No abstract markdown sections are available for this abstract.</div>`;
   }
-  view.appendChild(sectionsBlock);
+  view.appendChild(sectionsBlock.section);
 
-  const figureBlock = document.createElement("section");
-  figureBlock.className = "detail-block";
-  figureBlock.innerHTML = "<h3>Figure notes</h3>";
+  const figureBlock = createDetailSection("Figure notes", { open: false });
   if ((detail.figure_analyses || []).length > 0) {
     for (const figure of detail.figure_analyses) {
-      figureBlock.appendChild(
+      figureBlock.body.appendChild(
         createDisclosureCard(
           figure.question_name || "Figure analysis",
           figure.rich_html || `<p>${escapeHtml(figure.notes || "")}</p>`,
@@ -1138,19 +1142,17 @@ function renderDetail() {
       );
     }
   } else {
-    figureBlock.innerHTML += `<div class="empty-state">No cached figure analysis is available for this abstract.</div>`;
+    figureBlock.body.innerHTML = `<div class="empty-state">No cached figure analysis is available for this abstract.</div>`;
   }
-  view.appendChild(figureBlock);
-  view.appendChild(claimBlock);
+  view.appendChild(figureBlock.section);
+  view.appendChild(claimBlock.section);
 
-  const referencesBlock = document.createElement("section");
-  referencesBlock.className = "detail-block";
-  referencesBlock.innerHTML = "<h3>Reference matches</h3>";
+  const referencesBlock = createDetailSection("Reference matches", { open: false });
   const referenceSummary = detail.reference_summary || { matched_count: 0, unmatched_count: 0, items: [], unmatched_items: [] };
   const headerNote = document.createElement("p");
   headerNote.className = "reference-note";
   headerNote.textContent = `${referenceSummary.matched_count} matched · ${referenceSummary.unmatched_count} unmatched`;
-  referencesBlock.appendChild(headerNote);
+  referencesBlock.body.appendChild(headerNote);
   if ((referenceSummary.items || []).length > 0) {
     const list = document.createElement("div");
     list.className = "link-list is-compact";
@@ -1170,14 +1172,14 @@ function renderDetail() {
         )
       );
     }
-    referencesBlock.appendChild(list);
+    referencesBlock.body.appendChild(list);
   } else {
-    referencesBlock.innerHTML += `<div class="empty-state">No OpenAlex-matched references are cached for this abstract.</div>`;
+    referencesBlock.body.innerHTML += `<div class="empty-state">No OpenAlex-matched references are cached for this abstract.</div>`;
   }
   if ((referenceSummary.unmatched_items || []).length > 0) {
     const unmatchedHeading = document.createElement("h4");
     unmatchedHeading.textContent = "Unmatched references";
-    referencesBlock.appendChild(unmatchedHeading);
+    referencesBlock.body.appendChild(unmatchedHeading);
     const unmatchedList = document.createElement("div");
     unmatchedList.className = "link-list is-compact";
     for (const item of referenceSummary.unmatched_items) {
@@ -1192,10 +1194,10 @@ function renderDetail() {
         )
       );
     }
-      referencesBlock.appendChild(unmatchedList);
+    referencesBlock.body.appendChild(unmatchedList);
   }
-  view.appendChild(referencesBlock);
-  view.appendChild(metadataBlock);
+  view.appendChild(referencesBlock.section);
+  view.appendChild(metadataBlock.section);
 }
 
 function render() {

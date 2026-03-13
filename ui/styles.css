@@ -685,6 +685,15 @@ label {
   padding: 10px 12px 12px;
 }
 
+.detail-disclosure.is-section-group summary {
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.detail-disclosure.is-section-group .detail-disclosure__title {
+  font-size: 1rem;
+}
+
 .detail-disclosure.is-compact summary {
   padding-top: 10px;
   padding-bottom: 10px;

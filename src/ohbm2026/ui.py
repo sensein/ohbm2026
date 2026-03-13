@@ -23,6 +23,7 @@ DEFAULT_NEIGHBORS_INPUT = "data/embeddings/voyage_stage2_published/neighbors.jso
 DEFAULT_CLUSTER_15_DIR = "data/embeddings/voyage_stage2_published/semantic_analysis_15-communities"
 DEFAULT_CLUSTER_21_DIR = "data/embeddings/voyage_stage2_published/semantic_analysis_21-communities"
 DEFAULT_CLUSTER_25_DIR = "data/embeddings/voyage_stage2_published/clustering_benchmark"
+DEFAULT_CLAIMS_CLUSTER_DIR = "data/embeddings/minilm_claims/clustering_benchmark_25_30"
 DEFAULT_SEMANTIC_VECTORS_INPUT = "data/embeddings/minilm_stage1/vectors.npy"
 DEFAULT_SEMANTIC_METADATA_INPUT = "data/embeddings/minilm_stage1/metadata.json"
 DEFAULT_UMAP_INPUT = "data/embeddings/minilm_stage1/umap_title-introduction-methods-results-conclusion.json"
@@ -42,6 +43,7 @@ SECTION_FIELDS = (
 FACET_GROUPS = (
     "accepted_for",
     "semantic_25",
+    "claims_28",
     "primary_topic",
     "secondary_topic",
     "keywords",
@@ -476,6 +478,9 @@ def build_metadata(raw_abstract: dict[str, Any], enriched_abstract: dict[str, An
     metadata["semantic_25"] = [
         normalize_cluster_value(partitions["semantic_25"]["assignments"].get(abstract_id), partitions["semantic_25"])
     ]
+    metadata["claims_28"] = [
+        normalize_cluster_value(partitions["claims_28"]["assignments"].get(abstract_id), partitions["claims_28"])
+    ]
     return metadata
 
 
@@ -586,6 +591,7 @@ def build_ui_payload(
     cluster_15_dir: Path,
     cluster_21_dir: Path,
     cluster_25_dir: Path,
+    claims_cluster_dir: Path,
     semantic_vectors_input: Path,
     semantic_metadata_input: Path,
     umap_input: Path,
@@ -599,6 +605,7 @@ def build_ui_payload(
     neighbors = load_neighbors(neighbors_input, top_neighbors)
     partitions = {
         "semantic_25": load_cluster_partition(cluster_25_dir, "semantic_25"),
+        "claims_28": load_cluster_partition(claims_cluster_dir, "claims_28"),
     }
     umap_projection = load_umap_projection(umap_input)
 
@@ -627,6 +634,7 @@ def build_ui_payload(
             "facets": {
                 "accepted_for": [metadata["accepted_for"]],
                 "semantic_25": metadata["semantic_25"],
+                "claims_28": metadata["claims_28"],
                 "primary_topic": [metadata["primary_topic"]],
                 "secondary_topic": metadata["secondary_topic_facets"],
                 "keywords": metadata["keywords"],
@@ -639,7 +647,6 @@ def build_ui_payload(
                 "recording_technology": domain_facets["recording_technology"],
                 "brain_regions": domain_facets["brain_regions"],
                 "brain_networks": domain_facets["brain_networks"],
-                "semantic_25": metadata["semantic_25"],
             },
             "search_blob": build_search_blob(raw_abstract, enriched_abstract, metadata),
         }
@@ -676,6 +683,7 @@ def build_ui_payload(
             "neighbors": neighbors.get(abstract_id, []),
             "clusters": {
                 "semantic_25": partitions["semantic_25"]["assignments"].get(abstract_id),
+                "claims_28": partitions["claims_28"]["assignments"].get(abstract_id),
             },
         }
 
@@ -729,6 +737,7 @@ def build_ui_payload(
             "neighbors_source": str(neighbors_input),
             "partitions": {
                 "semantic_25": str(cluster_25_dir),
+                "claims_28": str(claims_cluster_dir),
             },
             "files": files,
             "semantic_search": semantic_search["metadata"] if semantic_search else None,
@@ -780,6 +789,7 @@ def build_export_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cluster-15-dir", default=DEFAULT_CLUSTER_15_DIR)
     parser.add_argument("--cluster-21-dir", default=DEFAULT_CLUSTER_21_DIR)
     parser.add_argument("--cluster-25-dir", default=DEFAULT_CLUSTER_25_DIR)
+    parser.add_argument("--claims-cluster-dir", default=DEFAULT_CLAIMS_CLUSTER_DIR)
     parser.add_argument("--semantic-vectors-input", default=DEFAULT_SEMANTIC_VECTORS_INPUT)
     parser.add_argument("--semantic-metadata-input", default=DEFAULT_SEMANTIC_METADATA_INPUT)
     parser.add_argument("--umap-input", default=DEFAULT_UMAP_INPUT)
@@ -799,6 +809,7 @@ def export_ui_main(argv: list[str] | None = None) -> int:
         cluster_15_dir=Path(args.cluster_15_dir),
         cluster_21_dir=Path(args.cluster_21_dir),
         cluster_25_dir=Path(args.cluster_25_dir),
+        claims_cluster_dir=Path(args.claims_cluster_dir),
         semantic_vectors_input=Path(args.semantic_vectors_input),
         semantic_metadata_input=Path(args.semantic_metadata_input),
         umap_input=Path(args.umap_input),
@@ -828,6 +839,7 @@ def build_ui_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cluster-15-dir", default=DEFAULT_CLUSTER_15_DIR)
     parser.add_argument("--cluster-21-dir", default=DEFAULT_CLUSTER_21_DIR)
     parser.add_argument("--cluster-25-dir", default=DEFAULT_CLUSTER_25_DIR)
+    parser.add_argument("--claims-cluster-dir", default=DEFAULT_CLAIMS_CLUSTER_DIR)
     parser.add_argument("--semantic-vectors-input", default=DEFAULT_SEMANTIC_VECTORS_INPUT)
     parser.add_argument("--semantic-metadata-input", default=DEFAULT_SEMANTIC_METADATA_INPUT)
     parser.add_argument("--umap-input", default=DEFAULT_UMAP_INPUT)
@@ -850,6 +862,7 @@ def build_ui_main(argv: list[str] | None = None) -> int:
         cluster_15_dir=Path(args.cluster_15_dir),
         cluster_21_dir=Path(args.cluster_21_dir),
         cluster_25_dir=Path(args.cluster_25_dir),
+        claims_cluster_dir=Path(args.claims_cluster_dir),
         semantic_vectors_input=Path(args.semantic_vectors_input),
         semantic_metadata_input=Path(args.semantic_metadata_input),
         umap_input=Path(args.umap_input),

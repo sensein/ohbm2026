@@ -29,6 +29,7 @@ DEFAULT_TSNE_EARLY_EXAGGERATION = 12.0
 HUGGINGFACE_TOKEN_ENV_VARS = ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN")
 ALLOWED_EMBEDDING_FIELDS = {
     "title",
+    "claims",
     "introduction",
     "methods",
     "results",
@@ -38,6 +39,7 @@ ALLOWED_EMBEDDING_FIELDS = {
     "acknowledgement",
 }
 SECTION_HEADINGS = {
+    "claims": "Claims",
     "introduction": "Introduction",
     "methods": "Methods",
     "results": "Results",
@@ -47,6 +49,7 @@ SECTION_HEADINGS = {
     "acknowledgement": "Acknowledgement",
 }
 SECTION_MARKDOWN_KEYS = {
+    "claims": "claims_markdown",
     "introduction": "introduction_markdown",
     "methods": "methods_markdown",
     "results": "results_markdown",
@@ -216,6 +219,11 @@ def build_embedding_text(
             if title:
                 parts.append(title)
             continue
+        if field == "claims":
+            claim_text = build_claim_embedding_text(abstract)
+            if claim_text:
+                parts.append(f"{SECTION_HEADINGS[field]}:\n{claim_text}")
+            continue
         section_key = SECTION_MARKDOWN_KEYS[field]
         section_text = (abstract.get(section_key) or "").strip()
         if section_text:
@@ -231,6 +239,20 @@ def build_embedding_texts(
 ) -> list[str]:
     selected_fields = normalize_embedding_fields(fields)
     return [build_embedding_text(abstract, selected_fields, title_lookup=title_lookup) for abstract in abstracts]
+
+
+def build_claim_embedding_text(abstract: dict[str, Any]) -> str:
+    claim_extraction = abstract.get("claim_extraction") or {}
+    raw_claims = claim_extraction.get("claims") or []
+    claim_lines: list[str] = []
+    for claim_record in raw_claims:
+        if not isinstance(claim_record, dict):
+            continue
+        claim_text = str(claim_record.get("claim") or "").strip()
+        if not claim_text:
+            continue
+        claim_lines.append(f"- {claim_text}")
+    return "\n".join(claim_lines)
 
 
 def embedding_variant_name(fields: list[str] | tuple[str, ...] | None = None) -> str:
@@ -1816,8 +1838,10 @@ def align_semantic_records(
     ids: list[int],
     enriched_lookup: dict[int, dict[str, Any]],
     title_lookup: dict[int, str] | None = None,
+    embedding_fields: list[str] | tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    selected_fields = normalize_embedding_fields(embedding_fields)
     for abstract_id in ids:
         abstract = enriched_lookup.get(abstract_id, {"id": abstract_id})
         record = dict(abstract)
@@ -1829,7 +1853,7 @@ def align_semantic_records(
         )
         record["cluster_document"] = build_embedding_text(
             record,
-            DEFAULT_EMBEDDING_FIELDS,
+            selected_fields,
             title_lookup=title_lookup,
         )
         records.append(record)
@@ -1840,8 +1864,14 @@ def align_cluster_records(
     ids: list[int],
     enriched_lookup: dict[int, dict[str, Any]],
     title_lookup: dict[int, str] | None = None,
+    embedding_fields: list[str] | tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
-    return align_semantic_records(ids, enriched_lookup, title_lookup=title_lookup)
+    return align_semantic_records(
+        ids,
+        enriched_lookup,
+        title_lookup=title_lookup,
+        embedding_fields=embedding_fields,
+    )
 
 
 def build_knn_graph(ids: list[int], matrix: Any, num_neighbors: int = 50) -> Any:
@@ -2541,9 +2571,15 @@ def cluster_benchmark_main(argv: list[str] | None = None) -> int:
         pca_components=args.pca_components,
         random_state=args.random_state,
     )
+    embedding_fields = normalize_embedding_fields(bundle["source_metadata"].get("embedding_fields"))
     title_lookup = load_title_lookup(Path(args.title_input))
     enriched_lookup = load_enriched_lookup(Path(args.input))
-    records = align_cluster_records(bundle["ids"], enriched_lookup, title_lookup=title_lookup)
+    records = align_cluster_records(
+        bundle["ids"],
+        enriched_lookup,
+        title_lookup=title_lookup,
+        embedding_fields=embedding_fields,
+    )
     methods = [str(method).strip().lower() for method in args.methods if str(method).strip()]
     k_values = list(range(int(args.k_min), int(args.k_max) + 1))
     benchmark = run_clustering_benchmark(
@@ -2611,9 +2647,15 @@ def build_semantic_analysis_parser() -> argparse.ArgumentParser:
 def semantic_analysis_main(argv: list[str] | None = None) -> int:
     args = build_semantic_analysis_parser().parse_args(argv)
     bundle = load_embedding_bundle(Path(args.embeddings_dir))
+    embedding_fields = normalize_embedding_fields(bundle["source_metadata"].get("embedding_fields"))
     title_lookup = load_title_lookup(Path(args.title_input))
     enriched_lookup = load_enriched_lookup(Path(args.input))
-    records = align_semantic_records(bundle["ids"], enriched_lookup, title_lookup=title_lookup)
+    records = align_semantic_records(
+        bundle["ids"],
+        enriched_lookup,
+        title_lookup=title_lookup,
+        embedding_fields=embedding_fields,
+    )
     graph = build_knn_graph(bundle["ids"], bundle["matrix"], num_neighbors=args.num_neighbors)
     if args.resolution is not None:
         community_result = detect_semantic_communities_at_resolution(graph, args.resolution)

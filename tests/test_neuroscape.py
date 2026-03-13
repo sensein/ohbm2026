@@ -7,6 +7,7 @@ from ohbm2026.neuroscape import (
     DEFAULT_EMBEDDING_FIELDS,
     align_semantic_records,
     build_embedding_output_name,
+    build_claim_embedding_text,
     build_distinct_color_map,
     build_hf_parser,
     build_openai_parser,
@@ -91,6 +92,50 @@ class NeuroScapeHelpersTest(unittest.TestCase):
         text = build_embedding_text(abstract, ["discussion"])
 
         self.assertEqual(text, "Discussion:\nDiscussion")
+
+    def test_build_claim_embedding_text_formats_claims(self) -> None:
+        abstract = {
+            "claim_extraction": {
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "claim_type": "EXPLICIT",
+                        "claim": "Memory encoding recruits the hippocampus.",
+                    },
+                    {
+                        "claim_id": "C2",
+                        "claim_type": "IMPLICIT",
+                        "claim": "This pattern may generalize to retrieval.",
+                    },
+                ]
+            }
+        }
+
+        text = build_claim_embedding_text(abstract)
+
+        self.assertEqual(
+            text,
+            "- Memory encoding recruits the hippocampus.\n"
+            "- This pattern may generalize to retrieval.",
+        )
+
+    def test_build_embedding_text_supports_claims_field(self) -> None:
+        abstract = {
+            "id": 1,
+            "claim_extraction": {
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "claim_type": "EXPLICIT",
+                        "claim": "Stimulus timing improved decoding accuracy.",
+                    }
+                ]
+            },
+        }
+
+        text = build_embedding_text(abstract, ["claims"])
+
+        self.assertEqual(text, "Claims:\n- Stimulus timing improved decoding accuracy.")
 
     def test_build_embedding_texts_preserves_order(self) -> None:
         abstracts = [
@@ -415,6 +460,32 @@ class NeuroScapeHelpersTest(unittest.TestCase):
 
         self.assertEqual(records[0]["title"], "Example title")
         self.assertIn("Introduction:\nIntro", records[0]["cluster_document"])
+
+    def test_align_semantic_records_uses_requested_embedding_fields(self) -> None:
+        records = align_semantic_records(
+            [1],
+            {
+                1: {
+                    "id": 1,
+                    "accepted_for": "Poster",
+                    "title": "Example title",
+                    "introduction_markdown": "Intro",
+                    "claim_extraction": {
+                        "claims": [
+                            {
+                                "claim_id": "C1",
+                                "claim_type": "EXPLICIT",
+                                "claim": "Neural responses tracked sentence difficulty.",
+                            }
+                        ]
+                    },
+                }
+            },
+            embedding_fields=["claims"],
+        )
+
+        self.assertIn("Claims:\n- Neural responses tracked sentence difficulty.", records[0]["cluster_document"])
+        self.assertNotIn("Introduction:\nIntro", records[0]["cluster_document"])
 
     def test_load_annotation_lookup_merges_raw_and_figure_keywords(self) -> None:
         import json
@@ -992,6 +1063,7 @@ class NeuroScapeHelpersTest(unittest.TestCase):
                         "ids": [1, 2, 3, 4, 5, 6],
                         "metadata": [{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}, {"id": 5}, {"id": 6}],
                         "embedding_name": "bundle",
+                        "embedding_fields": ["claims"],
                     }
                 ),
                 encoding="utf-8",
@@ -1000,12 +1072,36 @@ class NeuroScapeHelpersTest(unittest.TestCase):
                 json.dumps(
                     {
                         "abstracts": [
-                            {"id": 1, "accepted_for": "Poster", "methods_markdown": "memory fmri"},
-                            {"id": 2, "accepted_for": "Poster", "methods_markdown": "memory fmri"},
-                            {"id": 3, "accepted_for": "Poster", "methods_markdown": "memory fmri"},
-                            {"id": 4, "accepted_for": "Oral", "methods_markdown": "vision eeg"},
-                            {"id": 5, "accepted_for": "Oral", "methods_markdown": "vision eeg"},
-                            {"id": 6, "accepted_for": "Oral", "methods_markdown": "vision eeg"},
+                            {
+                                "id": 1,
+                                "accepted_for": "Poster",
+                                "claim_extraction": {"claims": [{"claim_id": "C1", "claim_type": "EXPLICIT", "claim": "memory fmri hippocampus"}]},
+                            },
+                            {
+                                "id": 2,
+                                "accepted_for": "Poster",
+                                "claim_extraction": {"claims": [{"claim_id": "C1", "claim_type": "EXPLICIT", "claim": "memory fmri encoding"}]},
+                            },
+                            {
+                                "id": 3,
+                                "accepted_for": "Poster",
+                                "claim_extraction": {"claims": [{"claim_id": "C1", "claim_type": "EXPLICIT", "claim": "memory fmri recall"}]},
+                            },
+                            {
+                                "id": 4,
+                                "accepted_for": "Oral",
+                                "claim_extraction": {"claims": [{"claim_id": "C1", "claim_type": "EXPLICIT", "claim": "vision eeg cortex"}]},
+                            },
+                            {
+                                "id": 5,
+                                "accepted_for": "Oral",
+                                "claim_extraction": {"claims": [{"claim_id": "C1", "claim_type": "EXPLICIT", "claim": "vision eeg attention"}]},
+                            },
+                            {
+                                "id": 6,
+                                "accepted_for": "Oral",
+                                "claim_extraction": {"claims": [{"claim_id": "C1", "claim_type": "EXPLICIT", "claim": "vision eeg perception"}]},
+                            },
                         ]
                     }
                 ),
@@ -1057,6 +1153,10 @@ class NeuroScapeHelpersTest(unittest.TestCase):
             self.assertTrue((output_dir / "cluster_summaries.json").exists())
             benchmark = json.loads((output_dir / "benchmark.json").read_text(encoding="utf-8"))
             self.assertEqual(len(benchmark["results"]), 4)
+            summaries = json.loads((output_dir / "cluster_summaries.json").read_text(encoding="utf-8"))
+            cluster_text = json.dumps(summaries)
+            self.assertIn("memory", cluster_text)
+            self.assertIn("vision", cluster_text)
             fake_print.assert_called_once()
 
     def test_umap_main_writes_outputs(self) -> None:
