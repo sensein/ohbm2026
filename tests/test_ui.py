@@ -343,7 +343,7 @@ class UIHelpersTest(unittest.TestCase):
         )
         self.assertEqual(
             payload["facets"]["groups"][:5],
-            ["accepted_for", "primary_topic", "secondary_topic", "keywords", "methods"],
+            ["accepted_for", "semantic_25", "voyage_spectral_31", "claims_28", "primary_topic"],
         )
         self.assertIn("secondary_topic", payload["facets"]["groups"])
         self.assertIn("voyage_spectral_31", payload["facets"]["groups"])

@@ -703,7 +703,11 @@ def build_ui_payload(
         partition = load_cluster_partition(spec.source_dir, spec.key)
         partition["metadata"] = build_cluster_layer_metadata(spec, partition)
         partitions[spec.key] = partition
-    facet_groups = tuple(BASE_FACET_GROUPS) + tuple(spec.key for spec in cluster_layer_specs)
+    facet_groups = (
+        "accepted_for",
+        *(spec.key for spec in cluster_layer_specs),
+        *(group for group in BASE_FACET_GROUPS if group != "accepted_for"),
+    )
     facet_labels = {
         **BASE_FACET_LABELS,
         **{spec.key: spec.facet_label for spec in cluster_layer_specs},
