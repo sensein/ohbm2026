@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
@@ -23,6 +24,7 @@ DEFAULT_NEIGHBORS_INPUT = "data/embeddings/voyage_stage2_published/neighbors.jso
 DEFAULT_CLUSTER_15_DIR = "data/embeddings/voyage_stage2_published/semantic_analysis_15-communities"
 DEFAULT_CLUSTER_21_DIR = "data/embeddings/voyage_stage2_published/semantic_analysis_21-communities"
 DEFAULT_CLUSTER_25_DIR = "data/embeddings/voyage_stage2_published/clustering_benchmark"
+DEFAULT_CLUSTER_SPECTRAL_DIR = "data/embeddings/voyage_stage2_published/clustering_benchmark_spectral"
 DEFAULT_CLAIMS_CLUSTER_DIR = "data/embeddings/minilm_claims/clustering_benchmark_25_30"
 DEFAULT_SEMANTIC_VECTORS_INPUT = "data/embeddings/minilm_stage1/vectors.npy"
 DEFAULT_SEMANTIC_METADATA_INPUT = "data/embeddings/minilm_stage1/metadata.json"
@@ -40,10 +42,8 @@ SECTION_FIELDS = (
     ("acknowledgement_markdown", "Acknowledgement"),
     ("additional_content_questions_markdown", "Additional Content"),
 )
-FACET_GROUPS = (
+BASE_FACET_GROUPS = (
     "accepted_for",
-    "semantic_25",
-    "claims_28",
     "primary_topic",
     "secondary_topic",
     "keywords",
@@ -57,6 +57,21 @@ FACET_GROUPS = (
     "brain_regions",
     "brain_networks",
 )
+BASE_FACET_LABELS = {
+    "accepted_for": "Accepted for",
+    "primary_topic": "Primary topic",
+    "secondary_topic": "Subcategory",
+    "keywords": "Keywords",
+    "methods": "Methods",
+    "study_type": "Study type",
+    "population": "Population",
+    "field_strength": "Field strength",
+    "processing_packages": "Processing packages",
+    "species": "Species",
+    "recording_technology": "Recording technology",
+    "brain_regions": "Brain regions",
+    "brain_networks": "Brain networks",
+}
 QUESTION_MAP = {
     "methods": "Please indicate which methods were used in your research:",
     "study_type": 'Please indicate below if your study was a "resting state" or "task-activation” study.',
@@ -125,6 +140,16 @@ BRAIN_NETWORK_PATTERNS = {
 
 class UIBuildError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class ClusterLayerSpec:
+    key: str
+    label: str
+    toggle_label: str
+    facet_label: str
+    source_dir: Path
+    description: str
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -392,6 +417,79 @@ def load_cluster_partition(path: Path, key: str) -> dict[str, Any]:
     }
 
 
+def build_cluster_layer_specs(
+    cluster_15_dir: Path,
+    cluster_25_dir: Path,
+    spectral_cluster_dir: Path,
+    claims_cluster_dir: Path,
+) -> list[ClusterLayerSpec]:
+    return [
+        ClusterLayerSpec(
+            key="voyage_graph_15",
+            label="Voyage semantic communities",
+            toggle_label="Voyage 15-community graph",
+            facet_label="Voyage semantic community",
+            source_dir=cluster_15_dir,
+            description="Graph community detection on voyage stage 2 published embeddings.",
+        ),
+        ClusterLayerSpec(
+            key="semantic_25",
+            label="Voyage semantic clusters",
+            toggle_label="Voyage 25-cluster benchmark",
+            facet_label="Voyage semantic cluster",
+            source_dir=cluster_25_dir,
+            description="Best partition benchmark on voyage stage 2 published embeddings.",
+        ),
+        ClusterLayerSpec(
+            key="voyage_spectral_31",
+            label="Voyage spectral clusters",
+            toggle_label="Voyage 31-cluster spectral",
+            facet_label="Voyage spectral cluster",
+            source_dir=spectral_cluster_dir,
+            description="Nearest-neighbor spectral clustering on voyage stage 2 published embeddings.",
+        ),
+        ClusterLayerSpec(
+            key="claims_28",
+            label="Claims semantic clusters",
+            toggle_label="Claims 28-cluster benchmark",
+            facet_label="Claims semantic cluster",
+            source_dir=claims_cluster_dir,
+            description="Claim-space clustering on MiniLM claims embeddings.",
+        ),
+    ]
+
+
+def build_cluster_layer_metadata(spec: ClusterLayerSpec, partition: dict[str, Any]) -> dict[str, Any]:
+    cluster_count = len(partition["clusters"])
+    embedding_name = spec.source_dir.parent.name
+    metadata: dict[str, Any] = {
+        "key": spec.key,
+        "label": spec.label,
+        "toggle_label": spec.toggle_label,
+        "facet_label": spec.facet_label,
+        "description": spec.description,
+        "source_dir": str(spec.source_dir),
+        "embedding_name": embedding_name,
+        "cluster_count": cluster_count,
+        "cluster_summary_count": cluster_count,
+        "method": None,
+    }
+    best_run_path = spec.source_dir / "best_run.json"
+    if best_run_path.exists():
+        best_run_payload = load_json(best_run_path)
+        best_run = best_run_payload.get("result") or best_run_payload
+        metadata["method"] = best_run.get("method")
+        metadata["best_k"] = best_run.get("cluster_count") or best_run.get("requested_cluster_count") or best_run.get("k")
+        metadata["silhouette_score"] = best_run.get("silhouette_score")
+    community_path = spec.source_dir / "community_detection.json"
+    if community_path.exists():
+        community = load_json(community_path)
+        metadata["method"] = metadata["method"] or "graph-community"
+        metadata["best_resolution"] = community.get("best_resolution")
+        metadata["best_modularity"] = community.get("best_modularity")
+    return metadata
+
+
 def normalize_cluster_value(cluster_id: int | None, partition: dict[str, Any]) -> str:
     if cluster_id is None:
         return "Unknown"
@@ -475,12 +573,10 @@ def build_metadata(raw_abstract: dict[str, Any], enriched_abstract: dict[str, An
         "processing_packages": parse_string_list_value(questions.get(QUESTION_MAP["processing_packages"])),
     }
     abstract_id = int(raw_abstract["id"])
-    metadata["semantic_25"] = [
-        normalize_cluster_value(partitions["semantic_25"]["assignments"].get(abstract_id), partitions["semantic_25"])
-    ]
-    metadata["claims_28"] = [
-        normalize_cluster_value(partitions["claims_28"]["assignments"].get(abstract_id), partitions["claims_28"])
-    ]
+    for layer_key, partition in partitions.items():
+        metadata[layer_key] = [
+            normalize_cluster_value(partition["assignments"].get(abstract_id), partition)
+        ]
     return metadata
 
 
@@ -565,11 +661,11 @@ def build_sections(enriched_abstract: dict[str, Any]) -> list[dict[str, str]]:
     return sections
 
 
-def compute_facets(search_records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    counts: dict[str, Counter[str]] = {group: Counter() for group in FACET_GROUPS}
+def compute_facets(search_records: list[dict[str, Any]], facet_groups: tuple[str, ...]) -> dict[str, list[dict[str, Any]]]:
+    counts: dict[str, Counter[str]] = {group: Counter() for group in facet_groups}
     for record in search_records:
         metadata = record["facets"]
-        for group in FACET_GROUPS:
+        for group in facet_groups:
             values = metadata.get(group) or []
             for value in values:
                 counts[group][str(value)] += 1
@@ -591,6 +687,7 @@ def build_ui_payload(
     cluster_15_dir: Path,
     cluster_21_dir: Path,
     cluster_25_dir: Path,
+    spectral_cluster_dir: Path,
     claims_cluster_dir: Path,
     semantic_vectors_input: Path,
     semantic_metadata_input: Path,
@@ -603,9 +700,21 @@ def build_ui_payload(
     image_lookup = load_image_analysis_lookup(image_analyses_input)
     reference_lookup = load_reference_lookup(references_input)
     neighbors = load_neighbors(neighbors_input, top_neighbors)
-    partitions = {
-        "semantic_25": load_cluster_partition(cluster_25_dir, "semantic_25"),
-        "claims_28": load_cluster_partition(claims_cluster_dir, "claims_28"),
+    cluster_layer_specs = build_cluster_layer_specs(
+        cluster_15_dir=cluster_15_dir,
+        cluster_25_dir=cluster_25_dir,
+        spectral_cluster_dir=spectral_cluster_dir,
+        claims_cluster_dir=claims_cluster_dir,
+    )
+    partitions: dict[str, dict[str, Any]] = {}
+    for spec in cluster_layer_specs:
+        partition = load_cluster_partition(spec.source_dir, spec.key)
+        partition["metadata"] = build_cluster_layer_metadata(spec, partition)
+        partitions[spec.key] = partition
+    facet_groups = tuple(BASE_FACET_GROUPS) + tuple(spec.key for spec in cluster_layer_specs)
+    facet_labels = {
+        **BASE_FACET_LABELS,
+        **{spec.key: spec.facet_label for spec in cluster_layer_specs},
     }
     umap_projection = load_umap_projection(umap_input)
 
@@ -633,8 +742,6 @@ def build_ui_payload(
             "figure_keywords": metadata["figure_keywords"],
             "facets": {
                 "accepted_for": [metadata["accepted_for"]],
-                "semantic_25": metadata["semantic_25"],
-                "claims_28": metadata["claims_28"],
                 "primary_topic": [metadata["primary_topic"]],
                 "secondary_topic": metadata["secondary_topic_facets"],
                 "keywords": metadata["keywords"],
@@ -647,6 +754,7 @@ def build_ui_payload(
                 "recording_technology": domain_facets["recording_technology"],
                 "brain_regions": domain_facets["brain_regions"],
                 "brain_networks": domain_facets["brain_networks"],
+                **{layer_key: metadata[layer_key] for layer_key in partitions},
             },
             "search_blob": build_search_blob(raw_abstract, enriched_abstract, metadata),
         }
@@ -682,13 +790,14 @@ def build_ui_payload(
         relations[str(abstract_id)] = {
             "neighbors": neighbors.get(abstract_id, []),
             "clusters": {
-                "semantic_25": partitions["semantic_25"]["assignments"].get(abstract_id),
-                "claims_28": partitions["claims_28"]["assignments"].get(abstract_id),
+                layer_key: partition["assignments"].get(abstract_id)
+                for layer_key, partition in partitions.items()
             },
         }
 
     clusters_payload = {
         key: {
+            "metadata": partition["metadata"],
             "clusters": sorted(partition["clusters"].values(), key=lambda cluster: cluster["cluster_id"]),
         }
         for key, partition in partitions.items()
@@ -719,8 +828,9 @@ def build_ui_payload(
             "abstracts": detail_records,
         },
         "facets": {
-            "groups": list(FACET_GROUPS),
-            "facets": compute_facets(search_records),
+            "groups": list(facet_groups),
+            "labels": facet_labels,
+            "facets": compute_facets(search_records, facet_groups),
         },
         "relations": {
             "abstracts": relations,
@@ -736,9 +846,10 @@ def build_ui_payload(
             "abstract_count": len(search_records),
             "neighbors_source": str(neighbors_input),
             "partitions": {
-                "semantic_25": str(cluster_25_dir),
-                "claims_28": str(claims_cluster_dir),
+                key: partition["metadata"]["source_dir"]
+                for key, partition in partitions.items()
             },
+            "cluster_layers": [partition["metadata"] for partition in partitions.values()],
             "files": files,
             "semantic_search": semantic_search["metadata"] if semantic_search else None,
             "projection": {
@@ -789,6 +900,7 @@ def build_export_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cluster-15-dir", default=DEFAULT_CLUSTER_15_DIR)
     parser.add_argument("--cluster-21-dir", default=DEFAULT_CLUSTER_21_DIR)
     parser.add_argument("--cluster-25-dir", default=DEFAULT_CLUSTER_25_DIR)
+    parser.add_argument("--spectral-cluster-dir", default=DEFAULT_CLUSTER_SPECTRAL_DIR)
     parser.add_argument("--claims-cluster-dir", default=DEFAULT_CLAIMS_CLUSTER_DIR)
     parser.add_argument("--semantic-vectors-input", default=DEFAULT_SEMANTIC_VECTORS_INPUT)
     parser.add_argument("--semantic-metadata-input", default=DEFAULT_SEMANTIC_METADATA_INPUT)
@@ -809,6 +921,7 @@ def export_ui_main(argv: list[str] | None = None) -> int:
         cluster_15_dir=Path(args.cluster_15_dir),
         cluster_21_dir=Path(args.cluster_21_dir),
         cluster_25_dir=Path(args.cluster_25_dir),
+        spectral_cluster_dir=Path(args.spectral_cluster_dir),
         claims_cluster_dir=Path(args.claims_cluster_dir),
         semantic_vectors_input=Path(args.semantic_vectors_input),
         semantic_metadata_input=Path(args.semantic_metadata_input),
@@ -839,6 +952,7 @@ def build_ui_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cluster-15-dir", default=DEFAULT_CLUSTER_15_DIR)
     parser.add_argument("--cluster-21-dir", default=DEFAULT_CLUSTER_21_DIR)
     parser.add_argument("--cluster-25-dir", default=DEFAULT_CLUSTER_25_DIR)
+    parser.add_argument("--spectral-cluster-dir", default=DEFAULT_CLUSTER_SPECTRAL_DIR)
     parser.add_argument("--claims-cluster-dir", default=DEFAULT_CLAIMS_CLUSTER_DIR)
     parser.add_argument("--semantic-vectors-input", default=DEFAULT_SEMANTIC_VECTORS_INPUT)
     parser.add_argument("--semantic-metadata-input", default=DEFAULT_SEMANTIC_METADATA_INPUT)
@@ -862,6 +976,7 @@ def build_ui_main(argv: list[str] | None = None) -> int:
         cluster_15_dir=Path(args.cluster_15_dir),
         cluster_21_dir=Path(args.cluster_21_dir),
         cluster_25_dir=Path(args.cluster_25_dir),
+        spectral_cluster_dir=Path(args.spectral_cluster_dir),
         claims_cluster_dir=Path(args.claims_cluster_dir),
         semantic_vectors_input=Path(args.semantic_vectors_input),
         semantic_metadata_input=Path(args.semantic_metadata_input),

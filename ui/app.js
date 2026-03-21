@@ -8,10 +8,8 @@ const DATA_FILES = {
   projection: "./data/projection.umap.json",
 };
 
-const FACET_LABELS = {
+const BASE_FACET_LABELS = {
   accepted_for: "Accepted for",
-  semantic_25: "Semantic cluster",
-  claims_28: "Claims cluster",
   primary_topic: "Primary topic",
   secondary_topic: "Subcategory",
   keywords: "Keywords",
@@ -24,11 +22,6 @@ const FACET_LABELS = {
   recording_technology: "Recording technology",
   brain_regions: "Brain regions",
   brain_networks: "Brain networks",
-};
-
-const CLUSTER_LAYER_LABELS = {
-  semantic_25: "25-cluster benchmark",
-  claims_28: "Claims 28-cluster benchmark",
 };
 
 const CLUSTER_COLORS = [
@@ -104,6 +97,45 @@ let searchRenderTimer = null;
 let semanticBundlePromise = null;
 let semanticExtractorPromise = null;
 
+function clusterLayerConfigs() {
+  const configured = store?.manifest?.cluster_layers;
+  if (Array.isArray(configured) && configured.length > 0) {
+    return configured;
+  }
+  return [
+    { key: "semantic_25", label: "Voyage semantic clusters", toggle_label: "Voyage 25-cluster benchmark", facet_label: "Voyage semantic cluster" },
+    { key: "claims_28", label: "Claims semantic clusters", toggle_label: "Claims 28-cluster benchmark", facet_label: "Claims semantic cluster" },
+  ];
+}
+
+function clusterLayerMeta(layerKey) {
+  return clusterLayerConfigs().find((layer) => layer.key === layerKey) || null;
+}
+
+function clusterLayerLabel(layerKey) {
+  return clusterLayerMeta(layerKey)?.toggle_label || clusterLayerMeta(layerKey)?.label || layerKey;
+}
+
+function facetLabel(group) {
+  return store?.facets?.labels?.[group] || BASE_FACET_LABELS[group] || group;
+}
+
+function initializeDynamicState() {
+  const facetGroups = store?.facets?.groups || [];
+  const nextFacets = {};
+  for (const group of facetGroups) {
+    nextFacets[group] = state.facets[group] || new Set();
+    if (nextFacets[group].size > 0) {
+      state.expandedFacets.add(group);
+    }
+  }
+  state.facets = nextFacets;
+  const availableClusterKeys = clusterLayerConfigs().map((layer) => layer.key);
+  if (!availableClusterKeys.includes(state.clusterLayer)) {
+    state.clusterLayer = availableClusterKeys[0] || DEFAULT_CLUSTER_LAYER;
+  }
+}
+
 function tokenize(text) {
   return String(text || "")
     .toLowerCase()
@@ -141,13 +173,23 @@ function loadUrlState() {
   const params = new URLSearchParams(window.location.search);
   state.query = params.get("q") || "";
   state.selectedId = params.get("abstract");
-  const requestedClusterLayer = params.get("clusterView");
-  state.clusterLayer = CLUSTER_LAYER_LABELS[requestedClusterLayer] ? requestedClusterLayer : DEFAULT_CLUSTER_LAYER;
+  state.clusterLayer = params.get("clusterView") || DEFAULT_CLUSTER_LAYER;
   state.searchMode = params.get("mode") || "lexical";
   state.semanticThreshold = Number(params.get("semanticThreshold") || "0") || 0;
-  for (const group of Object.keys(FACET_LABELS)) {
+  for (const group of Object.keys(BASE_FACET_LABELS)) {
     const value = params.get(group);
     state.facets[group] = new Set(value ? value.split("|").filter(Boolean) : []);
+  }
+}
+
+function applyFacetUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  for (const group of store?.facets?.groups || []) {
+    const value = params.get(group);
+    state.facets[group] = new Set(value ? value.split("|").filter(Boolean) : []);
+    if (state.facets[group].size > 0) {
+      state.expandedFacets.add(group);
+    }
   }
 }
 
@@ -551,7 +593,7 @@ function toggleFacet(group, value) {
 }
 
 function resetFacets() {
-  for (const group of Object.keys(FACET_LABELS)) {
+  for (const group of Object.keys(state.facets)) {
     state.facets[group].clear();
   }
   syncUrlState();
@@ -627,7 +669,7 @@ function addToggleAction(buttonRow, label, onClick) {
 function renderClusterToggle() {
   const root = document.getElementById("cluster-toggle");
   root.replaceChildren();
-  const clusterLayers = Object.entries(CLUSTER_LAYER_LABELS);
+  const clusterLayers = clusterLayerConfigs().map((layer) => [layer.key, layer.toggle_label || layer.label || layer.key]);
   root.classList.toggle("hidden", clusterLayers.length <= 1);
   for (const [key, label] of clusterLayers) {
     const button = document.createElement("button");
@@ -719,7 +761,7 @@ function renderActiveFilters() {
   for (const [group, values] of Object.entries(state.facets)) {
     for (const value of values) {
       chips.push(
-        addFacetChip(`${FACET_LABELS[group]}: ${value}`, () => {
+        addFacetChip(`${facetLabel(group)}: ${value}`, () => {
           toggleFacet(group, value);
         })
       );
@@ -774,7 +816,7 @@ function renderProjection() {
   meta.textContent =
     state.projectionSelection.size > 0
       ? `${state.projectionSelection.size} abstracts selected from the map`
-      : `Click a point to open an abstract. Colored by ${CLUSTER_LAYER_LABELS[state.clusterLayer].toLowerCase()}.`;
+      : `Click a point to open an abstract. Colored by ${clusterLayerLabel(state.clusterLayer).toLowerCase()}.`;
 
   const traces = [{
     type: "scattergl",
@@ -914,7 +956,7 @@ function renderFacets() {
     headingButton.addEventListener("click", () => toggleFacetGroup(group));
     const headingLabel = document.createElement("span");
     headingLabel.className = "facet-group__label";
-    headingLabel.textContent = FACET_LABELS[group] || group;
+    headingLabel.textContent = facetLabel(group);
     const headingMeta = document.createElement("span");
     headingMeta.className = "facet-group__meta";
     headingMeta.textContent = state.facets[group].size > 0 ? `${state.facets[group].size} selected` : `${options.length} matching`;
@@ -1197,9 +1239,10 @@ function renderDetail() {
       continue;
     }
     semanticContextCount += 1;
-    const semanticDisclosure = createDisclosureShell(CLUSTER_LAYER_LABELS[layerKey] || layerKey, {
+    const layerMeta = clusterLayerMeta(layerKey);
+    const semanticDisclosure = createDisclosureShell(layerMeta?.label || clusterLayerLabel(layerKey), {
       open: false,
-      meta: `Cluster ${cluster.cluster_id}`,
+      meta: [layerMeta?.embedding_name, layerMeta?.method, `Cluster ${cluster.cluster_id}`].filter(Boolean).join(" · "),
     });
     const card = document.createElement("div");
     card.className = "detail-card";
@@ -1441,7 +1484,7 @@ function attachEvents() {
 
 async function main() {
   loadUrlState();
-  Object.keys(FACET_LABELS).forEach((group) => {
+  Object.keys(BASE_FACET_LABELS).forEach((group) => {
     state.facets[group] = state.facets[group] || new Set();
     if (state.facets[group].size > 0) {
       state.expandedFacets.add(group);
@@ -1449,6 +1492,8 @@ async function main() {
   });
   attachEvents();
   store = await loadStore();
+  initializeDynamicState();
+  applyFacetUrlState();
   state.semantic.status = SEARCH_MODE_DESCRIPTIONS[state.searchMode] || "";
   render();
   await refreshSemanticQuery(state.query);

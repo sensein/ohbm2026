@@ -62,6 +62,7 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(args.top_neighbors, 8)
         self.assertEqual(args.image_analyses_input, "data/image_analyses_openai.json")
         self.assertEqual(args.cluster_25_dir, "data/embeddings/voyage_stage2_published/clustering_benchmark")
+        self.assertEqual(args.spectral_cluster_dir, "data/embeddings/voyage_stage2_published/clustering_benchmark_spectral")
         self.assertEqual(args.claims_cluster_dir, "data/embeddings/minilm_claims/clustering_benchmark_25_30")
         self.assertEqual(args.semantic_vectors_input, "data/embeddings/minilm_stage1/vectors.npy")
         self.assertEqual(args.umap_input, "data/embeddings/minilm_stage1/umap_title-introduction-methods-results-conclusion.json")
@@ -80,10 +81,12 @@ class UIHelpersTest(unittest.TestCase):
             cluster_15_dir = root / "semantic_analysis_15"
             cluster_21_dir = root / "semantic_analysis_21"
             cluster_25_dir = root / "clustering_benchmark"
+            spectral_cluster_dir = root / "clustering_benchmark_spectral"
             claims_cluster_dir = root / "claims_clustering_benchmark"
             cluster_15_dir.mkdir()
             cluster_21_dir.mkdir()
             cluster_25_dir.mkdir()
+            spectral_cluster_dir.mkdir()
             claims_cluster_dir.mkdir()
 
             raw_input.write_text(
@@ -272,15 +275,26 @@ class UIHelpersTest(unittest.TestCase):
                 encoding="utf-8",
             )
             for directory, cluster_id, label in (
-                (cluster_15_dir, 3, "unused"),
+                (cluster_15_dir, 3, "graph, memory, aging"),
                 (cluster_21_dir, 7, "unused"),
                 (cluster_25_dir, 11, "memory, aging, hippocampus"),
+                (spectral_cluster_dir, 31, "spectral, memory, fmri"),
                 (claims_cluster_dir, 28, "pd, disease, patients"),
             ):
                 (directory / "cluster_assignments.json").write_text(
                     json.dumps({"assignments": {"1": cluster_id}}),
                     encoding="utf-8",
                 )
+                if "semantic_analysis" in directory.name:
+                    (directory / "community_detection.json").write_text(
+                        json.dumps({"best_resolution": 2.5, "best_modularity": 0.41}),
+                        encoding="utf-8",
+                    )
+                else:
+                    (directory / "best_run.json").write_text(
+                        json.dumps({"method": "kmeans", "cluster_count": cluster_id, "silhouette_score": 0.1}),
+                        encoding="utf-8",
+                    )
                 (directory / "cluster_summaries.json").write_text(
                     json.dumps(
                         {
@@ -308,6 +322,7 @@ class UIHelpersTest(unittest.TestCase):
                 cluster_15_dir=cluster_15_dir,
                 cluster_21_dir=cluster_21_dir,
                 cluster_25_dir=cluster_25_dir,
+                spectral_cluster_dir=spectral_cluster_dir,
                 claims_cluster_dir=claims_cluster_dir,
                 semantic_vectors_input=semantic_vectors_input,
                 semantic_metadata_input=semantic_metadata_input,
@@ -319,7 +334,9 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(payload["search"]["abstracts"][0]["title"], "Memory fMRI in aging")
         self.assertEqual(payload["search"]["abstracts"][0]["primary_topic"], "Lifespan Development")
         self.assertEqual(payload["search"]["abstracts"][0]["secondary_topic"], "Aging")
+        self.assertEqual(payload["search"]["abstracts"][0]["facets"]["voyage_graph_15"], ["3: graph, memory, aging"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["semantic_25"], ["11: memory, aging, hippocampus"])
+        self.assertEqual(payload["search"]["abstracts"][0]["facets"]["voyage_spectral_31"], ["31: spectral, memory, fmri"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["claims_28"], ["28: pd, disease, patients"])
         self.assertEqual(
             payload["search"]["abstracts"][0]["facets"]["secondary_topic"],
@@ -327,11 +344,12 @@ class UIHelpersTest(unittest.TestCase):
         )
         self.assertEqual(
             payload["facets"]["groups"][:5],
-            ["accepted_for", "semantic_25", "claims_28", "primary_topic", "secondary_topic"],
+            ["accepted_for", "primary_topic", "secondary_topic", "keywords", "methods"],
         )
         self.assertIn("secondary_topic", payload["facets"]["groups"])
-        self.assertNotIn("semantic_15", payload["search"]["abstracts"][0]["facets"])
-        self.assertNotIn("semantic_21", payload["search"]["abstracts"][0]["facets"])
+        self.assertIn("voyage_graph_15", payload["facets"]["groups"])
+        self.assertIn("voyage_spectral_31", payload["facets"]["groups"])
+        self.assertIn("claims_28", payload["facets"]["groups"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["species"], ["Human"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["brain_regions"], ["Hippocampus"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["brain_networks"], ["Default Mode Network"])
@@ -346,8 +364,20 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(payload["details"]["abstracts"]["1"]["claim_extraction"]["claim_count"], 1)
         self.assertEqual(payload["details"]["abstracts"]["1"]["reference_summary"]["matched_count"], 1)
         self.assertEqual(payload["relations"]["abstracts"]["1"]["neighbors"][0]["id"], 2)
-        self.assertEqual(payload["relations"]["abstracts"]["1"]["clusters"], {"semantic_25": 11, "claims_28": 28})
-        self.assertEqual(payload["manifest"]["partitions"], {"semantic_25": str(cluster_25_dir), "claims_28": str(claims_cluster_dir)})
+        self.assertEqual(
+            payload["relations"]["abstracts"]["1"]["clusters"],
+            {"voyage_graph_15": 3, "semantic_25": 11, "voyage_spectral_31": 31, "claims_28": 28},
+        )
+        self.assertEqual(
+            payload["manifest"]["partitions"],
+            {
+                "voyage_graph_15": str(cluster_15_dir),
+                "semantic_25": str(cluster_25_dir),
+                "voyage_spectral_31": str(spectral_cluster_dir),
+                "claims_28": str(claims_cluster_dir),
+            },
+        )
+        self.assertEqual([layer["key"] for layer in payload["manifest"]["cluster_layers"]], ["voyage_graph_15", "semantic_25", "voyage_spectral_31", "claims_28"])
         self.assertEqual(payload["manifest"]["semantic_search"]["dimension"], 2)
         self.assertEqual(payload["manifest"]["semantic_search"]["browser_model"], "Xenova/all-MiniLM-L6-v2")
         self.assertEqual(payload["projection"]["umap"]["count"], 1)
@@ -373,11 +403,13 @@ class UIHelpersTest(unittest.TestCase):
             cluster_15_dir = root / "semantic_analysis_15"
             cluster_21_dir = root / "semantic_analysis_21"
             cluster_25_dir = root / "clustering_benchmark"
+            spectral_cluster_dir = root / "clustering_benchmark_spectral"
             claims_cluster_dir = root / "claims_clustering_benchmark"
             site_output_dir = root / "site"
             cluster_15_dir.mkdir()
             cluster_21_dir.mkdir()
             cluster_25_dir.mkdir()
+            spectral_cluster_dir.mkdir()
             claims_cluster_dir.mkdir()
 
             raw_input.write_text(
@@ -425,11 +457,21 @@ class UIHelpersTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            for directory in (cluster_15_dir, cluster_21_dir, cluster_25_dir, claims_cluster_dir):
+            for directory in (cluster_15_dir, cluster_21_dir, cluster_25_dir, spectral_cluster_dir, claims_cluster_dir):
                 (directory / "cluster_assignments.json").write_text(
                     json.dumps({"assignments": {"1": 0}}),
                     encoding="utf-8",
                 )
+                if "semantic_analysis" in directory.name:
+                    (directory / "community_detection.json").write_text(
+                        json.dumps({"best_resolution": 2.5, "best_modularity": 0.41}),
+                        encoding="utf-8",
+                    )
+                else:
+                    (directory / "best_run.json").write_text(
+                        json.dumps({"method": "kmeans", "cluster_count": 1, "silhouette_score": 0.1}),
+                        encoding="utf-8",
+                    )
                 (directory / "cluster_summaries.json").write_text(
                     json.dumps(
                         {
@@ -470,6 +512,8 @@ class UIHelpersTest(unittest.TestCase):
                     str(cluster_21_dir),
                     "--cluster-25-dir",
                     str(cluster_25_dir),
+                    "--spectral-cluster-dir",
+                    str(spectral_cluster_dir),
                     "--claims-cluster-dir",
                     str(claims_cluster_dir),
                     "--semantic-vectors-input",
