@@ -1180,6 +1180,8 @@ function renderDetail() {
   const metadataGrid = document.createElement("div");
   metadataGrid.className = "detail-grid";
   const metadataItems = [
+    ["Phenomena", detail.phenomena],
+    ["Theories", detail.theories],
     ["Methods", detail.methods],
     ["Study type", detail.study_type],
     ["Population", detail.population],

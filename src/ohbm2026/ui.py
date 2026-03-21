@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import shutil
@@ -26,6 +27,7 @@ DEFAULT_CLUSTER_21_DIR = "data/embeddings/voyage_stage2_published/semantic_analy
 DEFAULT_CLUSTER_25_DIR = "data/embeddings/voyage_stage2_published/clustering_benchmark"
 DEFAULT_CLUSTER_SPECTRAL_DIR = "data/embeddings/voyage_stage2_published/clustering_benchmark_spectral"
 DEFAULT_CLAIMS_CLUSTER_DIR = "data/embeddings/minilm_claims/clustering_benchmark_25_30"
+DEFAULT_PHENOMENA_THEORIES_INPUT = "data/abstracts_with_phenomena_with_theories_refined.csv"
 DEFAULT_SEMANTIC_VECTORS_INPUT = "data/embeddings/minilm_stage1/vectors.npy"
 DEFAULT_SEMANTIC_METADATA_INPUT = "data/embeddings/minilm_stage1/metadata.json"
 DEFAULT_UMAP_INPUT = "data/embeddings/minilm_stage1/umap_title-introduction-methods-results-conclusion.json"
@@ -44,6 +46,8 @@ SECTION_FIELDS = (
 )
 BASE_FACET_GROUPS = (
     "accepted_for",
+    "phenomena",
+    "theories",
     "primary_topic",
     "secondary_topic",
     "keywords",
@@ -59,6 +63,8 @@ BASE_FACET_GROUPS = (
 )
 BASE_FACET_LABELS = {
     "accepted_for": "Accepted for",
+    "phenomena": "Phenomena",
+    "theories": "Theories",
     "primary_topic": "Primary topic",
     "secondary_topic": "Subcategory",
     "keywords": "Keywords",
@@ -395,6 +401,33 @@ def load_neighbors(path: Path, top_k: int) -> dict[int, list[dict[str, Any]]]:
     }
 
 
+def parse_code_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in str(value).split("|") if part.strip()]
+
+
+def load_phenomena_theories_lookup(path: Path) -> dict[int, dict[str, list[str]]]:
+    if not path.exists():
+        return {}
+    lookup: dict[int, dict[str, list[str]]] = {}
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            raw_id = str(row.get("id") or "").strip()
+            if not raw_id:
+                continue
+            try:
+                abstract_id = int(raw_id)
+            except ValueError:
+                continue
+            lookup[abstract_id] = {
+                "phenomena": parse_code_list(row.get("phenomena")),
+                "theories": parse_code_list(row.get("theories")),
+            }
+    return lookup
+
+
 def load_cluster_partition(path: Path, key: str) -> dict[str, Any]:
     assignments = load_json(path / "cluster_assignments.json").get("assignments") or {}
     clusters = load_json(path / "cluster_summaries.json").get("clusters") or []
@@ -586,6 +619,8 @@ def build_search_blob(raw_abstract: dict[str, Any], enriched_abstract: dict[str,
         " ".join(metadata.get("figure_keywords") or []),
         metadata.get("primary_topic") or "",
         " ".join(metadata.get("secondary_topic_facets") or [metadata.get("secondary_topic") or ""]),
+        " ".join(metadata.get("phenomena") or []),
+        " ".join(metadata.get("theories") or []),
         " ".join(metadata.get("methods") or []),
         " ".join(metadata.get("study_type") or []),
         " ".join(metadata.get("population") or []),
@@ -675,6 +710,7 @@ def build_ui_payload(
     enriched_input: Path,
     references_input: Path,
     image_analyses_input: Path,
+    phenomena_theories_input: Path,
     neighbors_input: Path,
     cluster_15_dir: Path,
     cluster_21_dir: Path,
@@ -691,6 +727,7 @@ def build_ui_payload(
     enriched_lookup = {int(abstract["id"]): abstract for abstract in enriched_abstracts}
     image_lookup = load_image_analysis_lookup(image_analyses_input)
     reference_lookup = load_reference_lookup(references_input)
+    phenomena_theories_lookup = load_phenomena_theories_lookup(phenomena_theories_input)
     neighbors = load_neighbors(neighbors_input, top_neighbors)
     cluster_layer_specs = build_cluster_layer_specs(
         cluster_15_dir=cluster_15_dir,
@@ -706,7 +743,9 @@ def build_ui_payload(
     facet_groups = (
         "accepted_for",
         *(spec.key for spec in cluster_layer_specs),
-        *(group for group in BASE_FACET_GROUPS if group != "accepted_for"),
+        "phenomena",
+        "theories",
+        *(group for group in BASE_FACET_GROUPS if group not in {"accepted_for", "phenomena", "theories"}),
     )
     facet_labels = {
         **BASE_FACET_LABELS,
@@ -726,6 +765,8 @@ def build_ui_payload(
             continue
         title = cleaned_abstract_title(raw_abstract.get("title"))
         metadata = build_metadata(raw_abstract, enriched_abstract, partitions)
+        metadata["phenomena"] = list(phenomena_theories_lookup.get(abstract_id, {}).get("phenomena") or [])
+        metadata["theories"] = list(phenomena_theories_lookup.get(abstract_id, {}).get("theories") or [])
         domain_facets = build_domain_facets(raw_abstract, enriched_abstract, metadata)
         abstract_ids.append(abstract_id)
         search_record = {
@@ -740,6 +781,8 @@ def build_ui_payload(
                 "accepted_for": [metadata["accepted_for"]],
                 "primary_topic": [metadata["primary_topic"]],
                 "secondary_topic": metadata["secondary_topic_facets"],
+                "phenomena": metadata["phenomena"],
+                "theories": metadata["theories"],
                 "keywords": metadata["keywords"],
                 "methods": metadata["methods"],
                 "study_type": metadata["study_type"],
@@ -767,6 +810,8 @@ def build_ui_payload(
             "primary_topic": metadata["primary_topic"],
             "secondary_topic": metadata["secondary_topic"],
             "keywords": metadata["keywords"],
+            "phenomena": metadata["phenomena"],
+            "theories": metadata["theories"],
             "figure_keywords": metadata["figure_keywords"],
             "methods": metadata["methods"],
             "study_type": metadata["study_type"],
@@ -841,6 +886,7 @@ def build_ui_payload(
             "generated_at": datetime.now(UTC).isoformat(),
             "abstract_count": len(search_records),
             "neighbors_source": str(neighbors_input),
+            "phenomena_theories_source": str(phenomena_theories_input),
             "partitions": {
                 key: partition["metadata"]["source_dir"]
                 for key, partition in partitions.items()
@@ -892,6 +938,7 @@ def build_export_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enriched-input", default=DEFAULT_ENRICHED_INPUT)
     parser.add_argument("--references-input", default=DEFAULT_REFERENCES_INPUT)
     parser.add_argument("--image-analyses-input", default=DEFAULT_IMAGE_ANALYSES_INPUT)
+    parser.add_argument("--phenomena-theories-input", default=DEFAULT_PHENOMENA_THEORIES_INPUT)
     parser.add_argument("--neighbors-input", default=DEFAULT_NEIGHBORS_INPUT)
     parser.add_argument("--cluster-15-dir", default=DEFAULT_CLUSTER_15_DIR)
     parser.add_argument("--cluster-21-dir", default=DEFAULT_CLUSTER_21_DIR)
@@ -913,6 +960,7 @@ def export_ui_main(argv: list[str] | None = None) -> int:
         enriched_input=Path(args.enriched_input),
         references_input=Path(args.references_input),
         image_analyses_input=Path(args.image_analyses_input),
+        phenomena_theories_input=Path(args.phenomena_theories_input),
         neighbors_input=Path(args.neighbors_input),
         cluster_15_dir=Path(args.cluster_15_dir),
         cluster_21_dir=Path(args.cluster_21_dir),
@@ -944,6 +992,7 @@ def build_ui_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enriched-input", default=DEFAULT_ENRICHED_INPUT)
     parser.add_argument("--references-input", default=DEFAULT_REFERENCES_INPUT)
     parser.add_argument("--image-analyses-input", default=DEFAULT_IMAGE_ANALYSES_INPUT)
+    parser.add_argument("--phenomena-theories-input", default=DEFAULT_PHENOMENA_THEORIES_INPUT)
     parser.add_argument("--neighbors-input", default=DEFAULT_NEIGHBORS_INPUT)
     parser.add_argument("--cluster-15-dir", default=DEFAULT_CLUSTER_15_DIR)
     parser.add_argument("--cluster-21-dir", default=DEFAULT_CLUSTER_21_DIR)
@@ -968,6 +1017,7 @@ def build_ui_main(argv: list[str] | None = None) -> int:
         enriched_input=Path(args.enriched_input),
         references_input=Path(args.references_input),
         image_analyses_input=Path(args.image_analyses_input),
+        phenomena_theories_input=Path(args.phenomena_theories_input),
         neighbors_input=Path(args.neighbors_input),
         cluster_15_dir=Path(args.cluster_15_dir),
         cluster_21_dir=Path(args.cluster_21_dir),

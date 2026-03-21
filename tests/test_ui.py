@@ -61,6 +61,7 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(args.output_dir, "export/ui-site/data")
         self.assertEqual(args.top_neighbors, 8)
         self.assertEqual(args.image_analyses_input, "data/image_analyses_openai.json")
+        self.assertEqual(args.phenomena_theories_input, "data/abstracts_with_phenomena_with_theories_refined.csv")
         self.assertEqual(args.cluster_25_dir, "data/embeddings/voyage_stage2_published/clustering_benchmark")
         self.assertEqual(args.spectral_cluster_dir, "data/embeddings/voyage_stage2_published/clustering_benchmark_spectral")
         self.assertEqual(args.claims_cluster_dir, "data/embeddings/minilm_claims/clustering_benchmark_25_30")
@@ -74,6 +75,7 @@ class UIHelpersTest(unittest.TestCase):
             enriched_input = root / "abstracts_enriched.json"
             references_input = root / "reference_metadata.json"
             image_analyses_input = root / "image_analyses.json"
+            phenomena_theories_input = root / "phenomena_theories.csv"
             neighbors_input = root / "neighbors.json"
             semantic_vectors_input = root / "vectors.npy"
             semantic_metadata_input = root / "metadata.json"
@@ -239,6 +241,11 @@ class UIHelpersTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            phenomena_theories_input.write_text(
+                "id,abstract_body,phenomena,theories\n"
+                "1,\"Memory body\",PHEN_002|PHEN_025,THEO_010|THEO_014\n",
+                encoding="utf-8",
+            )
             neighbors_input.write_text(
                 json.dumps({"neighbors": {"1": [{"id": 2, "score": 0.9}]}}),
                 encoding="utf-8",
@@ -318,6 +325,7 @@ class UIHelpersTest(unittest.TestCase):
                 enriched_input=enriched_input,
                 references_input=references_input,
                 image_analyses_input=image_analyses_input,
+                phenomena_theories_input=phenomena_theories_input,
                 neighbors_input=neighbors_input,
                 cluster_15_dir=cluster_15_dir,
                 cluster_21_dir=cluster_21_dir,
@@ -334,6 +342,8 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(payload["search"]["abstracts"][0]["title"], "Memory fMRI in aging")
         self.assertEqual(payload["search"]["abstracts"][0]["primary_topic"], "Lifespan Development")
         self.assertEqual(payload["search"]["abstracts"][0]["secondary_topic"], "Aging")
+        self.assertEqual(payload["search"]["abstracts"][0]["facets"]["phenomena"], ["PHEN_002", "PHEN_025"])
+        self.assertEqual(payload["search"]["abstracts"][0]["facets"]["theories"], ["THEO_010", "THEO_014"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["semantic_25"], ["11: memory, aging, hippocampus"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["voyage_spectral_31"], ["31: spectral, memory, fmri"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["claims_28"], ["28: pd, disease, patients"])
@@ -343,8 +353,9 @@ class UIHelpersTest(unittest.TestCase):
         )
         self.assertEqual(
             payload["facets"]["groups"][:5],
-            ["accepted_for", "semantic_25", "voyage_spectral_31", "claims_28", "primary_topic"],
+            ["accepted_for", "semantic_25", "voyage_spectral_31", "claims_28", "phenomena"],
         )
+        self.assertIn("theories", payload["facets"]["groups"])
         self.assertIn("secondary_topic", payload["facets"]["groups"])
         self.assertIn("voyage_spectral_31", payload["facets"]["groups"])
         self.assertIn("claims_28", payload["facets"]["groups"])
@@ -354,6 +365,8 @@ class UIHelpersTest(unittest.TestCase):
         self.assertNotIn("figure_keywords", payload["search"]["abstracts"][0]["facets"])
         self.assertNotIn("figure_keywords", payload["facets"]["groups"])
         self.assertEqual(payload["details"]["abstracts"]["1"]["recording_technology"], ["fMRI"])
+        self.assertEqual(payload["details"]["abstracts"]["1"]["phenomena"], ["PHEN_002", "PHEN_025"])
+        self.assertEqual(payload["details"]["abstracts"]["1"]["theories"], ["THEO_010", "THEO_014"])
         self.assertEqual(payload["details"]["abstracts"]["1"]["figure_keywords"], ["Flowchart"])
         self.assertEqual(
             [item["question_name"] for item in payload["details"]["abstracts"]["1"]["figure_analyses"][:2]],
@@ -393,6 +406,7 @@ class UIHelpersTest(unittest.TestCase):
             enriched_input = root / "abstracts_enriched.json"
             references_input = root / "reference_metadata.json"
             image_analyses_input = root / "image_analyses.json"
+            phenomena_theories_input = root / "phenomena_theories.csv"
             neighbors_input = root / "neighbors.json"
             semantic_vectors_input = root / "vectors.npy"
             semantic_metadata_input = root / "metadata.json"
@@ -422,6 +436,10 @@ class UIHelpersTest(unittest.TestCase):
                 encoding="utf-8",
             )
             image_analyses_input.write_text(json.dumps({"analyses": {}}), encoding="utf-8")
+            phenomena_theories_input.write_text(
+                "id,abstract_body,phenomena,theories\n1,\"T body\",PHEN_001,THEO_001\n",
+                encoding="utf-8",
+            )
             neighbors_input.write_text(json.dumps({"neighbors": {"1": []}}), encoding="utf-8")
             np.save(semantic_vectors_input, np.array([[1.0, 0.0]], dtype=np.float32))
             semantic_metadata_input.write_text(
@@ -501,6 +519,8 @@ class UIHelpersTest(unittest.TestCase):
                     str(references_input),
                     "--image-analyses-input",
                     str(image_analyses_input),
+                    "--phenomena-theories-input",
+                    str(phenomena_theories_input),
                     "--neighbors-input",
                     str(neighbors_input),
                     "--cluster-15-dir",
