@@ -275,7 +275,7 @@ class UIHelpersTest(unittest.TestCase):
                 encoding="utf-8",
             )
             for directory, cluster_id, label in (
-                (cluster_15_dir, 3, "graph, memory, aging"),
+                (cluster_15_dir, 3, "unused"),
                 (cluster_21_dir, 7, "unused"),
                 (cluster_25_dir, 11, "memory, aging, hippocampus"),
                 (spectral_cluster_dir, 31, "spectral, memory, fmri"),
@@ -334,7 +334,6 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(payload["search"]["abstracts"][0]["title"], "Memory fMRI in aging")
         self.assertEqual(payload["search"]["abstracts"][0]["primary_topic"], "Lifespan Development")
         self.assertEqual(payload["search"]["abstracts"][0]["secondary_topic"], "Aging")
-        self.assertEqual(payload["search"]["abstracts"][0]["facets"]["voyage_graph_15"], ["3: graph, memory, aging"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["semantic_25"], ["11: memory, aging, hippocampus"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["voyage_spectral_31"], ["31: spectral, memory, fmri"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["claims_28"], ["28: pd, disease, patients"])
@@ -347,7 +346,6 @@ class UIHelpersTest(unittest.TestCase):
             ["accepted_for", "primary_topic", "secondary_topic", "keywords", "methods"],
         )
         self.assertIn("secondary_topic", payload["facets"]["groups"])
-        self.assertIn("voyage_graph_15", payload["facets"]["groups"])
         self.assertIn("voyage_spectral_31", payload["facets"]["groups"])
         self.assertIn("claims_28", payload["facets"]["groups"])
         self.assertEqual(payload["search"]["abstracts"][0]["facets"]["species"], ["Human"])
@@ -366,18 +364,17 @@ class UIHelpersTest(unittest.TestCase):
         self.assertEqual(payload["relations"]["abstracts"]["1"]["neighbors"][0]["id"], 2)
         self.assertEqual(
             payload["relations"]["abstracts"]["1"]["clusters"],
-            {"voyage_graph_15": 3, "semantic_25": 11, "voyage_spectral_31": 31, "claims_28": 28},
+            {"semantic_25": 11, "voyage_spectral_31": 31, "claims_28": 28},
         )
         self.assertEqual(
             payload["manifest"]["partitions"],
             {
-                "voyage_graph_15": str(cluster_15_dir),
                 "semantic_25": str(cluster_25_dir),
                 "voyage_spectral_31": str(spectral_cluster_dir),
                 "claims_28": str(claims_cluster_dir),
             },
         )
-        self.assertEqual([layer["key"] for layer in payload["manifest"]["cluster_layers"]], ["voyage_graph_15", "semantic_25", "voyage_spectral_31", "claims_28"])
+        self.assertEqual([layer["key"] for layer in payload["manifest"]["cluster_layers"]], ["semantic_25", "voyage_spectral_31", "claims_28"])
         self.assertEqual(payload["manifest"]["semantic_search"]["dimension"], 2)
         self.assertEqual(payload["manifest"]["semantic_search"]["browser_model"], "Xenova/all-MiniLM-L6-v2")
         self.assertEqual(payload["projection"]["umap"]["count"], 1)

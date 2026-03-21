@@ -425,14 +425,6 @@ def build_cluster_layer_specs(
 ) -> list[ClusterLayerSpec]:
     return [
         ClusterLayerSpec(
-            key="voyage_graph_15",
-            label="Voyage semantic communities",
-            toggle_label="Voyage 15-community graph",
-            facet_label="Voyage semantic community",
-            source_dir=cluster_15_dir,
-            description="Graph community detection on voyage stage 2 published embeddings.",
-        ),
-        ClusterLayerSpec(
             key="semantic_25",
             label="Voyage semantic clusters",
             toggle_label="Voyage 25-cluster benchmark",
