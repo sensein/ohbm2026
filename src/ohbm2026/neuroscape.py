@@ -1106,7 +1106,7 @@ def cluster_with_method(
     random_state: int = 42,
 ) -> list[int]:
     import numpy as np
-    from sklearn.cluster import AgglomerativeClustering, Birch, KMeans
+    from sklearn.cluster import AgglomerativeClustering, Birch, KMeans, SpectralClustering
     from sklearn.mixture import GaussianMixture
 
     method_name = str(method).strip().lower()
@@ -1140,6 +1140,19 @@ def cluster_with_method(
     if method_name == "birch":
         estimator = Birch(n_clusters=cluster_count)
         return estimator.fit_predict(matrix).astype(np.int32).tolist()
+    if method_name == "spectral-nearest-neighbors":
+        array = np.asarray(matrix, dtype=np.float32)
+        if int(array.shape[0]) <= cluster_count:
+            raise NeuroScapeError("spectral-nearest-neighbors requires more rows than cluster_count")
+        n_neighbors = min(max(int(cluster_count), 10), int(array.shape[0]) - 1)
+        estimator = SpectralClustering(
+            n_clusters=cluster_count,
+            affinity="nearest_neighbors",
+            n_neighbors=n_neighbors,
+            assign_labels="kmeans",
+            random_state=random_state,
+        )
+        return estimator.fit_predict(array).astype(np.int32).tolist()
     raise NeuroScapeError(f"Unsupported clustering method: {method}")
 
 

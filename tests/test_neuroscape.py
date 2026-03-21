@@ -674,7 +674,14 @@ class NeuroScapeHelpersTest(unittest.TestCase):
             dtype=np.float32,
         )
 
-        for method in ["kmeans", "agglomerative-ward", "agglomerative-average", "gaussian-mixture", "birch"]:
+        for method in [
+            "kmeans",
+            "agglomerative-ward",
+            "agglomerative-average",
+            "gaussian-mixture",
+            "birch",
+            "spectral-nearest-neighbors",
+        ]:
             labels = cluster_with_method(matrix, method, cluster_count=2, random_state=7)
             self.assertEqual(len(labels), 4)
             self.assertEqual(len(set(labels)), 2)
