@@ -8,3 +8,16 @@ data/
 .cache/
 .matplotlib/
 export/
+
+# Local experiment and scratch outputs
+.matplotlib-cache/
+experiments/
+logs/
+tmp/
+
+# Local working memory archives
+memory/archive/
+
+# Local packaging and lock artifacts
+src/*.egg-info/
+uv.lock
