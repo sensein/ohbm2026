@@ -7,6 +7,8 @@ matching, embeddings, clustering, and a static search UI.
 This README is the runbook for a person or an agent that needs to go from the
 original abstract download to the current latest step.
 
+Project conventions that should not be violated live in [CONSTITUTION.md](/Users/satra/software/temp/ohbm2026/CONSTITUTION.md), including the rule that recorded experiment runs must write to fresh directories and never overwrite prior outputs.
+
 ## What The Pipeline Produces
 
 Core artifacts:

@@ -4,6 +4,7 @@ import argparse
 import csv
 import itertools
 import json
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
@@ -19,21 +20,57 @@ SESSION_IDS = (1, 2, 3, 4)
 SESSION_TO_BLOCK = {1: 1, 2: 1, 3: 2, 4: 2}
 BLOCK_TO_SESSIONS = {1: (1, 2), 2: (3, 4)}
 SESSION_LABELS = {
-    1: "June 15 standby",
-    2: "June 16 standby",
-    3: "June 17 standby",
-    4: "June 18 standby",
+    1: "June 15-16 alternating pattern A",
+    2: "June 15-16 alternating pattern B",
+    3: "June 17-18 alternating pattern A",
+    4: "June 17-18 alternating pattern B",
 }
 BLOCK_LABELS = {
     1: "June 15-16 block",
     2: "June 17-18 block",
+}
+SESSION_STANDBY_WINDOWS = {
+    1: (
+        "Monday, June 15 | 13:45-14:45",
+        "Tuesday, June 16 | 13:30-14:30",
+    ),
+    2: (
+        "Monday, June 15 | 14:45-15:45",
+        "Tuesday, June 16 | 12:30-13:30",
+    ),
+    3: (
+        "Wednesday, June 17 | 12:45-13:45",
+        "Thursday, June 18 | 14:45-15:45",
+    ),
+    4: (
+        "Wednesday, June 17 | 13:45-14:45",
+        "Thursday, June 18 | 13:45-14:45",
+    ),
 }
 HALL_LABELS = {
     1: "Poster Hall",
 }
 LAYOUT_POSTER_FACES_PER_BOARD = 2
 DEFAULT_LAYOUT_GEOMETRY = "data/poster_layout/layout_assets/layout_geometry.json"
+DEFAULT_PROPOSAL_CSV_VOYAGE_EMBEDDINGS_DIR = "data/embeddings/voyage_stage2_published"
+DEFAULT_PROPOSAL_CSV_CLAIMS_EMBEDDINGS_DIR = "data/embeddings/minilm_claims"
 UNKNOWN_CATEGORY = "Unknown"
+LISTING_TEMPLATE_COLUMNS = (
+    "Abstract ID Number",
+    "NEW POSTER NUMBER *USE THIS NUMBER FOR YOUR LOCATION IN THE POSTER HALL",
+    "First Stand-by Time",
+    "Second Stand-by Time",
+    "Abstract Title",
+    "Primary Category",
+    "Last Name of First Author",
+)
+DEFAULT_LISTING_INTRO = (
+    "OHBM 2026 POSTER LISTING\n"
+    "POSTER HALL LOCATION: EXHIBITION HALL 1\n\n"
+    "Please use this document to confirm your poster number and stand-by times at OHBM 2026. "
+    "Each poster presenter has two total stand-by times during the event, one on each day of their assigned 2-day block."
+)
+LISTING_CSV_ENCODING = "utf-8-sig"
 
 
 class PosterLayoutError(RuntimeError):
@@ -97,6 +134,54 @@ DEFAULT_LAYOUT_LABEL_SYSTEM = "submitter_primary_secondary"
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def standby_time_labels_for_session(session_id: int) -> tuple[str, str]:
+    if session_id not in SESSION_STANDBY_WINDOWS:
+        raise PosterLayoutError(f"Unknown standby session pattern: {session_id}")
+    return SESSION_STANDBY_WINDOWS[session_id]
+
+
+def standby_session_for_block_and_poster_number(block_id: int, poster_number: int) -> int:
+    if block_id not in BLOCK_TO_SESSIONS:
+        raise PosterLayoutError(f"Unknown poster block: {block_id}")
+    if int(poster_number) <= 0:
+        raise PosterLayoutError("Poster numbers must be positive integers")
+    block_sessions = BLOCK_TO_SESSIONS[int(block_id)]
+    return block_sessions[0] if int(poster_number) % 2 == 1 else block_sessions[1]
+
+
+def _format_poster_number(poster_number: int) -> str:
+    return f"{int(poster_number):04d}"
+
+
+def _sanitize_author_last_name(value: str | None) -> str:
+    raw_value = str(value or "").strip()
+    if not raw_value:
+        return ""
+    cleaned = re.sub(r"\s+", " ", raw_value)
+    return cleaned
+
+
+def load_author_last_names(path: Path | None) -> dict[int, str]:
+    if path is None or not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_authors = payload.get("authors", payload if isinstance(payload, list) else [])
+    if not isinstance(raw_authors, list):
+        return {}
+    last_names: dict[int, str] = {}
+    for author in raw_authors:
+        if not isinstance(author, dict):
+            continue
+        author_id = author.get("id")
+        if not isinstance(author_id, int):
+            continue
+        last_name = _sanitize_author_last_name(author.get("last_name"))
+        if not last_name:
+            continue
+        last_names[author_id] = last_name
+    return last_names
 
 
 def load_cluster_inputs(
@@ -297,7 +382,7 @@ def _author_groups(records: list[AcceptedAbstract]) -> list[list[AcceptedAbstrac
         if len(group) > len(SESSION_IDS):
             first_author_id = group[0].first_author_id
             raise PosterLayoutError(
-                f"First author {first_author_id} has {len(group)} posters, which exceeds the four standby sessions"
+                f"First author {first_author_id} has {len(group)} posters, which exceeds the four standby patterns"
             )
     grouped.sort(
         key=lambda group: (
@@ -649,6 +734,54 @@ def _load_normalized_embedding_bundle(bundle_dir: Path) -> tuple[dict[int, int],
     return {abstract_id: index for index, abstract_id in enumerate(ids)}, matrix
 
 
+@lru_cache(maxsize=4)
+def _load_optional_normalized_embedding_bundle(bundle_dir: str) -> tuple[dict[int, int], np.ndarray] | None:
+    path = Path(bundle_dir)
+    if not path.exists():
+        return None
+    try:
+        return _load_normalized_embedding_bundle(path)
+    except Exception:
+        return None
+
+
+def _ordered_neighbor_mean_cosine_similarity(
+    ordered_assignments: list[dict[str, Any]],
+    bundle_dir: str,
+    neighbor_count: int = 5,
+) -> dict[int, float | None]:
+    bundle = _load_optional_normalized_embedding_bundle(bundle_dir)
+    if bundle is None:
+        return {
+            int(item.get("abstract_id")): None
+            for item in ordered_assignments
+            if isinstance(item.get("abstract_id"), int)
+        }
+    index_by_id, matrix = bundle
+    scores: dict[int, float | None] = {}
+    total = len(ordered_assignments)
+    for position, item in enumerate(ordered_assignments):
+        abstract_id = item.get("abstract_id")
+        if not isinstance(abstract_id, int) or abstract_id not in index_by_id:
+            if isinstance(abstract_id, int):
+                scores[abstract_id] = None
+            continue
+        candidate_positions = sorted(
+            (other for other in range(total) if other != position),
+            key=lambda other: (abs(other - position), other),
+        )[:neighbor_count]
+        similarities: list[float] = []
+        for other_position in candidate_positions:
+            other_id = ordered_assignments[other_position].get("abstract_id")
+            if not isinstance(other_id, int) or other_id not in index_by_id:
+                continue
+            left_index = index_by_id[abstract_id]
+            right_index = index_by_id[other_id]
+            similarities.append(float(np.dot(matrix[left_index], matrix[right_index])))
+        scores[abstract_id] = float(np.mean(similarities)) if similarities else None
+    return scores
+
+
 def _path_distance_key(
     current_id: int,
     candidate_id: int,
@@ -806,11 +939,14 @@ def _session_summary(records: list[AcceptedAbstract], assignments: dict[int, int
     summaries: dict[str, Any] = {}
     for session_id in SESSION_IDS:
         session_records = [record for record in records if assignments.get(record.abstract_id) == session_id]
+        first_standby_label, second_standby_label = standby_time_labels_for_session(session_id)
         summaries[str(session_id)] = {
             "session_id": session_id,
             "session_label": SESSION_LABELS[session_id],
             "block_id": SESSION_TO_BLOCK[session_id],
             "block_label": BLOCK_LABELS[SESSION_TO_BLOCK[session_id]],
+            "first_standby_time_label": first_standby_label,
+            "second_standby_time_label": second_standby_label,
             "poster_count": len(session_records),
             "layout_parent_label_counts": dict(sorted(Counter(record.layout_parent_label for record in session_records).items())),
             "layout_exact_label_counts": dict(sorted(Counter(record.layout_exact_label for record in session_records).items())),
@@ -1036,12 +1172,18 @@ def build_layout_proposal(
             block_positions[abstract_id] = block_position
             current_number += 1
 
+    final_session_assignments: dict[int, int] = {}
+    for abstract_id, poster_number in poster_numbers.items():
+        block_id = SESSION_TO_BLOCK[session_assignments[abstract_id]]
+        final_session_assignments[abstract_id] = standby_session_for_block_and_poster_number(block_id, poster_number)
+
     assignments = []
-    for abstract_id in sorted(session_assignments, key=lambda value: poster_numbers[value]):
+    for abstract_id in sorted(final_session_assignments, key=lambda value: poster_numbers[value]):
         record = records_by_id[abstract_id]
-        session_id = session_assignments[abstract_id]
+        session_id = final_session_assignments[abstract_id]
         block_id = SESSION_TO_BLOCK[session_id]
         layout_slot = layout_slot_for_block_position(block_positions[abstract_id])
+        first_standby_label, second_standby_label = standby_time_labels_for_session(session_id)
         assignments.append(
             {
                 "abstract_id": abstract_id,
@@ -1058,6 +1200,8 @@ def build_layout_proposal(
                 "claims_cluster_label": record.claims_cluster_label,
                 "standby_session": session_id,
                 "standby_session_label": SESSION_LABELS[session_id],
+                "first_standby_time_label": first_standby_label,
+                "second_standby_time_label": second_standby_label,
                 "block_id": block_id,
                 "block_label": BLOCK_LABELS[block_id],
                 "poster_number": poster_numbers[abstract_id],
@@ -1098,10 +1242,11 @@ def build_layout_proposal(
             },
             "assumption": (
                 "Assignment is optimized over all accepted abstracts, including posters and oral presentations. "
-                "Every accepted abstract receives a standby session and board-face position."
+                "Each accepted abstract receives a paired standby pattern with one one-hour standby on each day of its assigned block, "
+                "plus a board-face position."
             ),
         },
-        "session_summaries": _session_summary(assigned_records, session_assignments),
+        "session_summaries": _session_summary(assigned_records, final_session_assignments),
         "assignments": assignments,
     }
 
@@ -1140,8 +1285,6 @@ def build_semantic_path_proposal(
         seed_id=seed_id,
     )
     _block_by_id, block_sequences = assign_path_to_blocks(ordered_ids, records_by_id)
-    session_assignments = assign_block_sequences_to_sessions(block_sequences, records_by_id)
-
     poster_numbers: dict[int, int] = {}
     block_positions: dict[int, int] = {}
     current_number = 1
@@ -1151,12 +1294,21 @@ def build_semantic_path_proposal(
             block_positions[abstract_id] = block_position
             current_number += 1
 
+    session_assignments = {
+        abstract_id: standby_session_for_block_and_poster_number(
+            1 if abstract_id in block_sequences[1] else 2,
+            poster_numbers[abstract_id],
+        )
+        for abstract_id in poster_numbers
+    }
+
     assignments = []
     for abstract_id in sorted(session_assignments, key=lambda value: poster_numbers[value]):
         record = records_by_id[abstract_id]
         session_id = session_assignments[abstract_id]
         block_id = SESSION_TO_BLOCK[session_id]
         layout_slot = layout_slot_for_block_position(block_positions[abstract_id])
+        first_standby_label, second_standby_label = standby_time_labels_for_session(session_id)
         assignments.append(
             {
                 "abstract_id": abstract_id,
@@ -1173,6 +1325,8 @@ def build_semantic_path_proposal(
                 "claims_cluster_label": record.claims_cluster_label,
                 "standby_session": session_id,
                 "standby_session_label": SESSION_LABELS[session_id],
+                "first_standby_time_label": first_standby_label,
+                "second_standby_time_label": second_standby_label,
                 "block_id": block_id,
                 "block_label": BLOCK_LABELS[block_id],
                 "poster_number": poster_numbers[abstract_id],
@@ -1208,7 +1362,8 @@ def build_semantic_path_proposal(
             "path_seed_strategy": config.seed_strategy,
             "assumption": (
                 "A single semantic nearest-neighbor path is built across all accepted abstracts, seeded by an oral presentation. "
-                "The path is then split into two near-alternating block sequences and balanced across standby sessions."
+                "The path is then split into two near-alternating block sequences and balanced across paired standby patterns "
+                "with one one-hour standby on each day of the assigned block."
             ),
         },
         "session_summaries": _session_summary(assigned_records, session_assignments),
@@ -1576,10 +1731,13 @@ def analyze_layout_proposal(
     session_analysis: dict[str, Any] = {}
     for session_id in SESSION_IDS:
         records = session_records[session_id]
+        first_standby_label, second_standby_label = standby_time_labels_for_session(session_id)
         session_analysis[str(session_id)] = {
             "session_id": session_id,
             "session_label": SESSION_LABELS[session_id],
             "block_id": SESSION_TO_BLOCK[session_id],
+            "first_standby_time_label": first_standby_label,
+            "second_standby_time_label": second_standby_label,
             "counts": {
                 "posters": len(records),
                 "layout_parent_labels": len({record.layout_parent_label for record in records}),
@@ -1644,6 +1802,10 @@ def analyze_layout_proposal(
     oral_assignments = []
     for oral in inputs.oral_records:
         assigned_session_id = assignments_by_id.get(oral.abstract_id)
+        first_standby_label = None
+        second_standby_label = None
+        if assigned_session_id is not None:
+            first_standby_label, second_standby_label = standby_time_labels_for_session(assigned_session_id)
         oral_assignments.append(
             {
                 "abstract_id": oral.abstract_id,
@@ -1654,6 +1816,8 @@ def analyze_layout_proposal(
                 "layout_exact_label": oral.layout_exact_label,
                 "assigned_session_id": assigned_session_id,
                 "assigned_session_label": None if assigned_session_id is None else SESSION_LABELS[assigned_session_id],
+                "first_standby_time_label": first_standby_label,
+                "second_standby_time_label": second_standby_label,
                 "assigned_block_id": None if assigned_session_id is None else SESSION_TO_BLOCK[assigned_session_id],
             }
         )
@@ -1690,15 +1854,37 @@ def analyze_layout_proposal(
 
 def write_layout_csv(path: Path, proposal: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    ordered_assignments = sorted(
+        list(proposal.get("assignments", [])),
+        key=lambda item: (
+            int(item.get("poster_number") or 0),
+            int(item.get("abstract_id") or 0),
+        ),
+    )
+    voyage_neighbor_scores = _ordered_neighbor_mean_cosine_similarity(
+        ordered_assignments,
+        DEFAULT_PROPOSAL_CSV_VOYAGE_EMBEDDINGS_DIR,
+    )
+    claims_neighbor_scores = _ordered_neighbor_mean_cosine_similarity(
+        ordered_assignments,
+        DEFAULT_PROPOSAL_CSV_CLAIMS_EMBEDDINGS_DIR,
+    )
     fieldnames = [
         "poster_number",
         "board_number",
         "board_side",
         "board_label",
         "abstract_id",
+        "primary_parent_category",
+        "primary_subcategory",
+        "primary_category",
         "title",
+        "voyage_stage2_neighbor5_mean_cosine_similarity",
+        "claims_neighbor5_mean_cosine_similarity",
         "standby_session",
         "standby_session_label",
+        "first_standby_time_label",
+        "second_standby_time_label",
         "block_id",
         "block_label",
         "block_position",
@@ -1721,9 +1907,6 @@ def write_layout_csv(path: Path, proposal: dict[str, Any]) -> None:
         "hall_face_b_y",
         "hall_x",
         "hall_y",
-        "primary_parent_category",
-        "primary_subcategory",
-        "primary_category",
         "layout_parent_label",
         "layout_exact_label",
         "layout_label_system",
@@ -1734,8 +1917,54 @@ def write_layout_csv(path: Path, proposal: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for row in proposal.get("assignments", []):
-            writer.writerow({fieldname: row.get(fieldname) for fieldname in fieldnames})
+        for row in ordered_assignments:
+            abstract_id = row.get("abstract_id")
+            enriched_row = dict(row)
+            if isinstance(abstract_id, int):
+                enriched_row["voyage_stage2_neighbor5_mean_cosine_similarity"] = voyage_neighbor_scores.get(abstract_id)
+                enriched_row["claims_neighbor5_mean_cosine_similarity"] = claims_neighbor_scores.get(abstract_id)
+            else:
+                enriched_row["voyage_stage2_neighbor5_mean_cosine_similarity"] = None
+                enriched_row["claims_neighbor5_mean_cosine_similarity"] = None
+            writer.writerow({fieldname: enriched_row.get(fieldname) for fieldname in fieldnames})
+
+
+def write_listing_csv(
+    path: Path,
+    proposal: dict[str, Any],
+    authors_input: Path | None = None,
+    intro_text: str = DEFAULT_LISTING_INTRO,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    author_last_names = load_author_last_names(authors_input)
+    ordered_assignments = sorted(
+        list(proposal.get("assignments", [])),
+        key=lambda item: (
+            int(item.get("poster_number") or 0),
+            int(item.get("abstract_id") or 0),
+        ),
+    )
+    # Use a UTF-8 BOM so Excel and similar spreadsheet tools reliably detect
+    # Unicode surnames without mojibake.
+    with path.open("w", encoding=LISTING_CSV_ENCODING, newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([intro_text, *([""] * (len(LISTING_TEMPLATE_COLUMNS) - 1))])
+        writer.writerow(list(LISTING_TEMPLATE_COLUMNS))
+        for row in ordered_assignments:
+            poster_number = int(row.get("poster_number") or 0)
+            abstract_id = int(row.get("abstract_id") or 0)
+            first_author_id = row.get("first_author_id")
+            writer.writerow(
+                [
+                    abstract_id,
+                    _format_poster_number(poster_number),
+                    str(row.get("first_standby_time_label") or ""),
+                    str(row.get("second_standby_time_label") or ""),
+                    str(row.get("title") or ""),
+                    str(row.get("primary_parent_category") or row.get("primary_category") or ""),
+                    author_last_names.get(int(first_author_id), "") if isinstance(first_author_id, int) else "",
+                ]
+            )
 
 
 def load_proposal(path: Path) -> dict[str, Any]:
@@ -1743,9 +1972,10 @@ def load_proposal(path: Path) -> dict[str, Any]:
 
 
 def build_optimize_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Optimize OHBM poster standby sessions and numeric poster order")
+    parser = argparse.ArgumentParser(description="Optimize OHBM poster standby patterns and numeric poster order")
     parser.add_argument("--raw-input", default="data/abstracts.json")
     parser.add_argument("--embeddings-dir", default="data/embeddings/minilm_claims")
+    parser.add_argument("--authors-input", default="data/authors.json")
     parser.add_argument("--claims-cluster-assignments", default=DEFAULT_CLAIMS_CLUSTER_ASSIGNMENTS)
     parser.add_argument("--claims-cluster-summaries", default=DEFAULT_CLAIMS_CLUSTER_SUMMARIES)
     parser.add_argument("--layout-cluster-assignments")
@@ -1792,6 +2022,11 @@ def optimize_main(argv: list[str] | None = None) -> int:
     )
     write_json(output_dir / "proposal.json", proposal)
     write_layout_csv(output_dir / "proposal.csv", proposal)
+    write_listing_csv(
+        output_dir / "proposal_listing.csv",
+        proposal,
+        authors_input=Path(args.authors_input) if args.authors_input else None,
+    )
     write_json(output_dir / "session_summaries.json", proposal.get("session_summaries", {}))
     return 0
 

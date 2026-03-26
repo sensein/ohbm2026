@@ -13,20 +13,20 @@ The first pass should produce library code plus CLI scripts only. UI integration
 
 ## Working Assumptions
 
-These are the assumptions used in the first implementation:
+These are the assumptions used in the current implementation:
 
 - poster assignment is built from the accepted-poster subset of `data/abstracts.json`
 - oral presentations are not assigned poster standby sessions, but they are included in analysis outputs as topical and semantic context
 - claim-based semantic distance should come from the existing `data/embeddings/minilm_claims` bundle unless a different bundle is preferred
 - first-author conflict checks should use `authors[*].author_order` from the Oxford Abstracts export and should be treated as hard constraints
 - the optimization output should be auditable and rerunnable from local files without API access
-- a poster is assigned to one standby session out of four; the physical two-session block is derived from that session assignment
+- each poster is assigned to one paired standby pattern out of four; each pattern contains two one-hour standby windows, one on each day of a single 2-day block
 
 ## Product Questions To Confirm
 
 Confirmed decisions for the first pass:
 
-1. Posters live in a fixed two-session block, but the presenter is assigned to one of the two standby sessions.
+1. Posters live in a fixed two-day block, and the presenter is assigned to one of the two odd/even hourly standby patterns within that block.
 2. Only first-author conflicts are constrained, and they are hard constraints.
 3. The first implementation should optimize over the accepted corpus while explicitly reporting the oral presentations in the analysis outputs.
 4. A numeric poster order is sufficient for now.
@@ -66,7 +66,9 @@ Likely source files:
 - `data/poster_layout/proposal.json`
   - full assignment payload with metadata and objective components
 - `data/poster_layout/proposal.csv`
-  - one row per poster for spreadsheet review
+  - one row per accepted abstract for spreadsheet review and downstream plotting
+- `data/poster_layout/proposal_listing.csv`
+  - organizer-facing export shaped like the 2025 poster listing sheet, with poster number plus first/second standby times
 - `data/poster_layout/analysis.json`
   - quality metrics for the proposed or supplied layout
 - `data/poster_layout/session_summaries.json`
@@ -76,7 +78,7 @@ Suggested fields in `proposal.csv`:
 
 - `abstract_id`
 - `poster_number`
-- `session_block` or explicit standby sessions
+- explicit first and second standby times
 - `layout_zone`
 - `layout_row`
 - `layout_position`
@@ -103,7 +105,7 @@ Treat session assignment as the highest-priority combinatorial problem.
 
 Hard constraints:
 
-- every poster is assigned to the required number of standby sessions or session block
+- every poster is assigned to exactly one paired standby pattern, which implies two total one-hour standby windows within a single 2-day block
 - session sizes stay within capacity tolerance
 - accepted poster count is fully assigned exactly once
 
@@ -232,6 +234,8 @@ If this matures well, we can later fold the same functionality into `ohbmcli`.
 - [x] Implement greedy grouped assignment with hard first-author session constraints
 - [x] Implement numbering/layout ordering within each assigned block
 - [x] Add analysis script and output reports
+- [x] Shift standby assignments to paired one-hour patterns within each 2-day block
+- [x] Add an organizer-facing listing export modeled on the 2025 poster listing spreadsheet
 - [x] Run on the local accepted corpus and review diagnostics
 - [ ] Tune weights with stakeholder feedback
 
@@ -243,3 +247,11 @@ For the first implementation, optimize in two levels:
 - within-session numbering for semantic and category locality
 
 That decomposition matches the operational problem well and should give us an auditable result faster than a single monolithic optimizer.
+
+## Next Phase
+
+The next sequencing-focused benchmark phase is tracked in:
+
+- [docs/poster-sequencing-benchmark-plan.md](/Users/satra/software/temp/ohbm2026/docs/poster-sequencing-benchmark-plan.md)
+
+That plan keeps block assignments fixed and compares stronger ordering algorithms against the current greedy nearest-neighbor baseline, with special attention to low-similarity local stretches in the current Voyage-based proposal.

@@ -810,8 +810,6 @@ def _build_umap_figure(
         title_text="UMAP 2",
         range=[y_center - span, y_center + span],
         zeroline=False,
-        scaleanchor="x",
-        scaleratio=1,
     )
     return figure, background_indices, mode_trace_indices
 

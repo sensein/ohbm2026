@@ -99,6 +99,7 @@ class PosterLayoutFloorplanPlotTest(unittest.TestCase):
         self.assertIn("Claims 28", review_html)
         self.assertIn("Unknown", review_html)
         self.assertNotIn("Category Selectors</h2>", review_html)
+        self.assertNotIn('"scaleanchor":"x"', review_html)
         self.assertEqual(primary_html, review_html)
         self.assertEqual(semantic_html, review_html)
 

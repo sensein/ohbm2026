@@ -18,6 +18,7 @@ def _layout_system_display_name(layout_label_system: str) -> str:
         "voyage_stage2_kmeans_25": "Voyage Stage 2 k-means (25 clusters)",
         "voyage_stage2_spectral_31": "Voyage Stage 2 spectral (31 clusters)",
         "minilm_claims_kmeans_28": "MiniLM claims k-means (28 clusters)",
+        "voyage_stage2_olo_contiguous_31": "Voyage OLO contiguous categories (31 clusters)",
     }
     return mapping.get(layout_label_system, layout_label_system.replace("_", " "))
 
@@ -86,6 +87,8 @@ def summarize_proposal_dir(proposal_dir: Path) -> dict[str, Any]:
         "proposal_dir": str(proposal_dir),
         "proposal_name": proposal_dir.name,
         "weights": dict(metadata.get("weights") or {}),
+        "sequencing_method": str(metadata.get("sequencing_method") or ""),
+        "sequencing_assumption": str(metadata.get("sequencing_assumption") or ""),
         "layout_label_system": layout_label_system,
         "layout_exact_label_count": int(metadata.get("layout_exact_label_count") or 0),
         "layout_parent_label_count": int(metadata.get("layout_parent_label_count") or 0),
@@ -216,8 +219,9 @@ def _best_recommendation(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
             int(row.get("exact_categories_single_block_multi_poster") or 0),
             int(row.get("claims_clusters_single_block_multi_poster") or 0),
             int(row.get("exact_categories_single_block") or 0),
-            -float(row.get("block_adjacent_exact_category_match_rate") or 0.0),
             float(row.get("block_adjacent_mean_semantic_distance") or 0.0),
+            -float(row.get("claims_adjacent_same_cluster_rate") or 0.0),
+            -float(row.get("block_adjacent_exact_category_match_rate") or 0.0),
             row.get("proposal_name") or "",
         ),
     )[0]
@@ -228,12 +232,20 @@ def _proposal_emphasis(row: dict[str, Any]) -> str:
     proposal_kind = str(row.get("proposal_kind") or "")
     proposal_method = str(row.get("proposal_method") or "")
     layout_label_system = str(row.get("layout_label_system") or "")
+    sequencing_method = str(row.get("sequencing_method") or "")
     if proposal_name == "session_balance_baseline":
         return "Balance sessions and keep nearby posters closely related"
     if proposal_name == "block_spread_soft":
         return "Spread categories across blocks with a light touch"
     if proposal_name == "block_spread_strong":
         return "Spread categories across blocks more aggressively"
+    if sequencing_method.startswith("global_olo_two_opt"):
+        return (
+            "Build one global voyage-based order using optimal leaf ordering plus sparse 2-opt refinement, "
+            "derive contiguous layout categories from that sequence, then split it across blocks"
+        )
+    if sequencing_method.startswith("global_optimal_leaf_ordering"):
+        return "Build one global voyage-based order with optimal leaf ordering, derive contiguous layout categories, then split it across blocks"
     if proposal_name.startswith("semantic_layout_") or (
         proposal_kind == "weighted_assignment" and layout_label_system != "submitter_primary_secondary"
     ):
@@ -247,6 +259,16 @@ def _proposal_emphasis(row: dict[str, Any]) -> str:
             return "Build one semantic path from claims embeddings, then split it across blocks"
         return "Build one semantic path across all accepted abstracts, then split it across blocks"
     return "Custom weighting"
+
+
+def _block_spread_soft_detail() -> str:
+    return (
+        "`block_spread_soft` is the submitter-category reference layout. It uses the existing "
+        "parent/subcategory taxonomy to spread related categories across the two blocks with a light touch, "
+        "keeps a shared parent/subcategory order across blocks, and then uses embedding-based nearest-neighbor "
+        "ordering within each subcategory for local coherence. It does not run an additional within-category "
+        "hierarchical clustering pass."
+    )
 
 
 def build_markdown_summary(rows: list[dict[str, Any]]) -> str:
@@ -290,6 +312,9 @@ def build_markdown_summary(rows: list[dict[str, Any]]) -> str:
     lines.append("## What Each Proposal Emphasizes")
     for row in rows:
         lines.append(f"`{row['proposal_name']}`: {_proposal_emphasis(row)}.")
+    if soft is not None:
+        lines.append("")
+        lines.append(_block_spread_soft_detail())
     lines.append("")
     lines.append("## Where They Critically Differ")
     if baseline is not None:
@@ -430,9 +455,10 @@ def build_markdown_summary(rows: list[dict[str, Any]]) -> str:
     lines.append("## Files")
     for row in rows:
         proposal_dir = Path(str(row["proposal_dir"]))
-        lines.append(
-            f"- `{row['proposal_name']}`: `{proposal_dir / 'proposal.json'}`, `{proposal_dir / 'analysis.json'}`, `{proposal_dir / 'session_day_umap.html'}`"
-        )
+        files = [proposal_dir / "proposal.json", proposal_dir / "analysis.json", proposal_dir / "session_day_umap.html"]
+        if str(row.get("proposal_kind") or "") == "semantic_path":
+            files.append(proposal_dir / "layout_reassignment_summary.md")
+        lines.append(f"- `{row['proposal_name']}`: " + ", ".join(f"`{path}`" for path in files))
     lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -508,6 +534,8 @@ def build_organizer_memo_markdown(rows: list[dict[str, Any]]) -> str:
     strong = next((row for row in rows if row.get("proposal_name") == "block_spread_strong"), None)
     categorical_reference = soft or baseline or rows[0]
     source = recommendation if recommendation is not None else rows[0]
+    block_one_count = int(categorical_reference["session_counts"]["1"]) + int(categorical_reference["session_counts"]["2"])
+    block_two_count = int(categorical_reference["session_counts"]["3"]) + int(categorical_reference["session_counts"]["4"])
 
     lines = ["# Organizer Memo: Poster Layout Proposals", ""]
     lines.append("## Recommendation")
@@ -521,9 +549,8 @@ def build_organizer_memo_markdown(rows: list[dict[str, Any]]) -> str:
     lines.append("")
     lines.append("## Why This Recommendation")
     lines.append(
-        f"All proposals assign all `{categorical_reference['accepted_count']}` accepted abstracts and keep the schedule balanced across the four standby sessions "
-        f"({categorical_reference['session_counts']['1']}/{categorical_reference['session_counts']['2']}/"
-        f"{categorical_reference['session_counts']['3']}/{categorical_reference['session_counts']['4']})."
+        f"All proposals assign all `{categorical_reference['accepted_count']}` accepted abstracts and keep the two poster blocks balanced "
+        f"(`{block_one_count}` in the June 15-16 block and `{block_two_count}` in the June 17-18 block)."
     )
     lines.append(
         f"That includes `{categorical_reference['poster_count']}` poster-selected abstracts and `{categorical_reference['oral_count']}` oral-selected abstracts."
@@ -557,12 +584,27 @@ def build_organizer_memo_markdown(rows: list[dict[str, Any]]) -> str:
     lines.append(f"## What The {len(rows)} Proposals Emphasize")
     for row in rows:
         lines.append(f"- `{row['proposal_name']}`: {_proposal_emphasis(row)}.")
+    if soft is not None:
+        lines.append("")
+        lines.append(_block_spread_soft_detail())
     lines.append("")
     lines.append("## What They Share")
-    lines.append("- Even distribution across sessions.")
+    lines.append("- Even distribution across the two blocks.")
     lines.append("- Zero first-author conflicts.")
     lines.append("- Strong local topical grouping once posters are numbered in the hall.")
-    lines.append("- Broad distribution of related work across standby sessions.")
+    lines.append("- Broad distribution of related work across both blocks.")
+    lines.append("")
+    lines.append("## TL;DR")
+    if recommendation is not None:
+        lines.append(
+            f"If we want the cleanest organizer-facing option while prioritizing semantic coherence, start with `{recommendation['proposal_name']}`."
+        )
+    else:
+        lines.append("Start with the top-ranked proposal in the comparison set.")
+    lines.append(
+        f"For the detailed metrics and side-by-side tradeoffs, use `data/poster_layout/proposals/summary.md` and "
+        f"`{Path(str(source['proposal_dir'])) / 'layout_category_summary.md'}`."
+    )
     lines.append("")
     lines.append("## Active Layout System")
     lines.append(
@@ -608,10 +650,10 @@ def build_organizer_memo_markdown(rows: list[dict[str, Any]]) -> str:
     recommended_dir = Path(str(source["proposal_dir"]))
     lines.append(f"- Proposal data: `{recommended_dir / 'proposal.json'}`")
     lines.append(f"- Proposal spreadsheet export: `{recommended_dir / 'proposal.csv'}`")
+    lines.append(f"- Layout category summary: `{recommended_dir / 'layout_category_summary.md'}`")
     lines.append(f"- Analysis report: `{recommended_dir / 'analysis.json'}`")
     lines.append(f"- UMAP day/session comparison: `{recommended_dir / 'session_day_umap.html'}`")
     lines.append(f"- Proposal comparison summary: `data/poster_layout/proposals/summary.md`")
-    lines.append(f"- Claims category summary: `data/poster_layout/proposals/claims_categories.md`")
     lines.append("")
     lines.append("## Suggested Next Step")
     lines.append(
@@ -632,7 +674,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-json", default="data/poster_layout/proposals/summary.json")
     parser.add_argument("--output-csv", default="data/poster_layout/proposals/summary.csv")
     parser.add_argument("--output-md", default="data/poster_layout/proposals/summary.md")
-    parser.add_argument("--output-claims-md", default="data/poster_layout/proposals/claims_categories.md")
     parser.add_argument("--output-organizer-md", default="data/poster_layout/proposals/organizer_memo.md")
     return parser
 
@@ -645,7 +686,6 @@ def main(argv: list[str] | None = None) -> int:
     write_json(Path(args.output_json), payload)
     write_csv(Path(args.output_csv), rows)
     write_text(Path(args.output_md), build_markdown_summary(rows))
-    write_text(Path(args.output_claims_md), build_claims_categories_markdown(rows))
     write_text(Path(args.output_organizer_md), build_organizer_memo_markdown(rows))
     return 0
 

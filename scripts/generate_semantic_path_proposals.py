@@ -9,6 +9,7 @@ from ohbm2026.poster_layout import (
     build_semantic_path_proposal,
     load_layout_inputs,
     write_json,
+    write_listing_csv,
     write_layout_csv,
 )
 
@@ -32,6 +33,7 @@ def _write_proposal_bundle(
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "proposal.json", proposal)
     write_layout_csv(output_dir / "proposal.csv", proposal)
+    write_listing_csv(output_dir / "proposal_listing.csv", proposal, authors_input=Path("data/authors.json"))
     write_json(output_dir / "proposal_session_summaries.json", proposal.get("session_summaries", {}))
     analysis = analyze_layout_proposal(inputs, proposal)
     write_json(output_dir / "analysis.json", analysis)

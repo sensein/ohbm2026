@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import csv
 import numpy as np
 
 from ohbm2026 import poster_layout
@@ -190,6 +191,24 @@ class PosterLayoutTest(unittest.TestCase):
             self._collapse_label_runs(block_two_records, block_two_order),
         )
 
+    def test_standby_time_labels_follow_alternating_block_patterns(self) -> None:
+        self.assertEqual(
+            poster_layout.standby_time_labels_for_session(1),
+            ("Monday, June 15 | 13:45-14:45", "Tuesday, June 16 | 13:30-14:30"),
+        )
+        self.assertEqual(
+            poster_layout.standby_time_labels_for_session(2),
+            ("Monday, June 15 | 14:45-15:45", "Tuesday, June 16 | 12:30-13:30"),
+        )
+        self.assertEqual(
+            poster_layout.standby_time_labels_for_session(3),
+            ("Wednesday, June 17 | 12:45-13:45", "Thursday, June 18 | 14:45-15:45"),
+        )
+        self.assertEqual(
+            poster_layout.standby_time_labels_for_session(4),
+            ("Wednesday, June 17 | 13:45-14:45", "Thursday, June 18 | 13:45-14:45"),
+        )
+
     def test_optimize_main_writes_balanced_conflict_free_assignment(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -209,6 +228,7 @@ class PosterLayoutTest(unittest.TestCase):
 
             self.assertEqual(result, 0)
             proposal = json.loads((output_dir / "proposal.json").read_text(encoding="utf-8"))
+            proposal_listing = (output_dir / "proposal_listing.csv").read_text(encoding="utf-8")
 
         assignments = proposal["assignments"]
         self.assertEqual(len(assignments), 10)
@@ -218,6 +238,11 @@ class PosterLayoutTest(unittest.TestCase):
             for session_id in poster_layout.SESSION_IDS
         }
         self.assertEqual(session_counts, {1: 3, 2: 3, 3: 2, 4: 2})
+        for item in assignments:
+            self.assertEqual(
+                item["standby_session"],
+                poster_layout.standby_session_for_block_and_poster_number(item["block_id"], item["poster_number"]),
+            )
         assignments_by_id = {item["abstract_id"]: item for item in assignments}
         self.assertNotEqual(assignments_by_id[1]["standby_session"], assignments_by_id[3]["standby_session"])
         self.assertEqual(assignments[0]["hall_id"], 1)
@@ -226,8 +251,129 @@ class PosterLayoutTest(unittest.TestCase):
         self.assertEqual(assignments[0]["board_number"], 1)
         self.assertEqual(assignments[0]["board_side"], "A")
         self.assertEqual(assignments[0]["board_label"], "1A")
+        expected_standby_times = poster_layout.standby_time_labels_for_session(assignments[0]["standby_session"])
+        self.assertEqual(assignments[0]["first_standby_time_label"], expected_standby_times[0])
+        self.assertEqual(assignments[0]["second_standby_time_label"], expected_standby_times[1])
         self.assertAlmostEqual(assignments[0]["hall_edge_x0"], 232.0)
         self.assertAlmostEqual(assignments[0]["hall_edge_x1"], 240.7, places=1)
+        self.assertIn("OHBM 2026 POSTER LISTING", proposal_listing)
+        self.assertIn("First Stand-by Time,Second Stand-by Time", proposal_listing)
+        self.assertIn(assignments[0]["first_standby_time_label"], proposal_listing)
+
+    def test_write_listing_csv_uses_utf8_bom_for_unicode_last_names(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            authors_path = root / "authors.json"
+            listing_path = root / "proposal_listing.csv"
+            authors_path.write_text(
+                json.dumps({"authors": [{"id": 100, "last_name": "Tucić"}]}, indent=2),
+                encoding="utf-8",
+            )
+
+            poster_layout.write_listing_csv(
+                listing_path,
+                {
+                    "assignments": [
+                        {
+                            "abstract_id": 1,
+                            "poster_number": 1,
+                            "first_standby_time_label": "Monday, June 15 | 13:45-14:45",
+                            "second_standby_time_label": "Tuesday, June 16 | 13:30-14:30",
+                            "title": "Example title",
+                            "primary_parent_category": "Category",
+                            "first_author_id": 100,
+                        }
+                    ]
+                },
+                authors_input=authors_path,
+            )
+
+            raw_bytes = listing_path.read_bytes()
+
+        self.assertTrue(raw_bytes.startswith(b"\xef\xbb\xbf"))
+        self.assertIn("Tucić".encode("utf-8"), raw_bytes)
+
+    def test_write_layout_csv_moves_categories_before_title_and_adds_neighbor_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            voyage_dir = root / "voyage"
+            claims_dir = root / "claims"
+            for bundle_dir in (voyage_dir, claims_dir):
+                bundle_dir.mkdir(parents=True, exist_ok=True)
+                np.save(
+                    bundle_dir / "vectors.npy",
+                    np.asarray(
+                        [
+                            [1.0, 0.0],
+                            [0.8, 0.2],
+                            [0.0, 1.0],
+                        ],
+                        dtype=np.float32,
+                    ),
+                )
+                (bundle_dir / "metadata.json").write_text(
+                    json.dumps(
+                        {
+                            "ids": [1, 2, 3],
+                            "metadata": [{"id": 1}, {"id": 2}, {"id": 3}],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            output_path = root / "proposal.csv"
+            proposal = {
+                "assignments": [
+                    {
+                        "poster_number": 1,
+                        "abstract_id": 1,
+                        "title": "One",
+                        "primary_parent_category": "Parent A",
+                        "primary_subcategory": "Sub A",
+                        "primary_category": "Parent A :: Sub A",
+                    },
+                    {
+                        "poster_number": 2,
+                        "abstract_id": 2,
+                        "title": "Two",
+                        "primary_parent_category": "Parent A",
+                        "primary_subcategory": "Sub B",
+                        "primary_category": "Parent A :: Sub B",
+                    },
+                    {
+                        "poster_number": 3,
+                        "abstract_id": 3,
+                        "title": "Three",
+                        "primary_parent_category": "Parent B",
+                        "primary_subcategory": "Sub C",
+                        "primary_category": "Parent B :: Sub C",
+                    },
+                ]
+            }
+
+            previous_voyage_dir = poster_layout.DEFAULT_PROPOSAL_CSV_VOYAGE_EMBEDDINGS_DIR
+            previous_claims_dir = poster_layout.DEFAULT_PROPOSAL_CSV_CLAIMS_EMBEDDINGS_DIR
+            try:
+                poster_layout.DEFAULT_PROPOSAL_CSV_VOYAGE_EMBEDDINGS_DIR = str(voyage_dir)
+                poster_layout.DEFAULT_PROPOSAL_CSV_CLAIMS_EMBEDDINGS_DIR = str(claims_dir)
+                poster_layout._load_optional_normalized_embedding_bundle.cache_clear()
+                poster_layout.write_layout_csv(output_path, proposal)
+            finally:
+                poster_layout.DEFAULT_PROPOSAL_CSV_VOYAGE_EMBEDDINGS_DIR = previous_voyage_dir
+                poster_layout.DEFAULT_PROPOSAL_CSV_CLAIMS_EMBEDDINGS_DIR = previous_claims_dir
+                poster_layout._load_optional_normalized_embedding_bundle.cache_clear()
+
+            with output_path.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                fieldnames = list(reader.fieldnames or [])
+                rows = list(reader)
+
+        self.assertLess(fieldnames.index("primary_parent_category"), fieldnames.index("title"))
+        self.assertLess(fieldnames.index("primary_subcategory"), fieldnames.index("title"))
+        self.assertIn("voyage_stage2_neighbor5_mean_cosine_similarity", fieldnames)
+        self.assertIn("claims_neighbor5_mean_cosine_similarity", fieldnames)
+        self.assertAlmostEqual(float(rows[0]["voyage_stage2_neighbor5_mean_cosine_similarity"]), 0.485071, places=5)
+        self.assertAlmostEqual(float(rows[1]["claims_neighbor5_mean_cosine_similarity"]), 0.606339, places=5)
 
     def test_analyze_main_reports_zero_conflicts_and_nearby_orals(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -270,6 +416,8 @@ class PosterLayoutTest(unittest.TestCase):
             session_summary = analysis["session_analysis"][str(session_id)]
             self.assertEqual(session_summary["author_conflicts"]["conflict_count"], 0)
             self.assertLessEqual(len(session_summary["nearest_oral_presentations"]), 2)
+            self.assertIn("first_standby_time_label", session_summary)
+            self.assertIn("second_standby_time_label", session_summary)
         self.assertTrue(all(item.get("assigned_session_id") in poster_layout.SESSION_IDS for item in analysis["oral_presentations"]))
 
     def test_layout_slot_for_block_position_snakes_across_rows(self) -> None:

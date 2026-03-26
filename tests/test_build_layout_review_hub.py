@@ -14,6 +14,20 @@ def _load_hub_module():
 
 
 class LayoutReviewHubTest(unittest.TestCase):
+    def test_layout_system_display_name_handles_olo_taxonomy(self) -> None:
+        module = _load_hub_module()
+        self.assertEqual(
+            module._layout_system_display_name("voyage_stage2_olo_contiguous_31"),
+            "Voyage OLO contiguous categories (31 clusters)",
+        )
+
+    def test_short_proposal_label_keeps_long_variant_names_compact(self) -> None:
+        module = _load_hub_module()
+        self.assertEqual(
+            module._short_proposal_label("semantic_path_voyage31_olo_two_opt_knn20_p8"),
+            "Voyage31 OLO + 2-opt k20",
+        )
+
     def test_render_hub_html_includes_selector_and_navigator_controls(self) -> None:
         module = _load_hub_module()
         html = module.render_hub_html(

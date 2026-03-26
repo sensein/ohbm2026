@@ -92,7 +92,7 @@ class PosterLayoutDayPlotTest(unittest.TestCase):
             self.assertEqual(result, 0)
             html = (proposal_dir / "session_day_umap.html").read_text(encoding="utf-8")
 
-        self.assertIn("Accepted Abstract Session Selection on UI UMAP", html)
+        self.assertIn("Accepted Abstract Standby Pattern Selection on UI UMAP", html)
         self.assertIn("All accepted", html)
         self.assertIn("Poster %{customdata[1]}", html)
 

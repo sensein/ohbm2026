@@ -28,6 +28,7 @@ def _layout_system_display_name(layout_label_system: str) -> str:
         "voyage_stage2_kmeans_25": "Voyage Stage 2 k-means (25 clusters)",
         "voyage_stage2_spectral_31": "Voyage Stage 2 spectral (31 clusters)",
         "minilm_claims_kmeans_28": "MiniLM claims k-means (28 clusters)",
+        "voyage_stage2_olo_contiguous_31": "Voyage OLO contiguous categories (31 clusters)",
     }
     return mapping.get(layout_label_system, layout_label_system.replace("_", " "))
 
@@ -37,6 +38,18 @@ def _proposal_label(proposal_dir: Path) -> str:
     metadata = dict(proposal.get("metadata") or {})
     layout_label_system = str(metadata.get("layout_label_system") or "submitter_primary_secondary")
     return f"{proposal_dir.name} - {_layout_system_display_name(layout_label_system)}"
+
+
+def _short_proposal_label(proposal_name: str) -> str:
+    mapping = {
+        "block_spread_soft": "Block Spread Soft",
+        "semantic_layout_voyage25": "Voyage 25",
+        "semantic_layout_voyage31": "Voyage 31",
+        "semantic_layout_claims28": "Claims 28",
+        "semantic_path_voyage31_olo_two_opt_knn20_p8": "Voyage31 OLO + 2-opt k20",
+        "semantic_path_voyage31_olo_two_opt_knn40_p8": "Voyage31 OLO + 2-opt k40",
+    }
+    return mapping.get(proposal_name, proposal_name.replace("_", " "))
 
 
 def _format_percent(value: Any) -> str:
@@ -100,12 +113,17 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         display: flex;
         flex-direction: column;
         gap: 8px;
+        min-width: 0;
+      }}
+      .main {{
+        min-width: 0;
       }}
       .panel {{
         border: 1px solid rgba(185, 209, 204, 0.95);
         border-radius: 18px;
         background: rgba(255, 255, 255, 0.94);
         padding: 11px 12px;
+        min-width: 0;
       }}
       .panel h1,
       .panel h2 {{
@@ -174,6 +192,7 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         display: grid;
         gap: 4px;
         cursor: pointer;
+        min-width: 0;
       }}
       .proposal-item.is-active {{
         border-color: #0f766e;
@@ -182,7 +201,11 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
       }}
       .proposal-item-title {{
         font-weight: 700;
-        font-size: 14px;
+        font-size: 13px;
+        line-height: 1.25;
+        display: block;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }}
       .proposal-item-meta,
       .note,
@@ -190,6 +213,13 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         color: #5f6c7b;
         font-size: 14px;
         line-height: 1.5;
+      }}
+      .proposal-item-meta {{
+        display: block;
+        font-size: 12px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }}
       .main {{
         display: flex;
@@ -213,6 +243,7 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
       .headline {{
         display: grid;
         gap: 8px;
+        min-width: 0;
       }}
       .headline h1 {{
         margin: 0;
@@ -226,6 +257,7 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         flex-wrap: wrap;
         gap: 6px;
         align-items: center;
+        min-width: 0;
       }}
       .badge {{
         border-radius: 999px;
@@ -234,6 +266,9 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         padding: 5px 9px;
         font-size: 11px;
         font-weight: 700;
+        line-height: 1.3;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }}
       .badge.is-metric {{
         background: white;
@@ -247,11 +282,13 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         max-height: 148px;
         overflow: auto;
         padding-right: 2px;
+        min-width: 0;
       }}
       .layout-detail-host {{
         display: grid;
         gap: 6px;
         align-content: start;
+        min-width: 0;
       }}
       .preview-img {{
         width: 100%;
@@ -365,7 +402,8 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         font-size: 11px;
         line-height: 1.2;
         color: #334155;
-        white-space: nowrap;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }}
       .detail-inline-item strong {{
         color: #111827;
@@ -380,7 +418,8 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         font-size: 11px;
         line-height: 1.2;
         color: #334155;
-        white-space: nowrap;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }}
       .detail-meta-item strong {{
         color: #111827;
@@ -436,10 +475,12 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
       .navigator-status {{
         font-size: 12px;
         color: #334155;
+        overflow-wrap: anywhere;
       }}
       .navigator-shortcut {{
         font-size: 11px;
         color: #5f6c7b;
+        overflow-wrap: anywhere;
       }}
       .controls-row {{
         display: flex;
@@ -494,6 +535,8 @@ def render_hub_html(pages: list[dict[str, Any]]) -> str:
         margin: 0;
         font-size: 12px;
         line-height: 1.35;
+        min-width: 0;
+        overflow-wrap: anywhere;
       }}
       @media (max-width: 1080px) {{
         .shell {{
@@ -1486,7 +1529,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "slug": proposal_dir.name,
                 "label": _proposal_label(proposal_dir),
-                "short_label": proposal_dir.name,
+                "short_label": _short_proposal_label(proposal_dir.name),
                 "taxonomy": taxonomy,
                 "layout_count_label": layout_count_label,
                 "session_count_label": f"Sessions {session_count_label}",

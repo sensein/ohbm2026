@@ -10,10 +10,10 @@ from plotly.subplots import make_subplots
 
 
 SESSION_TITLES = {
-    1: "June 15 standby",
-    2: "June 16 standby",
-    3: "June 17 standby",
-    4: "June 18 standby",
+    1: "June 15-16 alternating pattern A",
+    2: "June 15-16 alternating pattern B",
+    3: "June 17-18 alternating pattern A",
+    4: "June 17-18 alternating pattern B",
 }
 
 
@@ -23,7 +23,7 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Plot poster session/day selections on the UI UMAP"
+        description="Plot poster paired-standby-pattern selections on the UI UMAP"
     )
     parser.add_argument("--proposal-dir", required=True)
     parser.add_argument(
@@ -148,8 +148,8 @@ def main(argv: list[str] | None = None) -> int:
 
     figure.update_layout(
         title=(
-            f"Accepted Abstract Session Selection on UI UMAP: {proposal_dir.name}<br>"
-            "<sup>Grey = all accepted abstracts; colored dots = abstracts in that standby session shaded by poster number.</sup>"
+            f"Accepted Abstract Standby Pattern Selection on UI UMAP: {proposal_dir.name}<br>"
+            "<sup>Grey = all accepted abstracts; colored dots = abstracts in that paired standby pattern shaded by poster number.</sup>"
         ),
         template="plotly_white",
         height=1000,
