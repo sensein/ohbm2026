@@ -9,6 +9,18 @@ original abstract download to the current latest step.
 
 Project conventions that should not be violated live in [CONSTITUTION.md](/Users/satra/software/temp/ohbm2026/CONSTITUTION.md), including the rule that recorded experiment runs must write to fresh directories and never overwrite prior outputs.
 
+For the repo-level intent, reproducibility model, key decisions, and experiment
+history, start with
+[docs/reproducibility-vision.md](/Users/satra/software/temp/ohbm2026/docs/reproducibility-vision.md).
+
+Recommended reading order for a new person or agent:
+
+1. [docs/reproducibility-vision.md](/Users/satra/software/temp/ohbm2026/docs/reproducibility-vision.md)
+2. [README.md](/Users/satra/software/temp/ohbm2026/README.md)
+3. [CONSTITUTION.md](/Users/satra/software/temp/ohbm2026/CONSTITUTION.md)
+4. [memory/summary.md](/Users/satra/software/temp/ohbm2026/memory/summary.md)
+5. the specific plan or experiment README closest to the work you are changing
+
 ## What The Pipeline Produces
 
 Core artifacts:
