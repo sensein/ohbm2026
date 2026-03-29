@@ -8,7 +8,7 @@ Auto-generated from all feature plans. Last updated: 2026-03-28
   `hashlib`, `datetime`), existing `ohbm2026` pipeline modules, and NumPy-backed
   downstream consumers already present in the repo
 - Local JSON/filesystem artifacts under ignored `data/inputs/`,
-  `data/cache/`, `data/outputs/`, `export/`, `tmp/`, and experiment
+  `data/cache/`, `data/outputs/`, `archive/`, `export/`, `tmp/`, and experiment
   directories
 
 ## Project Structure

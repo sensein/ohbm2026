@@ -20,6 +20,7 @@ logs/
 tmp/
 
 # Local working memory archives
+archive/
 memory/archive/
 
 # Local packaging and lock artifacts

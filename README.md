@@ -69,6 +69,8 @@ Local artifact layout rules:
 - `data/cache/` is for resumable caches and checkpoints
 - `data/outputs/experiments/`, `data/outputs/exported-sites/`, and
   `data/outputs/proposals/` are for local derived outputs
+- `archive/` is for local pre-migration backups that preserve legacy paths
+- legacy artifact paths may temporarily remain as symlinks into the new layout
 - `data/`, `export/`, and `tmp/` remain ignored by git
 
 ## Current Latest Step
