@@ -4,11 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
+from ohbm2026 import artifacts
 from ohbm2026.nocd_experiments import (
     annotate_community_structure_scores,
     checkpoint_sweep_summary_markdown,
     discover_checkpoint_configs,
     discover_embedding_sources,
+    filter_embedding_sources,
     load_embedding_source,
     prepare_source_artifacts,
     render_metric_heatmap,
@@ -19,10 +21,11 @@ from ohbm2026.nocd_experiments import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the NOCD pretrained checkpoint sweep experiment")
-    parser.add_argument("--embeddings-root", default="data/embeddings")
+    parser.add_argument("--embeddings-root", default=str(artifacts.EMBEDDINGS_ROOT))
     parser.add_argument("--checkpoint-dir", default="/tmp/nocd/checkpoints")
     parser.add_argument("--neighbor-count", type=int, default=20)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--embedding-source", action="append", default=[])
     parser.add_argument("--output-root", default="experiments/2026-03-25-nocd-checkpoint-sweep/runs/latest")
     parser.add_argument("--allow-existing-output", action="store_true")
     return parser
@@ -50,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     checkpoint_configs, compatibility_templates = discover_checkpoint_configs(checkpoint_dir)
     if not checkpoint_configs:
         raise FileNotFoundError(f"No compatible NOCD checkpoints were discovered in {checkpoint_dir}")
-    source_dirs = discover_embedding_sources(embeddings_root)
+    source_dirs = filter_embedding_sources(discover_embedding_sources(embeddings_root), args.embedding_source)
     summary_rows: list[dict[str, object]] = []
     compatibility_rows: list[dict[str, object]] = []
 

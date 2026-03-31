@@ -50,6 +50,7 @@ from ohbm2026.neuroscape import (
     score_projection,
     semantic_analysis_main,
     split_stage2_matrix,
+    summarize_membership_groups,
     summarize_semantic_clusters,
     summarize_stage2_clusters,
     umap_main,
@@ -238,6 +239,49 @@ class NeuroScapeHelpersTest(unittest.TestCase):
                 self.assertEqual(token, "test-token")
                 self.assertEqual(__import__("os").environ["HF_TOKEN"], "test-token")
                 self.assertEqual(__import__("os").environ["HUGGINGFACE_HUB_TOKEN"], "test-token")
+
+    def test_summarize_membership_groups_includes_rationale_and_primary_topics(self) -> None:
+        import numpy as np
+
+        ids = [1, 2, 3]
+        matrix = np.asarray(
+            [
+                [1.0, 0.0],
+                [0.8, 0.2],
+                [0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+        records = [
+            {
+                "id": 1,
+                "title": "Memory coding in hippocampus",
+                "accepted_for": "Poster",
+                "primary_topic": "Memory",
+                "cluster_document": "hippocampus memory coding fmri",
+            },
+            {
+                "id": 2,
+                "title": "Memory retrieval patterns",
+                "accepted_for": "Poster",
+                "primary_topic": "Memory",
+                "cluster_document": "memory retrieval pattern hippocampus",
+            },
+            {
+                "id": 3,
+                "title": "Motor cortex decoding",
+                "accepted_for": "Talk",
+                "primary_topic": "Motor",
+                "cluster_document": "motor cortex decoding movement",
+            },
+        ]
+
+        summaries = summarize_membership_groups(ids, matrix, records, {0: [1, 2], 1: [3]})
+
+        self.assertEqual(len(summaries), 2)
+        self.assertEqual(summaries[0]["primary_topic_counts"]["Memory"], 2)
+        self.assertIn("This group centers on", summaries[0]["rationale"])
+        self.assertIn("Poster", summaries[0]["rationale"])
 
     def test_extract_raw_keywords_reads_keywords_response(self) -> None:
         abstract = {

@@ -132,6 +132,17 @@ def discover_embedding_sources(embeddings_root: Path) -> list[Path]:
     )
 
 
+def filter_embedding_sources(source_dirs: list[Path], selected_names: list[str] | None = None) -> list[Path]:
+    normalized_names = {str(name).strip() for name in list(selected_names or []) if str(name).strip()}
+    if not normalized_names:
+        return list(source_dirs)
+    filtered = [path for path in source_dirs if path.name in normalized_names]
+    missing = sorted(normalized_names - {path.name for path in filtered})
+    if missing:
+        raise FileNotFoundError(f"Requested embedding source(s) not found: {', '.join(missing)}")
+    return filtered
+
+
 def load_embedding_source(bundle_dir: Path) -> EmbeddingSource:
     metadata = json.loads((bundle_dir / "metadata.json").read_text(encoding="utf-8"))
     ids = [int(value) for value in list(metadata.get("ids") or [])]

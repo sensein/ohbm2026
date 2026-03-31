@@ -13,6 +13,8 @@ or committed artifacts.
 
 ## Current Experiment Index
 
+- [2026-03-30-topic-clustering-optimization/README.md](/Users/satra/software/temp/ohbm2026/experiments/2026-03-30-topic-clustering-optimization/README.md)
+  - compares hard clustering, existing graph-community baselines, and soft overlapping memberships for `voyage_stage2_published`, `openai_stage1`, and `minilm_stage1`
 - [2026-03-22-global-path-variant-sweep/README.md](/Users/satra/software/temp/ohbm2026/experiments/2026-03-22-global-path-variant-sweep/README.md)
   - compared global ordering variants and showed that plain diffusion methods
     did not beat the stronger hierarchical baselines

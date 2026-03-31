@@ -4,11 +4,13 @@ import argparse
 import json
 from pathlib import Path
 
+from ohbm2026 import artifacts
 from ohbm2026.nocd_experiments import (
     annotate_community_structure_scores,
     classic_summary_markdown,
     discover_checkpoint_configs,
     discover_embedding_sources,
+    filter_embedding_sources,
     load_embedding_source,
     prepare_source_artifacts,
     render_metric_heatmap,
@@ -20,10 +22,11 @@ from ohbm2026.nocd_experiments import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the NOCD classic checkpoint prediction experiment")
-    parser.add_argument("--embeddings-root", default="data/embeddings")
+    parser.add_argument("--embeddings-root", default=str(artifacts.EMBEDDINGS_ROOT))
     parser.add_argument("--checkpoint-dir", default="/tmp/nocd/checkpoints")
     parser.add_argument("--neighbor-count", type=int, default=20)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--embedding-source", action="append", default=[])
     parser.add_argument("--output-root", default="experiments/2026-03-25-nocd-classic-predict/runs/latest")
     parser.add_argument("--allow-existing-output", action="store_true")
     return parser
@@ -52,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     classic_config = select_classic_checkpoint_config(checkpoint_configs)
     checkpoint_path = checkpoint_dir / str(classic_config["checkpoint_name"])
 
-    source_dirs = discover_embedding_sources(embeddings_root)
+    source_dirs = filter_embedding_sources(discover_embedding_sources(embeddings_root), args.embedding_source)
     summary_rows: list[dict[str, object]] = []
     for source_dir in source_dirs:
         source = load_embedding_source(source_dir)

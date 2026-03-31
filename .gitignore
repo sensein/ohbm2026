@@ -16,6 +16,10 @@ export/
 .matplotlib-cache/
 experiments/*
 !experiments/README.md
+!experiments/2026-03-30-topic-clustering-optimization/
+!experiments/2026-03-30-topic-clustering-optimization/**/
+!experiments/2026-03-30-topic-clustering-optimization/**/*.md
+!experiments/2026-03-30-topic-clustering-optimization/.gitignore
 logs/
 tmp/
 

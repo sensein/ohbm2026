@@ -124,6 +124,9 @@ class NOCDExperimentsTest(unittest.TestCase):
             self.assertEqual(prepared["adjacency"].shape, (3, 3))
             self.assertEqual(prepared["features"].shape, (3, 2))
 
+            filtered = nocd_experiments.filter_embedding_sources(discovered, ["demo_embeddings"])
+            self.assertEqual(filtered, [bundle])
+
     def test_summary_markdown_helpers_include_requested_metrics(self) -> None:
         classic_rows = nocd_experiments.annotate_community_structure_scores(
             [
@@ -210,6 +213,21 @@ class NOCDExperimentsTest(unittest.TestCase):
                 classic_runner.validate_output_root(output_root, allow_existing_output=False)
             with self.assertRaises(FileExistsError):
                 sweep_runner.validate_output_root(output_root, allow_existing_output=False)
+
+    def test_nocd_scripts_default_to_artifact_embedding_root(self) -> None:
+        classic_runner = _load_script_module("run_nocd_classic_predict_experiment.py")
+        sweep_runner = _load_script_module("run_nocd_checkpoint_sweep_experiment.py")
+
+        self.assertEqual(
+            classic_runner.build_parser().parse_args([]).embeddings_root,
+            "data/outputs/experiments/embeddings",
+        )
+        self.assertEqual(
+            sweep_runner.build_parser().parse_args([]).embeddings_root,
+            "data/outputs/experiments/embeddings",
+        )
+        self.assertEqual(classic_runner.build_parser().parse_args([]).embedding_source, [])
+        self.assertEqual(sweep_runner.build_parser().parse_args([]).embedding_source, [])
 
 
 if __name__ == "__main__":

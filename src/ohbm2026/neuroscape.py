@@ -2082,6 +2082,114 @@ def extract_cluster_keywords(documents: list[str], max_keywords: int = 8) -> lis
     return keywords[:max_keywords]
 
 
+def build_group_rationale(
+    *,
+    group_label: str,
+    keywords: list[str],
+    primary_topic_counts: dict[str, int],
+    accepted_for_counts: dict[str, int],
+) -> str:
+    keyword_phrase = ", ".join(keywords[:3]) if keywords else group_label
+    dominant_topics = sorted(primary_topic_counts.items(), key=lambda item: (-int(item[1]), item[0]))
+    dominant_formats = sorted(accepted_for_counts.items(), key=lambda item: (-int(item[1]), item[0]))
+    topic_phrase = ", ".join(topic for topic, _count in dominant_topics[:2]) if dominant_topics else "multiple areas"
+    format_phrase = (
+        ", ".join(format_name for format_name, _count in dominant_formats[:2])
+        if dominant_formats
+        else "multiple presentation formats"
+    )
+    return (
+        f"This group centers on {keyword_phrase} and connects abstracts spanning {topic_phrase}. "
+        f"The current members are mostly associated with {format_phrase}."
+    )
+
+
+def summarize_membership_groups(
+    ids: list[int],
+    matrix: Any,
+    records: list[dict[str, Any]],
+    group_members: dict[int, list[int]],
+    max_keywords: int = 8,
+    max_representatives: int = 5,
+) -> list[dict[str, Any]]:
+    import numpy as np
+
+    if not group_members:
+        return []
+
+    index_by_id = {int(abstract_id): position for position, abstract_id in enumerate(ids)}
+    record_by_id = {int(record["id"]): record for record in records}
+    centroids: dict[int, Any] = {}
+    valid_group_ids: list[int] = []
+    for group_id, member_ids in sorted(group_members.items()):
+        filtered_member_ids = [int(member_id) for member_id in member_ids if int(member_id) in index_by_id]
+        if not filtered_member_ids:
+            continue
+        member_matrix = matrix[[index_by_id[member_id] for member_id in filtered_member_ids]]
+        centroid = member_matrix.mean(axis=0)
+        centroid_norm = np.linalg.norm(centroid)
+        if centroid_norm:
+            centroid = centroid / centroid_norm
+        centroids[int(group_id)] = centroid
+        valid_group_ids.append(int(group_id))
+
+    if not valid_group_ids:
+        return []
+
+    centroid_matrix = np.vstack([centroids[group_id] for group_id in valid_group_ids])
+    centroid_similarities = centroid_matrix @ centroid_matrix.T
+    summaries: list[dict[str, Any]] = []
+    for group_position, group_id in enumerate(valid_group_ids):
+        member_ids = sorted(int(member_id) for member_id in group_members[group_id] if int(member_id) in index_by_id)
+        member_indices = [index_by_id[member_id] for member_id in member_ids]
+        member_matrix = matrix[member_indices]
+        centroid = centroids[group_id]
+        scores = member_matrix @ centroid
+        representative_order = np.argsort(scores)[::-1][:max_representatives]
+        representative_ids = [member_ids[index] for index in representative_order]
+        documents = [record_by_id.get(member_id, {}).get("cluster_document", "") for member_id in member_ids]
+        keywords = extract_cluster_keywords(documents, max_keywords=max_keywords)
+        accepted_for_counts: dict[str, int] = {}
+        primary_topic_counts: dict[str, int] = {}
+        for member_id in member_ids:
+            record = record_by_id.get(member_id, {})
+            accepted_for = str(record.get("accepted_for") or "Unknown")
+            primary_topic = str(record.get("primary_topic") or "Unknown")
+            accepted_for_counts[accepted_for] = accepted_for_counts.get(accepted_for, 0) + 1
+            primary_topic_counts[primary_topic] = primary_topic_counts.get(primary_topic, 0) + 1
+        similarity_row = centroid_similarities[group_position].copy()
+        similarity_row[group_position] = -1.0
+        nearest_group_position = int(np.argmax(similarity_row)) if len(valid_group_ids) > 1 else group_position
+        label = ", ".join(keywords[:3]) if keywords else f"Group {group_id}"
+        summaries.append(
+            {
+                "group_id": group_id,
+                "size": len(member_ids),
+                "label": label,
+                "keywords": keywords,
+                "rationale": build_group_rationale(
+                    group_label=label,
+                    keywords=keywords,
+                    primary_topic_counts=primary_topic_counts,
+                    accepted_for_counts=accepted_for_counts,
+                ),
+                "accepted_for_counts": accepted_for_counts,
+                "primary_topic_counts": primary_topic_counts,
+                "representative_abstracts": [
+                    {
+                        "id": member_id,
+                        "title": record_by_id.get(member_id, {}).get("title") or "",
+                    }
+                    for member_id in representative_ids
+                ],
+                "most_similar_group_id": valid_group_ids[nearest_group_position],
+                "most_similar_group_score": float(similarity_row[nearest_group_position]),
+                "member_ids": member_ids,
+            }
+        )
+    return summaries
+
+
 def summarize_semantic_clusters(
     ids: list[int],
     matrix: Any,
@@ -2090,65 +2198,24 @@ def summarize_semantic_clusters(
     max_keywords: int = 8,
     max_representatives: int = 5,
 ) -> list[dict[str, Any]]:
-    import numpy as np
-
-    index_by_id = {int(abstract_id): position for position, abstract_id in enumerate(ids)}
     cluster_members: dict[int, list[int]] = {}
     for abstract_id, cluster_id in assignments.items():
         cluster_members.setdefault(int(cluster_id), []).append(int(abstract_id))
-
-    centroids: dict[int, Any] = {}
-    for cluster_id, member_ids in cluster_members.items():
-        cluster_matrix = matrix[[index_by_id[member_id] for member_id in member_ids]]
-        centroid = cluster_matrix.mean(axis=0)
-        centroid_norm = np.linalg.norm(centroid)
-        if centroid_norm:
-            centroid = centroid / centroid_norm
-        centroids[cluster_id] = centroid
-
-    cluster_ids = sorted(cluster_members)
-    centroid_matrix = np.vstack([centroids[cluster_id] for cluster_id in cluster_ids])
-    centroid_similarities = centroid_matrix @ centroid_matrix.T
-    record_by_id = {int(record["id"]): record for record in records}
-
+    group_summaries = summarize_membership_groups(
+        ids,
+        matrix,
+        records,
+        cluster_members,
+        max_keywords=max_keywords,
+        max_representatives=max_representatives,
+    )
     summaries: list[dict[str, Any]] = []
-    for cluster_position, cluster_id in enumerate(cluster_ids):
-        member_ids = sorted(cluster_members[cluster_id])
-        member_indices = [index_by_id[member_id] for member_id in member_ids]
-        member_matrix = matrix[member_indices]
-        centroid = centroids[cluster_id]
-        scores = member_matrix @ centroid
-        representative_order = np.argsort(scores)[::-1][:max_representatives]
-        representative_ids = [member_ids[index] for index in representative_order]
-        documents = [record_by_id[member_id].get("cluster_document", "") for member_id in member_ids]
-        keywords = extract_cluster_keywords(documents, max_keywords=max_keywords)
-        accepted_for_counts: dict[str, int] = {}
-        for member_id in member_ids:
-            accepted_for = record_by_id[member_id].get("accepted_for") or "Unknown"
-            accepted_for_counts[str(accepted_for)] = accepted_for_counts.get(str(accepted_for), 0) + 1
-        similarity_row = centroid_similarities[cluster_position].copy()
-        similarity_row[cluster_position] = -1.0
-        nearest_cluster_position = int(np.argmax(similarity_row))
-        nearest_cluster_id = cluster_ids[nearest_cluster_position]
-
-        summaries.append(
-            {
-                "cluster_id": cluster_id,
-                "size": len(member_ids),
-                "label": ", ".join(keywords[:3]) if keywords else f"Cluster {cluster_id}",
-                "keywords": keywords,
-                "accepted_for_counts": accepted_for_counts,
-                "representative_abstracts": [
-                    {
-                        "id": member_id,
-                        "title": record_by_id[member_id].get("title") or "",
-                    }
-                    for member_id in representative_ids
-                ],
-                "most_similar_cluster_id": nearest_cluster_id,
-                "most_similar_cluster_score": float(similarity_row[nearest_cluster_position]),
-            }
-        )
+    for summary in group_summaries:
+        cluster_summary = dict(summary)
+        cluster_summary["cluster_id"] = int(cluster_summary.pop("group_id"))
+        cluster_summary["most_similar_cluster_id"] = int(cluster_summary.pop("most_similar_group_id"))
+        cluster_summary["most_similar_cluster_score"] = float(cluster_summary.pop("most_similar_group_score"))
+        summaries.append(cluster_summary)
     return summaries
 
 
