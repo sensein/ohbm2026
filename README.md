@@ -9,11 +9,11 @@ original abstract download to the current latest step.
 
 Repository home:
 
-- Git remote `origin`: `git@github.com:satra/ohbm2026.git`
-- GitHub URL: [github.com/satra/ohbm2026](https://github.com/satra/ohbm2026)
+- Git remote `origin`: `git@github.com:sensein/ohbm2026.git`
+- GitHub URL: [github.com/sensein/ohbm2026](https://github.com/sensein/ohbm2026)
 
 Project conventions that should not be violated live in
-[CONSTITUTION.md](/Users/satra/software/temp/ohbm2026/CONSTITUTION.md),
+[CONSTITUTION.md](CONSTITUTION.md),
 including the rules that Python work stays inside the repository-local `.venv`,
 recorded experiment runs write to fresh directories instead of overwriting prior
 outputs, behavior-changing work stays plan-first and test-driven, and secrets
@@ -22,24 +22,24 @@ never get copied into the repo or logs.
 This README is the operational runbook, not the full project charter.
 For the repo-level intent, reproducibility model, authoritative defaults, key
 decisions, and experiment history, start with
-[docs/reproducibility-vision.md](/Users/satra/software/temp/ohbm2026/docs/reproducibility-vision.md).
+[docs/reproducibility-vision.md](docs/reproducibility-vision.md).
 
 If you only read one document before changing behavior, read
-[docs/reproducibility-vision.md](/Users/satra/software/temp/ohbm2026/docs/reproducibility-vision.md)
+[docs/reproducibility-vision.md](docs/reproducibility-vision.md)
 first.
 
 Catalogs for the rest of the repository:
 
-- [docs/README.md](/Users/satra/software/temp/ohbm2026/docs/README.md)
-- [experiments/README.md](/Users/satra/software/temp/ohbm2026/experiments/README.md)
+- [docs/README.md](docs/README.md)
+- [experiments/README.md](experiments/README.md)
 
 Recommended reading order for a new person or agent:
 
-1. [docs/reproducibility-vision.md](/Users/satra/software/temp/ohbm2026/docs/reproducibility-vision.md)
-2. [README.md](/Users/satra/software/temp/ohbm2026/README.md)
-3. [docs/README.md](/Users/satra/software/temp/ohbm2026/docs/README.md)
-4. [CONSTITUTION.md](/Users/satra/software/temp/ohbm2026/CONSTITUTION.md)
-5. [memory/summary.md](/Users/satra/software/temp/ohbm2026/memory/summary.md)
+1. [docs/reproducibility-vision.md](docs/reproducibility-vision.md)
+2. [README.md](README.md)
+3. [docs/README.md](docs/README.md)
+4. [CONSTITUTION.md](CONSTITUTION.md)
+5. [memory/summary.md](memory/summary.md)
 6. the specific plan or experiment README closest to the work you are changing
 
 ## What The Pipeline Produces
@@ -121,7 +121,7 @@ Optional, depending on which branch of the pipeline you run:
 
 ## Environment Variables
 
-Create `.env` from [.env.sample](/Users/satra/software/temp/ohbm2026/.env.sample).
+Create `.env` from [.env.sample](.env.sample).
 
 Common keys:
 

@@ -72,7 +72,7 @@ defaults, but only after they are documented and auditable.
 ## Constitutional Commitments
 
 The project constitution lives in
-[CONSTITUTION.md](/Users/satra/software/temp/ohbm2026/CONSTITUTION.md). The
+[CONSTITUTION.md](../CONSTITUTION.md). The
 practical commitments future operators should internalize are:
 
 - all Python execution must use the repository-local `.venv` via
