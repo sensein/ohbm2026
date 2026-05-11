@@ -444,6 +444,14 @@ def load_neighbors(path: Path, top_k: int) -> dict[int, list[dict[str, Any]]]:
     }
 
 
+def load_distant(path: Path, bottom_k: int) -> dict[int, list[dict[str, Any]]]:
+    data = load_json(path)
+    return {
+        int(abstract_id): list(entries[:bottom_k])
+        for abstract_id, entries in (data.get("distant") or {}).items()
+    }
+
+
 def parse_code_list(value: str | None) -> list[str]:
     if not value:
         return []
@@ -772,6 +780,7 @@ def build_ui_payload(
     reference_lookup = load_reference_lookup(references_input)
     phenomena_theories_lookup = load_phenomena_theories_lookup(phenomena_theories_input)
     neighbors = load_neighbors(neighbors_input, top_neighbors)
+    distant = load_distant(neighbors_input, top_neighbors)
     cluster_layer_specs = build_cluster_layer_specs(
         cluster_15_dir=cluster_15_dir,
         cluster_25_dir=cluster_25_dir,
@@ -873,6 +882,7 @@ def build_ui_payload(
 
         relations[str(abstract_id)] = {
             "neighbors": neighbors.get(abstract_id, []),
+            "distant": distant.get(abstract_id, []),
             "clusters": {
                 layer_key: partition["assignments"].get(abstract_id)
                 for layer_key, partition in partitions.items()
