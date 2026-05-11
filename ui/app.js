@@ -1448,7 +1448,9 @@ async function loadStore() {
     Object.values(DATA_FILES).map((url) => fetch(url).then((response) => response.json()))
   );
   const preparedSearchAbstracts = search.abstracts.map((record) => {
+    const idStr = String(record.id);
     const allText = [
+      idStr,
       record.title || "",
       record.primary_topic || "",
       ...(record.keywords || []),
@@ -1462,7 +1464,7 @@ async function loadStore() {
       _titleTokens: buildTokenFrequency(record.title || ""),
       _topicTokens: buildTokenFrequency(record.primary_topic || ""),
       _keywordTokens: buildTokenFrequency([...(record.keywords || []), ...(record.figure_keywords || [])].join(" ")),
-      _blobTokens: buildTokenFrequency(record.search_blob || ""),
+      _blobTokens: buildTokenFrequency(idStr + " " + (record.search_blob || "")),
       _allTokens: buildTokenFrequency(allText),
     };
   });
