@@ -407,7 +407,7 @@ def write_embedding_bundle(
     return {"ids": ids, "matrix": matrix, "metadata": metadata}
 
 
-def compute_neighbors(ids: list[int], matrix: Any, top_k: int = 10) -> dict[str, Any]:
+def compute_neighbors(ids: list[int], matrix: Any, top_k: int = 10, bottom_k: int = 5) -> dict[str, Any]:
     import numpy as np
 
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
@@ -415,15 +415,27 @@ def compute_neighbors(ids: list[int], matrix: Any, top_k: int = 10) -> dict[str,
     normalized = matrix / norms
     similarities = normalized @ normalized.T
     neighbors: dict[str, list[dict[str, float]]] = {}
+    distant: dict[str, list[dict[str, float]]] = {}
     for index, abstract_id in enumerate(ids):
         row = similarities[index].copy()
         row[index] = -1.0
         neighbor_indices = np.argsort(row)[-top_k:][::-1]
         neighbors[str(abstract_id)] = [
-            {"id": int(ids[neighbor_index]), "score": float(row[neighbor_index])}
-            for neighbor_index in neighbor_indices
+            {"id": int(ids[ni]), "score": float(row[ni])}
+            for ni in neighbor_indices
         ]
-    return {"top_k": top_k, "neighbors": neighbors}
+        if bottom_k > 0:
+            row[index] = 2.0  # exclude self from bottom-k (cosine sim max is 1.0)
+            distant_indices = np.argsort(row)[:bottom_k]
+            distant[str(abstract_id)] = [
+                {"id": int(ids[di]), "score": float(row[di])}
+                for di in distant_indices
+            ]
+    result: dict[str, Any] = {"top_k": top_k, "neighbors": neighbors}
+    if bottom_k > 0:
+        result["bottom_k"] = bottom_k
+        result["distant"] = distant
+    return result
 
 
 def write_neuroscape_manifest(output_path: Path) -> None:

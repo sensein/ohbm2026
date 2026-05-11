@@ -1330,6 +1330,32 @@ function renderDetail() {
     relatedDisclosure.body.innerHTML = `<div class="empty-state">No precomputed nearest neighbors available.</div>`;
   }
   relationsBlock.body.appendChild(relatedDisclosure.details);
+
+  const dissimilarDisclosure = createDisclosureShell("Delightfully different", {
+    open: false,
+    meta: `${(relation.distant || []).length} abstracts`,
+  });
+  if ((relation.distant || []).length > 0) {
+    const dissimilarList = document.createElement("div");
+    dissimilarList.className = "link-list";
+    for (const item of relation.distant.slice(0, 8)) {
+      const record = store.byId[String(item.id)];
+      const button = document.createElement("button");
+      button.type = "button";
+      button.innerHTML = `
+        <strong>#${item.id}</strong> · ${escapeHtml(record?.accepted_for || "Unknown")}<br />
+        ${escapeHtml(record?.title || "Unknown abstract")}<br />
+        <span class="reference-note">Similarity ${Number(item.score).toFixed(3)}</span>
+      `;
+      button.addEventListener("click", () => setSelectedId(item.id));
+      dissimilarList.appendChild(button);
+    }
+    dissimilarDisclosure.body.appendChild(dissimilarList);
+  } else {
+    dissimilarDisclosure.body.innerHTML = `<div class="empty-state">No dissimilar abstracts available. Regenerate the site after re-running the embedding pipeline.</div>`;
+  }
+  relationsBlock.body.appendChild(dissimilarDisclosure.details);
+
   view.appendChild(relationsBlock.section);
 
   const sectionsBlock = createDetailSection("Abstract content", { open: false });
