@@ -298,11 +298,14 @@ suite catches it.
   network error (retried), exhausted retries, schema-drift on used
   field, semantically empty corpus, partial fetch. Silent fallbacks,
   bare excepts, and "log and continue" handlers are PROHIBITED.
-- **FR-008**: The fetch-abstracts stage MUST write all artifacts (the
-  corpus snapshot, the schema introspection, the provenance record,
-  any retry-state checkpoint) under the existing gitignored
-  `data/inputs/` root. The stage MUST refuse to write outside the
-  gitignored boundary even if explicitly directed to.
+- **FR-008**: The fetch-abstracts stage MUST write all artifacts
+  under the existing gitignored data roots: the corpus snapshot
+  under `data/primary/`; the GraphQL source snapshot, the GraphQL
+  schema artifact, and the provenance record under `data/inputs/`;
+  the resume checkpoint under `data/cache/fetch_abstracts/`; figure
+  assets under `data/inputs/assets/`. The stage MUST refuse to
+  write outside the gitignored boundary even if explicitly directed
+  to.
 - **FR-009**: The per-stage pattern documented for future stages MUST
   define and name each of the six contract elements: input contract,
   output contract, provenance contract, error-handling contract,
@@ -568,6 +571,16 @@ of them can be overridden in `/speckit-clarify` or `/speckit-plan`.
   to record an empty-corpus state (e.g. for early-cycle testing),
   they can pass an explicit `--allow-empty` flag added during
   planning; the default remains refuse.
+- **SOFT-tier registry starts empty in production**: existing
+  downstream consumers (`enrichment.py`, `openalex.py`,
+  `neuroscape.py`, `ui.py`, `poster_layout.py`, etc.) do NOT yet
+  declare `CONSUMED_ABSTRACT_FIELDS`, so the SOFT set is effectively
+  empty when Stage 1 runs in production at v1. SOFT-tier
+  classification is exercised in tests via synthetic registries (per
+  SC-003's second half). The `CONSUMED_ABSTRACT_FIELDS` declarations
+  land in the per-stage cleanup rounds that touch each consuming
+  module (Stage 2..N). This is a deliberate phasing decision: Stage
+  1 ships the mechanism; later stages populate it.
 
 ## Future Work (explicitly OUT of scope for this spec)
 
@@ -594,6 +607,3 @@ Listed here so they are not lost; each will be its own
   These are clear cleanup candidates but their refactors land in
   the per-stage rounds that touch them, not in this Stage-1 spec.
 - **Pytest migration**: candidate later improvement; not in v1.
-- **Renaming `ohbmcli ingest` to `ohbmcli fetch-abstracts`**:
-  candidate later improvement; backward-compatible alias decisions
-  belong in a deprecation-cycle spec, not here.
