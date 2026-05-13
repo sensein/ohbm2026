@@ -169,5 +169,39 @@ class CLITest(unittest.TestCase):
         manifest_main.assert_called_once_with(["--output", "manifest.json"])
 
 
+class TestIngestSubcommandRemoved(unittest.TestCase):
+    """T011 — `ohbmcli ingest` is REMOVED (no backward-compat alias).
+    Per spec FR-014 + Clarifications session 2026-05-12.
+
+    Hermetic safety net: we mock `cli.assets.main` so that, in red
+    phase (where `ingest` is still routed), the test fails FAST with
+    no live API calls. Once `ingest` is removed in T017, argparse
+    will reject it at parse time and raise SystemExit.
+    """
+
+    def test_ingest_subcommand_is_not_a_known_choice(self) -> None:
+        with mock.patch.object(cli.assets, "main", return_value=0):
+            with self.assertRaises(SystemExit):
+                cli.main(["ingest"])
+
+
+class TestFetchAbstractsSubcommand(unittest.TestCase):
+    """T011 — `ohbmcli fetch-abstracts` wires to fetch_stage.main.
+
+    Hermetic safety net: if `ohbm2026.fetch_stage` does not exist
+    yet (red phase), the test fails on ImportError before any other
+    code runs — no live API call possible.
+    """
+
+    def test_fetch_abstracts_delegates_to_fetch_stage_main(self) -> None:
+        from ohbm2026 import fetch_stage as fetch_stage_module
+
+        with mock.patch.object(fetch_stage_module, "main", return_value=0) as fs_main:
+            result = cli.main(["fetch-abstracts", "--allow-empty"])
+
+        self.assertEqual(result, 0)
+        fs_main.assert_called_once_with(["--allow-empty"])
+
+
 if __name__ == "__main__":
     unittest.main()
