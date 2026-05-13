@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Pre-commit hook: enforce the automatable subset of the project constitution.
+# Install once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/.specify/scripts/bash/constitution-check.sh" --staged
