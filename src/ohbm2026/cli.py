@@ -6,6 +6,7 @@ import sys
 from ohbm2026 import (
     artifacts,
     assets,
+    enrich_stage,
     enrichment,
     fetch_stage,
     neuroscape,
@@ -46,14 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     refresh_parser = subparsers.add_parser("refresh-assets", help="Refresh local figure assets from an existing normalized abstracts dataset")
     _copy_actions(refresh_parser, assets.build_parser())
 
-    enrich_parser = subparsers.add_parser("enrich", help="Build enriched abstracts from local databases")
-    _copy_actions(enrich_parser, enrichment.build_enrich_parser())
-
-    claims_parser = subparsers.add_parser("extract-claims", help="Extract claim lists from abstracts with cllm")
-    _copy_actions(claims_parser, enrichment.build_claim_extraction_parser())
-
-    figure_parser = subparsers.add_parser("analyze-figures", help="Analyze local figures with Ollama")
-    _copy_actions(figure_parser, enrichment.build_figure_analysis_parser())
+    enrich_abstracts_parser = subparsers.add_parser(
+        "enrich-abstracts",
+        help="Stage 2: enrich the accepted corpus (figures, claims, references)",
+    )
+    _copy_actions(enrich_abstracts_parser, enrich_stage._build_parser())
 
     minilm_parser = subparsers.add_parser("embed-minilm", help="Generate local MiniLM embeddings")
     _copy_actions(minilm_parser, neuroscape.build_minilm_parser())
@@ -115,12 +113,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _copy_actions(analyze_stage2_parser, neuroscape.build_stage2_analysis_parser())
 
-    references_parser = subparsers.add_parser(
-        "reference-metadata",
-        help="Resolve abstract references against OpenAlex and persist citation metadata",
-    )
-    _copy_actions(references_parser, openalex.build_parser())
-
     title_audit_parser = subparsers.add_parser(
         "title-audit",
         help="Write an audit report for cleaned abstract titles",
@@ -169,12 +161,8 @@ def main(argv: list[str] | None = None) -> int:
         return fetch_stage.main(subcommand_argv)
     if command == "refresh-assets":
         return _run_refresh_assets(subcommand_argv)
-    if command == "enrich":
-        return enrichment.enrich_main(subcommand_argv)
-    if command == "extract-claims":
-        return enrichment.extract_claims_main(subcommand_argv)
-    if command == "analyze-figures":
-        return enrichment.analyze_figures_main(subcommand_argv)
+    if command == "enrich-abstracts":
+        return enrich_stage.main(subcommand_argv)
     if command == "embed-minilm":
         return neuroscape.minilm_main(subcommand_argv)
     if command == "embed-hf":
@@ -199,8 +187,6 @@ def main(argv: list[str] | None = None) -> int:
         return neuroscape.projection_optimize_main(subcommand_argv)
     if command == "analyze-stage2":
         return neuroscape.stage2_analysis_main(subcommand_argv)
-    if command == "reference-metadata":
-        return openalex.main(subcommand_argv)
     if command == "title-audit":
         return titles.main(subcommand_argv)
     if command == "export-ui":
