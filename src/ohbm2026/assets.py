@@ -44,6 +44,40 @@ IMAGE_EXTENSIONS = {
 URL_PATTERN = re.compile(r"https?://[^\s<>'\")]+")
 TARGET_FIGURE_QUESTION_TOKENS = ("methods", "results")
 
+# This module writes `data/primary/abstracts.json`; it does NOT read
+# from it. Declaration kept for symmetry with the per-stage pattern
+# (research.md §4 / FR-021) — once a consumer module reads from the
+# normalized corpus, it adds its own CONSUMED_ABSTRACT_FIELDS.
+CONSUMED_ABSTRACT_FIELDS: frozenset[tuple[str, str]] = frozenset()
+
+# Per-record state machine for Stage 1 (data-model.md). Legal forward
+# transitions only. The orchestrator's checkpoint is the source of
+# truth for actual progress; this helper validates a transition is
+# permitted before committing it.
+_LEGAL_TRANSITIONS: dict[str, frozenset[str]] = {
+    "pending": frozenset({"corpus_fetched"}),
+    "corpus_fetched": frozenset({"figures_in_progress", "done"}),
+    "figures_in_progress": frozenset({"done", "failed-retryable"}),
+    "failed-retryable": frozenset({"done", "figures_in_progress"}),
+    "done": frozenset(),
+    "failed-blocking": frozenset(),
+}
+
+
+def advance_record_state(current: str, next_state: str) -> str:
+    """Validate a per-record state transition; return ``next_state`` if
+    legal, raise ``ValueError`` otherwise. Used by the orchestrator to
+    keep the checkpoint's per-record map honest."""
+    legal = _LEGAL_TRANSITIONS.get(current)
+    if legal is None:
+        raise ValueError(f"Unknown state: {current!r}")
+    if next_state not in legal:
+        raise ValueError(
+            f"Illegal record-state transition: {current!r} → {next_state!r}; "
+            f"legal next states from {current!r}: {sorted(legal)}"
+        )
+    return next_state
+
 
 @dataclass
 class AssetDownload:
@@ -249,23 +283,94 @@ def refresh_local_assets_from_database(
     return database
 
 
+def _flatten_program_session_row(pss: dict[str, Any]) -> dict[str, Any]:
+    """Flatten one ``program_sessions_submissions`` junction row into a
+    ``program_sessions[]`` entry per FR-021 / data-model.md."""
+    if not isinstance(pss, dict):
+        return {}
+    ps = pss.get("program_session") or {}
+    pd = ps.get("program_date") or {}
+    pl = ps.get("program_location") or {}
+    ptype = ps.get("program_type") or {}
+    ptrack = ps.get("program_track") or {}
+    return {
+        "session_id": ps.get("id"),
+        "session_name": ps.get("name"),
+        "session_type": ptype.get("name") if isinstance(ptype, dict) else None,
+        "session_track": ptrack.get("name") if isinstance(ptrack, dict) else None,
+        "session_date": pd.get("program_date") if isinstance(pd, dict) else None,
+        "session_location": pl.get("name") if isinstance(pl, dict) else None,
+        "session_start_time": ps.get("start_time"),
+        "session_end_time": ps.get("end_time"),
+        "standby_start_time": pss.get("start_time"),
+        "standby_end_time": pss.get("end_time"),
+        "display_order": pss.get("display_order"),
+    }
+
+
 def normalize_abstract(raw: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one Oxford Abstracts submission payload into the
+    Stage 1 corpus record. Maps upstream ``program_code`` to
+    ``poster_id`` (FR-020) and flattens ``program_sessions_submissions``
+    into ``program_sessions`` (FR-021)."""
     responses = [
         {"question_name": item.get("question", {}).get("question_name"), "value": item.get("value")}
         for item in raw.get("responses", [])
     ]
     response_values = [item["value"] for item in responses if isinstance(item.get("value"), str)]
     authors = sorted(raw.get("authors", []), key=lambda item: item.get("author_order", 0))
+    program_sessions = [
+        _flatten_program_session_row(pss)
+        for pss in (raw.get("program_sessions_submissions") or [])
+    ]
     return {
         "id": raw.get("id"),
+        "poster_id": raw.get("program_code"),
         "title": extract_value_field(raw.get("title")),
         "accepted_for": extract_value_field(raw.get("accepted_for")),
         "authors": authors,
         "responses": responses,
         "external_urls": extract_external_urls(response_values),
         "figure_urls": extract_target_figure_urls(responses),
+        "program_sessions": program_sessions,
         "local_assets": [],
     }
+
+
+def fetch_content_batches(
+    *,
+    api_key: str,
+    submission_ids: list[int],
+    batch_size: int,
+    on_batch_complete: "callable",
+    on_record_state_change: "callable",
+    timeout_start: float = DEFAULT_TIMEOUT_START_SECONDS,
+    timeout_limit: float = DEFAULT_TIMEOUT_LIMIT_SECONDS,
+):
+    """Generator: fetch submission content in chunks of ``batch_size``,
+    firing ``on_record_state_change(sid, state)`` for each per-record
+    transition and ``on_batch_complete(batch_ids)`` after the batch
+    finishes. Yields one normalized abstract per submission in input
+    order.
+
+    Per-record transitions emitted (no-figures path; the orchestrator
+    can layer figure-resolution on top with additional transitions):
+    ``pending`` → ``corpus_fetched`` → ``done``."""
+    for batch in chunked(submission_ids, batch_size):
+        for sid in batch:
+            on_record_state_change(sid, "pending")
+        raw_batch = fetch_abstract_content(
+            api_key,
+            batch,
+            timeout_start=timeout_start,
+            timeout_limit=timeout_limit,
+        )
+        for raw in raw_batch:
+            sid = raw.get("id")
+            on_record_state_change(sid, "corpus_fetched")
+            yield normalize_abstract(raw)
+            on_record_state_change(sid, "done")
+        on_batch_complete(list(batch))
 
 
 def build_database(

@@ -29,16 +29,25 @@ def _run_in_tmp_repo() -> TemporaryDirectory:
 
 
 def _fake_introspection() -> dict[str, object]:
+    """Matches Hasura naming: GraphQL type name = table name in
+    lowercase. Field names match what ABSTRACT_CONTENTS_QUERY asks
+    for, so the hard-set extraction's `(parent_field_name,
+    child_name)` keys overlap correctly with this introspection's
+    `(type_name, field_name)` keys."""
     return {
-        "queryType": {"name": "Query"},
+        "queryType": {"name": "query_root"},
         "types": [
             {
                 "kind": "OBJECT",
-                "name": "Submission",
+                "name": "submissions",
                 "fields": [
                     {"name": "id", "type": {"kind": "SCALAR", "name": "Int", "ofType": None}, "args": []},
-                    {"name": "title", "type": {"kind": "SCALAR", "name": "String", "ofType": None}, "args": []},
-                    {"name": "poster_id", "type": {"kind": "SCALAR", "name": "String", "ofType": None}, "args": []},
+                    {"name": "program_code", "type": {"kind": "SCALAR", "name": "String", "ofType": None}, "args": []},
+                    {"name": "title", "type": {"kind": "OBJECT", "name": "title_responses", "ofType": None}, "args": []},
+                    {"name": "accepted_for", "type": {"kind": "OBJECT", "name": "submission_acceptance", "ofType": None}, "args": []},
+                    {"name": "authors", "type": {"kind": "OBJECT", "name": "authors", "ofType": None}, "args": []},
+                    {"name": "responses", "type": {"kind": "OBJECT", "name": "question_responses", "ofType": None}, "args": []},
+                    {"name": "program_sessions_submissions", "type": {"kind": "OBJECT", "name": "program_sessions_submissions", "ofType": None}, "args": []},
                 ],
             },
         ],
@@ -63,12 +72,22 @@ def _patch_upstream(
     content_factory=_fake_submission,
 ):
     """Context-manager helper: patches every upstream call in
-    `ohbm2026.graphql_api` so fetch_stage.main() can run hermetically.
-    Returns the active mock patchers for use in assertions."""
+    `ohbm2026.graphql_api` AND its name-imported reference inside
+    `ohbm2026.assets` so fetch_stage.main() can run hermetically.
+
+    Both targets are patched because `assets.py` imports
+    `fetch_abstract_content` by name (a local reference); patching
+    only the upstream module would leave the local binding active
+    and the test would silently hit the live endpoint.
+    """
+    from ohbm2026 import assets as assets_module
     from ohbm2026 import graphql_api
 
     introspection = introspection or _fake_introspection()
     submission_ids = submission_ids if submission_ids is not None else [1, 2, 3]
+
+    def content_side_effect(api_key, ids, **kw):
+        return [content_factory(sid) for sid in ids]
 
     patches = [
         mock.patch.object(graphql_api, "fetch_schema_introspection", return_value=introspection),
@@ -80,7 +99,12 @@ def _patch_upstream(
         mock.patch.object(
             graphql_api,
             "fetch_abstract_content",
-            side_effect=lambda api_key, ids, **kw: [content_factory(sid) for sid in ids],
+            side_effect=content_side_effect,
+        ),
+        mock.patch.object(
+            assets_module,
+            "fetch_abstract_content",
+            side_effect=content_side_effect,
         ),
     ]
     return patches
@@ -269,17 +293,13 @@ class ResumabilityContractTests(unittest.TestCase):
 
     def test_resume_after_mid_batch_interruption_completes_without_refetching_done_records(self) -> None:
         from ohbm2026 import fetch_stage
-        from ohbm2026 import graphql_api
 
         all_ids = [1, 2, 3, 4]
         seen_ids: list[int] = []
 
-        def fake_content(api_key, ids, **kw):
-            seen_ids.extend(ids)
-            # First call: pretend partial-batch failure for id 3 onward
-            # so the orchestrator's per-record state for ids 1,2 lands
-            # as `done` but the run halts before finishing 3+.
-            return [_fake_submission(sid) for sid in ids]
+        def recording_factory(sid: int) -> dict[str, object]:
+            seen_ids.append(sid)
+            return _fake_submission(sid)
 
         with _run_in_tmp_repo() as tmp_name, mock.patch.dict(
             os.environ, {"OHBM2026_API": "fake"}, clear=False
@@ -323,10 +343,11 @@ class ResumabilityContractTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            # Second run (resume): record what upstream IDs were requested.
+            # Second run (resume): record what upstream IDs were requested
+            # via the recording content factory.
             seen_ids.clear()
             with mock.patch("ohbm2026.fetch_stage.Path.cwd", return_value=tmp), _StackedPatches(
-                _patch_upstream(submission_ids=all_ids, content_factory=_fake_submission)
+                _patch_upstream(submission_ids=all_ids, content_factory=recording_factory)
             ):
                 second = fetch_stage.main([])
 
@@ -341,6 +362,7 @@ class DiscoveryContractTests(unittest.TestCase):
     mismatched bound_schema_hash refuses to resume silently."""
 
     def test_introspection_call_happens_before_content_calls(self) -> None:
+        from ohbm2026 import assets as assets_module
         from ohbm2026 import fetch_stage
         from ohbm2026 import graphql_api
 
@@ -362,7 +384,8 @@ class DiscoveryContractTests(unittest.TestCase):
             os.environ, {"OHBM2026_API": "fake"}, clear=False
         ), mock.patch.object(graphql_api, "fetch_schema_introspection", side_effect=intro_recorder), \
              mock.patch.object(graphql_api, "fetch_abstract_ids", side_effect=ids_recorder), \
-             mock.patch.object(graphql_api, "fetch_abstract_content", side_effect=content_recorder):
+             mock.patch.object(graphql_api, "fetch_abstract_content", side_effect=content_recorder), \
+             mock.patch.object(assets_module, "fetch_abstract_content", side_effect=content_recorder):
             tmp = Path(tmp_name)
             with mock.patch("ohbm2026.fetch_stage.Path.cwd", return_value=tmp):
                 exit_code = fetch_stage.main([])
