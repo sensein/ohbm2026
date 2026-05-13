@@ -28,6 +28,21 @@
   serves as the foundation for downstream experimentation. Stage 1's
   job is to make that representation's upstream input trustworthy and
   re-fetchable without rework.
+- Q: At what granularity does Stage 1 checkpoint progress so an
+  interrupted fetch can resume? → A: Combined — a page-level cursor
+  for the GraphQL query AND per-record completion markers within the
+  in-flight page. Worst-case redo on interruption is bounded to the
+  records still in flight when the interruption happened (not a full
+  page, not the whole fetch).
+- Q: How is "used by pipeline" defined for schema-drift classification
+  — what blocks the fetch versus what is informational? → A: Tiered.
+  Fields the GraphQL fetch query body requests are the **hard
+  contract** — drift on these blocks Stage 1. Fields any downstream
+  pipeline module reads from `data/primary/abstracts.json` are the
+  **soft contract** — drift on these is recorded in the schema-diff
+  summary with a "DOWNSTREAM IMPACT" tag, but Stage 1 still completes.
+  Operators see both classes in one place; only the hard class halts
+  the fetch.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -180,6 +195,19 @@ suite catches it.
 
 ### Edge Cases
 
+- A field that is BOTH in the GraphQL query body AND consumed
+  downstream changes upstream → classified as HARD (drift blocks
+  Stage 1); the downstream-impact tag is still recorded alongside
+  the block so the operator knows which downstream module also
+  needs updating once they fix the fetch query.
+- A field is in the soft-contract set but the upstream schema
+  has dropped it → SOFT-tier entry with `DOWNSTREAM IMPACT`, Stage
+  1 completes but the abstracts.json column will be null for that
+  field going forward. The consuming module's next run is the
+  operator's problem to plan, not Stage 1's problem to block.
+- A new field is added upstream that no part of the pipeline reads
+  → INFORMATIONAL entry in the schema-diff summary; no action
+  required by Stage 1.
 - The `OHBM2026_API` env var is missing → fail immediately with a
   named error, do not attempt the request, do not overwrite local
   artifacts.
@@ -215,10 +243,24 @@ suite catches it.
   alongside the corpus snapshot on every successful run.
 - **FR-003**: On every run, the fetch-abstracts stage MUST compare the
   freshly fetched schema against the most recent locally persisted
-  schema (if any). Differences in fields the pipeline actually uses
-  MUST surface as a precise blocking error; differences in fields the
-  pipeline does not use MUST be recorded in provenance and MUST NOT
-  block the run.
+  schema (if any). The comparison MUST partition every field-level
+  difference into one of three tiers:
+  - **HARD CONTRACT** — fields the GraphQL fetch query body
+    requests. Any drift here (removed type, removed field, renamed
+    field, type change on a used field, required-vs-optional flip
+    on a used field) MUST surface as a precise blocking error
+    naming the affected field, the old shape, and the new shape;
+    Stage 1 MUST exit non-zero without overwriting the existing
+    corpus snapshot.
+  - **SOFT CONTRACT** — fields any `src/ohbm2026/` module reads
+    from `data/primary/abstracts.json` (and that the fetch query
+    populates into the normalized corpus). Drift here MUST be
+    recorded in the schema-diff summary with a `DOWNSTREAM IMPACT`
+    tag naming the consuming module(s) and field; Stage 1 MUST
+    complete (no block), and the operator's next step is to update
+    the consuming module in a separate spec.
+  - **INFORMATIONAL** — all other schema changes. Recorded in the
+    diff summary for visibility; no impact on Stage 1.
 - **FR-004**: The fetch-abstracts stage MUST be idempotent on full
   re-run against unchanged upstream state: the primary corpus snapshot
   and the schema artifact MUST be content-identical between runs;
@@ -291,6 +333,24 @@ suite catches it.
   MUST contain enough information to (a) decide whether to resume,
   (b) know how far the previous run got, and (c) explain to a
   human what was completed and what is still pending.
+- **FR-018**: The checkpoint MUST track progress at TWO granularities
+  simultaneously: (1) **page-level** — the last successfully
+  completed GraphQL page cursor, so resume can skip every fully
+  retrieved page with no GraphQL traffic; (2) **per-record within
+  the in-flight page** — completion markers for each abstract
+  inside the page that was being processed when the interruption
+  happened, so resume re-fetches only the records that were not yet
+  fully resolved (corpus row plus any linked figure assets). The
+  worst-case redo on interruption is bounded to the records in
+  flight, NOT a full page and NOT the whole fetch.
+- **FR-019**: The checkpoint MUST be self-validating against the
+  persisted GraphQL schema artifact. If the schema artifact's hash
+  in the checkpoint does not match the most recent locally persisted
+  schema, the checkpoint MUST be treated as untrustworthy and the
+  next run MUST refuse to resume silently — it surfaces the
+  mismatch and requires explicit operator intent (e.g. an explicit
+  flag) before proceeding. This prevents resuming a fetch across a
+  schema change that may have altered the fields being collected.
 
 ### Key Entities
 
@@ -306,8 +366,19 @@ suite catches it.
   FR-005; lives alongside the corpus snapshot.
 - **Schema Diff Summary**: A structured diff between the current and
   previous schema artifacts (added/removed/changed types and fields),
-  partitioned by "used by pipeline" vs "not used by pipeline".
-  Embedded in the Provenance Record under `schema_diff_vs_previous`.
+  partitioned into the three tiers defined in FR-003: HARD CONTRACT
+  (fetch-query fields), SOFT CONTRACT (downstream-consumed fields,
+  each tagged with the consuming module), and INFORMATIONAL. Embedded
+  in the Provenance Record under `schema_diff_vs_previous`. Each
+  entry names the field path, the change kind, the previous shape,
+  the current shape, and the tier.
+- **Resume Checkpoint**: A single JSON file persisted atomically as
+  Stage 1 progresses (FR-017, FR-018, FR-019). Contains: the bound
+  schema artifact hash; the last fully completed GraphQL page cursor;
+  for the in-flight page, a per-abstract completion map (`done` /
+  `in_progress` / `failed-retryable` / `failed-blocking`); a count of
+  records completed and pending; the run id of the run that wrote it.
+  Lives under the gitignored `data/inputs/` (or `data/cache/`) root.
 - **Per-Stage Pattern Doc**: A short reference page (README section or
   separate doc) that names the six contracts every stage script
   satisfies. Cites Stage 1 by file and function.
@@ -344,14 +415,21 @@ suite catches it.
   repo's `constitution-check.sh --full` lint stays green; new
   module-specific tests assert that each failure path raises.
 - **CA-007**: This feature IS Principle VII applied to the fetch
-  stage. The persisted GraphQL schema, the field-level diff, and the
-  "fail loudly on used-field drift" requirement are the explicit
-  implementation of "discover external state, don't hardcode it".
-  The implementation MUST NOT introduce any hardcoded "supported
-  fields" allow-list except the list of fields the pipeline actually
-  reads — and that list MUST be discoverable from the code (e.g. by
-  introspecting the GraphQL query body), not from a separate file
-  that can drift.
+  stage. The persisted GraphQL schema, the tiered field-level diff
+  (HARD / SOFT / INFORMATIONAL — see FR-003), and the "fail loudly
+  on hard-contract drift" requirement are the explicit implementation
+  of "discover external state, don't hardcode it". Neither the hard-
+  contract field set nor the soft-contract field set MAY be expressed
+  as a manually maintained allow-list that can silently drift from
+  the code:
+  - The hard-contract set MUST be derived at runtime from the GraphQL
+    query body the fetch stage actually sends.
+  - The soft-contract set MUST be derived at runtime from the
+    downstream consumers (e.g. by static inspection of the
+    `src/ohbm2026/` modules that read `abstracts.json`, or by an
+    explicit consumer-side declaration each module owns and Stage 1
+    discovers — the plan phase chooses the mechanism). The spec only
+    constrains that the set is NOT a separate file Stage 1 reads.
 - **CA-008**: The provenance record IS the machine-readable
   provenance that Principle VIII requires for any artifact reaching
   organizers/downstream consumers. The corpus snapshot is upstream
@@ -372,19 +450,30 @@ suite catches it.
   and reproducibility dominate. (Decision recorded in Clarifications
   session 2026-05-12.)
 - **SC-008**: A Stage 1 fetch interrupted at any point during a run
-  is resumable on the next invocation 100% of the time — measured
-  by an automated test that interrupts the fetch at three distinct
-  progress points (early, mid, late) and verifies that resume
-  completes the corpus without re-fetching the already-retrieved
-  records.
+  is resumable on the next invocation 100% of the time — measured by
+  an automated test that interrupts the fetch at six distinct
+  progress points: (1) before any page completes, (2) between two
+  fully completed pages, (3) inside an in-flight page after some but
+  not all records have resolved, repeated for each of the early /
+  mid / late phases of the fetch. Resume MUST complete the corpus
+  without re-fetching any record whose checkpoint marker is "done".
+- **SC-009**: Across a sequence of interrupt-then-resume cycles on
+  the same fetch, the count of GraphQL requests issued on resume MUST
+  equal the count required for the records still pending (not the
+  total record count) — verified by a request-counter mock in the
+  test suite.
 - **SC-002**: Two consecutive fetch-abstracts runs against unchanged
   upstream produce primary outputs (corpus snapshot, schema
   artifact) that match on 100% of user-visible fields; only
   provenance run-id and timestamp differ.
-- **SC-003**: When a deliberate "used-field renamed upstream"
-  scenario is simulated in tests, the stage detects and surfaces it
-  with a precise error 100% of the time and writes 0 corrupted
-  corpus snapshots.
+- **SC-003**: When a deliberate "hard-contract used-field renamed
+  upstream" scenario is simulated in tests, Stage 1 detects and
+  surfaces it with a precise error 100% of the time and writes 0
+  corrupted corpus snapshots. Symmetrically, when a deliberate
+  "soft-contract downstream-consumed-field dropped upstream"
+  scenario is simulated, Stage 1 completes successfully AND the
+  schema-diff summary contains a `DOWNSTREAM IMPACT` entry naming
+  the consuming module — verified by an automated test.
 - **SC-004**: 100% of acceptance scenarios listed under User Story
   1 are covered by at least one automated test.
 - **SC-005**: The per-stage pattern doc lets an unfamiliar
