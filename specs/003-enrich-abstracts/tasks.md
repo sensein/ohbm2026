@@ -119,7 +119,7 @@ description: "Task list for Stage 2 — Enrich Abstracts (Figures, Claims, Refer
 
 **Goal**: Confirm that the US1 implementation also passes the idempotency contract (US2 tests should now go green without additional implementation work).
 
-- [ ] T019 [US2] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.IdempotencyContractTests -v` and confirm green. If failures, the implementation has a non-determinism bug (e.g., dict iteration order, timestamps leaking into the payload) — fix the implementation, not the test.
+- [X] T019 [US2] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.IdempotencyContractTests -v` and confirm green. If failures, the implementation has a non-determinism bug (e.g., dict iteration order, timestamps leaking into the payload) — fix the implementation, not the test.
 
 ---
 
@@ -127,7 +127,7 @@ description: "Task list for Stage 2 — Enrich Abstracts (Figures, Claims, Refer
 
 **Goal**: Confirm US1's per-component cache isolation works end-to-end.
 
-- [ ] T020 [US3] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ComponentInvalidationTests -v` and confirm green. If failures, the cache-key derivation is conflating components — fix the implementation.
+- [X] T020 [US3] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ComponentInvalidationTests -v` and confirm green. If failures, the cache-key derivation is conflating components — fix the implementation.
 
 ---
 
@@ -135,15 +135,15 @@ description: "Task list for Stage 2 — Enrich Abstracts (Figures, Claims, Refer
 
 **Goal**: Confirm US1's stateless-with-cache design handles accepted↔withdrawn movements correctly.
 
-- [ ] T021 [US4] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.MovementHandlingTests -v` and confirm green. If failures, the orchestrator is reading the previous enriched corpus for content (not just for the delta-vs-previous summary) — fix the implementation.
+- [X] T021 [US4] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.MovementHandlingTests -v` and confirm green. If failures, the orchestrator is reading the previous enriched corpus for content (not just for the delta-vs-previous summary) — fix the implementation.
 
 ### Resumability verification (SC-009)
 
-- [ ] T021a [US1] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ResumabilityContractTests -v` and confirm green. If failures, the orchestrator either wrote a partial SQLite (it should write only at the end as one atomic commit) OR ignored existing per-component cache entries on the second run — fix the implementation.
+- [X] T021a [US1] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ResumabilityContractTests -v` and confirm green. If failures, the orchestrator either wrote a partial SQLite (it should write only at the end as one atomic commit) OR ignored existing per-component cache entries on the second run — fix the implementation.
 
 ### Discovery + error contract verification (CA-006, CA-007, FR-010)
 
-- [ ] T021b [US1] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ErrorContractTests tests.test_enrich_stage.DiscoveryContractTests -v` and confirm green. If `ErrorContractTests` fails, a typed exception isn't reaching `main()` and being mapped to the documented exit code — fix `enrich_stage.main`. If `DiscoveryContractTests` fails, a component is "best-effort parsing" a malformed LLM response instead of raising — fix the component runner in `enrich_stage.py` (the existing helper in `enrichment.py` may need a validate-before-return wrapper).
+- [X] T021b [US1] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ErrorContractTests tests.test_enrich_stage.DiscoveryContractTests -v` and confirm green. If `ErrorContractTests` fails, a typed exception isn't reaching `main()` and being mapped to the documented exit code — fix `enrich_stage.main`. If `DiscoveryContractTests` fails, a component is "best-effort parsing" a malformed LLM response instead of raising — fix the component runner in `enrich_stage.py` (the existing helper in `enrichment.py` may need a validate-before-return wrapper).
 
 ---
 
@@ -151,10 +151,10 @@ description: "Task list for Stage 2 — Enrich Abstracts (Figures, Claims, Refer
 
 **Goal**: Document Stage 2 across the project's doc surfaces so future readers can find it; remove references to the four legacy subcommands.
 
-- [ ] T022 [P] Update `docs/per-stage-pattern.md`: add Stage 2 as a co-canonical reference instance of the pattern alongside Stage 1. Cite `src/ohbm2026/enrich_stage.py` by function name for each of the six contracts (input via `_load_source_corpus`; output via `enrich_storage.EnrichedCorpusWriter` + `_write_provenance`; provenance via `_build_provenance_record`; error via the typed exception hierarchy in `exceptions.py`; resumability via per-component cache writes; discovery via `_classify_backend_availability`).
-- [ ] T023 Update `README.md`: add a "### 2. Enrich The Corpus" section (mirrors quickstart.md); list the new entry points (`scripts/run_enrich_abstracts.py`, `ohbmcli enrich-abstracts`); document the `--invalidate <component>` flag; document `--export-parquet PATH` as an optional secondary export that requires installing the new `parquet` optional extra (`uv pip install --python .venv/bin/python ".[parquet]"`); remove references to the four removed legacy subcommands from "End-To-End Workflow", "Token And Tool Matrix", and "Main Outputs By Stage". Update "Module Layout" to list `enrich_stage.py` + `enrich_storage.py`.
-- [ ] T024 [P] Update `CLAUDE.md`: refresh the subcommand catalog (drop the four removed; add `enrich-abstracts`); refresh the code-architecture section to mention `enrich_stage.py`, `enrich_storage.py`, the SQLite+zlib decision, and the per-component cache layout.
-- [ ] T025 [P] Update `docs/reproducibility-vision.md` Reproduction Ladder Level 2: replace the four old enrichment commands with `ohbmcli enrich-abstracts` as a single step; note the SQLite enriched output and the per-component cache namespaces.
+- [X] T022 [P] Update `docs/per-stage-pattern.md`: add Stage 2 as a co-canonical reference instance of the pattern alongside Stage 1. Cite `src/ohbm2026/enrich_stage.py` by function name for each of the six contracts (input via `_load_source_corpus`; output via `enrich_storage.EnrichedCorpusWriter` + `_write_provenance`; provenance via `_build_provenance_record`; error via the typed exception hierarchy in `exceptions.py`; resumability via per-component cache writes; discovery via `_classify_backend_availability`).
+- [X] T023 Update `README.md`: add a "### 2. Enrich The Corpus" section (mirrors quickstart.md); list the new entry points (`scripts/run_enrich_abstracts.py`, `ohbmcli enrich-abstracts`); document the `--invalidate <component>` flag; document `--export-parquet PATH` as an optional secondary export that requires installing the new `parquet` optional extra (`uv pip install --python .venv/bin/python ".[parquet]"`); remove references to the four removed legacy subcommands from "End-To-End Workflow", "Token And Tool Matrix", and "Main Outputs By Stage". Update "Module Layout" to list `enrich_stage.py` + `enrich_storage.py`.
+- [X] T024 [P] Update `CLAUDE.md`: refresh the subcommand catalog (drop the four removed; add `enrich-abstracts`); refresh the code-architecture section to mention `enrich_stage.py`, `enrich_storage.py`, the SQLite+zlib decision, and the per-component cache layout.
+- [X] T025 [P] Update `docs/reproducibility-vision.md` Reproduction Ladder Level 2: replace the four old enrichment commands with `ohbmcli enrich-abstracts` as a single step; note the SQLite enriched output and the per-component cache namespaces.
 
 ---
 

@@ -145,15 +145,21 @@ enrichment, references, embeddings, clusters, or the UI.
 The usual order is:
 
 1. `ohbmcli refresh-assets`
-2. `ohbmcli analyze-figures` or resume cached figure analysis
-3. `ohbmcli extract-claims`
-4. `ohbmcli enrich`
-5. `ohbmcli title-audit`
-6. `ohbmcli reference-metadata`
-7. embedding commands such as `embed-minilm`, `embed-voyage`, or
+2. `ohbmcli enrich-abstracts` — single Stage 2 entry (replaces the
+   former `analyze-figures` / `extract-claims` / `enrich` /
+   `reference-metadata` quartet). Writes the SQLite + zlib enriched
+   corpus at `data/primary/abstracts_enriched.sqlite` plus
+   per-component caches under `data/cache/figure_analysis/`,
+   `data/cache/claim_analysis/`, `data/cache/reference_metadata/`,
+   plus `data/inputs/abstracts_enrich_provenance__<state-key>.json`.
+   Use `--invalidate <component>` to force a single component to
+   re-run; pass `--export-parquet PATH` (with the `parquet` optional
+   extra installed) to emit a Parquet copy.
+3. `ohbmcli title-audit`
+4. embedding commands such as `embed-minilm`, `embed-voyage`, or
    `apply-published-stage2`
-8. `ohbmcli cluster-benchmark` and related semantic-analysis steps
-9. `ohbmcli build-ui`
+5. `ohbmcli cluster-benchmark` and related semantic-analysis steps
+6. `ohbmcli build-ui`
 
 ### Level 3: Rebuild from the upstream abstract source
 

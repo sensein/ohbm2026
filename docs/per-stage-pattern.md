@@ -1,9 +1,11 @@
 # Per-Stage Pattern
 
-Every pipeline stage in this repo (Stage 1 fetch, Stage 2 figures,
-Stage 3 enrichment, …) satisfies the same six contracts. This doc
-defines them and points at the canonical reference implementation
-— **Stage 1 (`src/ohbm2026/fetch_stage.py`)** — for each.
+Every pipeline stage in this repo (Stage 1 fetch, Stage 2 enrich,
+Stage 3+ analyses, …) satisfies the same six contracts. This doc
+defines them and points at two canonical reference implementations
+— **Stage 1 (`src/ohbm2026/fetch_stage.py`)** for a single-fetch
+stage, and **Stage 2 (`src/ohbm2026/enrich_stage.py`)** for a
+multi-component stage — for each.
 
 A new stage author should be able to read this page plus
 `fetch_stage.py` and write the next stage script in the same style.
@@ -29,6 +31,16 @@ Stage 1 reference:
 - `fetch_stage._build_parser` declares the CLI surface (env-file,
   env-var, batch-size, timeouts, allow flags, output overrides).
 
+Stage 2 reference (multi-component):
+- `enrich_stage._classify_backend_availability` discovers which of
+  `OPENAI_API_KEY` / `OPENALEX_API` are present (names only) and
+  returns a `BackendAvailability` dataclass that the orchestrator
+  uses to refuse running components whose backend is unavailable.
+- `enrich_stage._build_parser` declares the Stage 2 CLI surface
+  (env-file, source corpus, per-component model identifiers,
+  per-component failure thresholds, `--invalidate`, optional Parquet
+  export).
+
 ### 2. Output contract
 
 What artifacts the stage writes, at what paths, with what shape.
@@ -50,6 +62,17 @@ Stage 1 reference:
   `data/inputs/abstracts_fetch_provenance__<state-key>.json`.
 - All three use `fetch_stage._atomic_write_json` (temp-file →
   `os.replace`) for crash safety.
+
+Stage 2 reference:
+- Enriched corpus: `enrich_storage.EnrichedCorpusWriter` →
+  `data/primary/abstracts_enriched.sqlite` (SQLite + zlib(json) per
+  row; atomic temp→rename via `os.replace`).
+- Provenance: `enrich_stage._atomic_write_json` →
+  `data/inputs/abstracts_enrich_provenance__<state-key>.json`.
+- Per-component caches: `enrich_stage._write_cache_entry` →
+  `data/cache/{figure_analysis,claim_analysis,reference_metadata}/<cache-key>.json`.
+- Optional Parquet export: `--export-parquet PATH` lazy-imports
+  `pyarrow` so the module's top-level imports stay stdlib-only.
 
 ### 3. Provenance contract
 
@@ -73,15 +96,28 @@ Stage 1 reference:
 - The exact field set is contract-tested against
   `specs/002-rewire-pipeline/contracts/abstracts_fetch_provenance.schema.json`.
 
+Stage 2 reference:
+- The record is assembled inline in `enrich_stage.main` (no separate
+  builder helper) — required fields include `components` (one entry
+  per `{figures, claims, references}`), `delta_vs_previous`, and
+  `parquet_export_path` (null when the export flag was absent).
+- `enrich_stage._assert_paths_safe` is invoked on every path candidate
+  (output, parquet export, provenance) before any write.
+- The exact field set is contract-tested against
+  `specs/003-enrich-abstracts/contracts/enrich_provenance.schema.json`.
+
 ### 4. Error-handling contract
 
 What failures the stage surfaces loudly, with what typed cause,
 and at what exit code.
 
-- Typed exception hierarchy in `ohbm2026.exceptions` (Stage1Error
-  base + `SchemaContractError`, `CheckpointError`,
-  `ProvenanceError`, plus re-exported `GraphQLAPIError`). Stages
-  add their own subclasses where appropriate.
+- Typed exception hierarchy in `ohbm2026.exceptions` rooted at a
+  cross-stage `OhbmStageError(RuntimeError)`. Stage 1 subclass tree:
+  `Stage1Error` → `SchemaContractError`, `CheckpointError`,
+  `FigureFailureError`. Stage 2 subclass tree: `Stage2Error` →
+  `EnrichmentError`, `CacheVersionError`,
+  `ComponentFailureThresholdError`. `ProvenanceError` lives directly
+  under `OhbmStageError` since both stages reuse it.
 - No bare `except`. No silent fallbacks. No "log and continue"
   around operations whose failure would corrupt downstream
   artifacts.
@@ -93,6 +129,16 @@ Stage 1 reference:
   4 provenance, 5 figure failure rate, 6 empty corpus).
 - Exit codes documented in
   `specs/002-rewire-pipeline/contracts/cli.md`.
+
+Stage 2 reference:
+- `enrich_stage.main` catches each typed exception and maps it to
+  exit codes (1 generic EnrichmentError, 2 schema, 4 ProvenanceError
+  path-boundary, 5 ComponentFailureThresholdError, 6 empty corpus,
+  7 CacheVersionError). The enriched corpus is NOT written when a
+  threshold breach is detected (Principle VI: never clobber the
+  previous good corpus with a known-bad new one).
+- Exit codes documented in
+  `specs/003-enrich-abstracts/contracts/cli.md`.
 
 ### 5. Resumability contract
 
@@ -119,6 +165,18 @@ Stage 1 reference:
   `--allow-schema-change` is set.
 - Schema in `specs/002-rewire-pipeline/contracts/abstracts_fetch_checkpoint.schema.json`.
 
+Stage 2 reference:
+- Caches-as-checkpoint: there is no separate checkpoint file. Each
+  per-component cache entry written by `_write_cache_entry` is
+  atomic (temp + rename) and immediately visible to subsequent
+  abstracts in the same run. An interrupted run leaves the populated
+  cache entries on disk; the next invocation iterates the corpus
+  again, but every populated entry short-circuits to a cache hit
+  (research.md §8).
+- The enriched SQLite is written only at the very end, as one
+  atomic commit. An interruption before that final write leaves
+  the previous good corpus (if any) intact.
+
 ### 6. Discovery contract
 
 Which external state the stage discovers at runtime versus what it
@@ -142,6 +200,17 @@ Stage 1 reference:
   by importing consuming modules and unioning their
   `CONSUMED_ABSTRACT_FIELDS`. Neither set is a separately
   maintained allow-list.
+
+Stage 2 reference:
+- `enrich_stage._classify_backend_availability` discovers which
+  enrichment backends are invocable (which API keys are present,
+  which optional dependencies are installed). It returns a typed
+  `BackendAvailability` dataclass rather than a free-form dict
+  (CA-007).
+- LLM-response schema discovery: each component runner (figures,
+  claims, references) validates the model's response shape at parse
+  time. Mismatches raise `EnrichmentError` with the offending
+  response captured for post-hoc diagnosis (CA-007 / Principle VII).
 
 ## Adding a New Stage
 

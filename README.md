@@ -128,9 +128,9 @@ Common keys:
 - `OHBM2026_API`
   - required for Oxford Abstracts ingest and author lookup
 - `OPENAI_API_KEY`
-  - required for OpenAI figure analysis, OpenAI embeddings, `extract-claims` with OpenAI, and OpenAI-backed reference splitting
+  - required for Stage 2's `enrich-abstracts` (figure interpretation, claims extraction, OpenAI-backed reference splitting) and for OpenAI embeddings
 - `ANTHROPIC_API_KEY`
-  - required only if `extract-claims` is run with `--llm-provider anthropic`
+  - optional alternative claims-extraction backend (rare; default is OpenAI via cllm)
 - `VOYAGE_API`
   - required for Voyage embeddings
 - `OPENALEX_API`
@@ -150,15 +150,10 @@ Use this as the quick answer to "what do I need before I run this step?"
 
 | Workflow | Required secret(s) | Extra local tool(s) | Notes |
 | --- | --- | --- | --- |
-| `ohbmcli ingest` | `OHBM2026_API` | none | Fetches accepted abstracts and figure assets |
+| `ohbmcli fetch-abstracts` / `fetch-withdrawn` | `OHBM2026_API` | none | Stage 1 — accepted + withdrawn corpora; authors fetched inline |
 | `ohbmcli refresh-assets` | none | none | Uses the existing local normalized corpus |
-| `ohbmcli authors` | `OHBM2026_API` | none | Pulls author details from Oxford Abstracts |
-| `ohbmcli analyze-figures --vision-backend openai` | `OPENAI_API_KEY` | none | Current preferred figure-analysis route |
-| `ohbmcli analyze-figures --vision-backend ollama` | none | `ollama`, `qwen3.5:35b` | No hosted token required |
-| `ohbmcli extract-claims` | `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` | `cllm` installed in `.venv` | Provider depends on `--llm-provider` |
-| `ohbmcli enrich` | none | none | Consumes local caches only |
+| `ohbmcli enrich-abstracts` | `OPENAI_API_KEY`; optional `OPENALEX_API` (recommended) | `cllm` installed in `.venv` | Stage 2 — figures + claims + references with per-component caches. `--invalidate <component>` forces a component re-run; `--export-parquet PATH` emits a Parquet copy (needs the `parquet` optional extra). |
 | `ohbmcli title-audit` | none | none | Reads local normalized corpus only |
-| `ohbmcli reference-metadata` | optional `OPENALEX_API`; `OPENAI_API_KEY` only if using OpenAI reference splitting | none | `OPENALEX_API` is recommended for authenticated reference matching |
 | `ohbmcli embed-minilm` / `embed-hf` | optional `HF_TOKEN` | `sentence-transformers` | `HF_TOKEN` is only needed for gated/private Hub access |
 | `ohbmcli embed-openai` | `OPENAI_API_KEY` | none | Hosted embedding route |
 | `ohbmcli embed-voyage` | `VOYAGE_API` | none | Voyage embedding route |
@@ -223,17 +218,13 @@ Pick the sequence that matches what you are trying to regenerate.
 
 Run these in order when rebuilding the main deliverable from upstream data:
 
-1. `ohbmcli ingest`
-2. `ohbmcli authors`
-3. `ohbmcli analyze-figures --vision-backend openai`
-4. `ohbmcli extract-claims`
-5. `ohbmcli enrich`
-6. `ohbmcli title-audit`
-7. `ohbmcli reference-metadata --use-title-search`
-8. one or more embedding commands such as `embed-minilm`, `embed-voyage`, or `embed-openai`
-9. `ohbmcli apply-published-stage2` if you want the published Voyage stage-2 space
-10. `ohbmcli semantic-analysis`, `cluster-benchmark`, `umap-plot`, or `compare-projections` for the cluster and projection products you want the UI to consume
-11. `ohbmcli export-ui` or `ohbmcli build-ui`
+1. `ohbmcli fetch-abstracts` (authors are fetched inline; replaces the former `ingest` + `authors` pair)
+2. `ohbmcli enrich-abstracts` (replaces the former `analyze-figures` + `extract-claims` + `enrich` + `reference-metadata` quartet; one entry, per-component caches under `data/cache/{figure_analysis,claim_analysis,reference_metadata}`)
+3. `ohbmcli title-audit`
+4. one or more embedding commands such as `embed-minilm`, `embed-voyage`, or `embed-openai`
+5. `ohbmcli apply-published-stage2` if you want the published Voyage stage-2 space
+6. `ohbmcli semantic-analysis`, `cluster-benchmark`, `umap-plot`, or `compare-projections` for the cluster and projection products you want the UI to consume
+7. `ohbmcli export-ui` or `ohbmcli build-ui`
 
 ### Add Or Refresh A Cluster Family
 
@@ -348,81 +339,76 @@ local figure links.
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli refresh-assets --reuse-existing-assets-only
 ```
 
-### 3. Export Authors
+### 3. Enrich The Corpus
 
-Optional, but useful if you want a separate author database.
-
-```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli authors
-```
-
-Output:
-
-- `data/inputs/authors.json`
-
-### 4. Run Figure Analysis
-
-There are two supported routes.
-
-#### Route A: OpenAI figure analysis
-
-This is the current preferred route for the main enriched corpus.
+Stage 2 — single canonical entry that runs all three enrichment components
+(figure interpretation, claims extraction, reference resolution) against the
+accepted corpus, with per-component caches keyed by
+`sha256(input || model_id)`. The four legacy subcommands
+(`analyze-figures`, `extract-claims`, `enrich`, `reference-metadata`)
+are REPLACED by this single entry (FR-014).
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-figures \
-  --vision-backend openai \
-  --openai-model gpt-4.1-mini \
-  --enriched-output data/outputs/experiments/enrichment/abstracts_enriched_openai.json
+PYTHONPATH=src .venv/bin/python scripts/run_enrich_abstracts.py
 ```
 
-Notes:
-
-- the cache is incremental and resumable
-- current code batches OpenAI image requests for better throughput
-- finished analyses are written as they complete
-
-#### Route B: Local Ollama figure analysis
+Equivalent through `ohbmcli`:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-figures \
-  --vision-backend ollama \
-  --vision-model qwen3.5:35b
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli enrich-abstracts
 ```
 
-### 5. Build The Main Enriched Abstract Dataset
+What it does:
 
-This step converts abstract content to ordered markdown and merges figure
-analysis plus any cached claim extraction back into the canonical enriched
-corpus.
+- reads `data/primary/abstracts.json` (accepted-only filter; the
+  withdrawn corpus is read-only)
+- for each accepted abstract: runs figures + claims + references
+  through per-component caches under
+  `data/cache/{figure_analysis,claim_analysis,reference_metadata}/<cache-key>.json`
+- writes the enriched corpus to `data/primary/abstracts_enriched.sqlite`
+  (SQLite + zlib(json) per row; primary-key indexed for O(1) random
+  lookup; ~21 MB for the 3244-abstract corpus per the benchmark in
+  `specs/003-enrich-abstracts/research.md`)
+- writes provenance to
+  `data/inputs/abstracts_enrich_provenance__<state-key>.json`
+  with names-only env vars, per-component model identifiers, and
+  cache hit/miss counts
 
-Current default:
-
-- `enrich` now defaults to the OpenAI figure-analysis cache under
-  `data/cache/figure_analysis/`
-- `enrich` now also defaults to the `cllm` claim cache under
-  `data/cache/claim_analysis/`
+Component-targeted refresh (when only one model changes):
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli enrich
+PYTHONPATH=src .venv/bin/python scripts/run_enrich_abstracts.py \
+  --invalidate figures \
+  --figure-model-id gpt-4o
 ```
 
-Explicit form:
+Other two components reuse cache hits intact. Use the same pattern
+with `--invalidate claims` or `--invalidate references`.
+
+Optional Parquet export (alongside the canonical SQLite output):
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli enrich \
-  --input data/primary/abstracts.json \
-  --image-analyses-input data/cache/figure_analysis/image_analyses_openai__<state-key>.json \
-  --claim-analyses-input data/cache/claim_analysis/claim_analyses_cllm__<state-key>.json \
-  --enriched-output data/primary/abstracts_enriched.json
+UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python ".[parquet]"
+PYTHONPATH=src .venv/bin/python scripts/run_enrich_abstracts.py \
+  --export-parquet data/primary/abstracts_enriched.parquet
 ```
 
-Output:
+The `parquet` optional extra installs `pyarrow`; the orchestrator
+lazy-imports it only when the flag is set.
 
-- `data/primary/abstracts_enriched.json`
+Smoke-check a random lookup:
 
-This is the main corpus used by downstream steps.
+```bash
+.venv/bin/python -c "
+import sqlite3, zlib, json
+con = sqlite3.connect('data/primary/abstracts_enriched.sqlite')
+row = con.execute('SELECT payload FROM abstracts WHERE id = ?', (1246274,)).fetchone()
+rec = json.loads(zlib.decompress(row[0]))
+print(rec['id'], rec.get('poster_id'), 'claims:', len(rec.get('claims', [])), 'figures:', len(rec.get('figure_interpretation', [])))
+"
+```
 
-### 6. Audit And Clean Display Titles
+### 4. Audit And Clean Display Titles
 
 The raw Oxford Abstracts export is kept unchanged, but downstream consumers now
 normalize obvious title issues such as leading bullets, wrapping quotes, and
@@ -441,114 +427,7 @@ Output:
 This file records each changed title with the original string, cleaned title,
 and normalization reasons.
 
-### 7. Match References With OpenAlex
-
-```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli reference-metadata \
-  --input data/primary/abstracts.json \
-  --output data/primary/reference_metadata.json \
-  --use-title-search
-```
-
-Output:
-
-- `data/primary/reference_metadata.json`
-
-This file is resumable and checkpoint-friendly.
-
-Reference resolution now follows this order:
-
-- markdown normalization of the raw references field
-- LLM-assisted splitting of the full reference markdown block, validated against the source text
-- exact DOI -> OpenAlex
-- exact PMID -> OpenAlex
-- direct OpenAlex title search for references with a title
-- Semantic Scholar full-reference search only for references that still have neither DOI nor title
-
-Current operational notes:
-
-- the OpenAI splitter runs one request per abstract attempt and can be driven concurrently
-- failed or invalid splits can be requeued and retried before falling back to a single-block record
-- OpenAlex title search can also run concurrently with an explicit requests-per-second cap
-- OpenAlex `/rate-limit` is the best way to inspect current search budget before a long rerun
-
-Useful options:
-
-- `--no-doi-discovery`
-  - skip the Semantic Scholar full-reference DOI-discovery fallback
-- `--no-llm-reference-splitting`
-  - skip the OpenAI/Ollama splitting pass and fall back to local markdown heuristics
-- `--reference-splitting-backend openai`
-  - use OpenAI for the splitting helper
-- `--reference-splitting-model gpt-5-nano`
-  - model used for reference structuring; defaults to `gpt-5-nano`
-  - the OpenAI backend uses the Responses API with a strict JSON schema for `{"references": [{"reference", "title", "doi"}]}` output
-  - extracted `title` and `doi` values are only used downstream if they are lexically present in the returned reference text
-- `--split-concurrency 500`
-  - number of in-flight OpenAI reference-splitting requests during collect
-- `--split-max-requeues 5`
-  - maximum retries for failed or invalid split attempts before falling back to a single merged block
-- `--title-concurrency 50`
-  - number of concurrent OpenAlex title-search workers
-- `--title-max-rps 90`
-  - soft request-rate cap for OpenAlex title search; useful for staying below OpenAlex short-window throttle limits
-- `--doi-discovery-similarity-threshold 0.8`
-  - minimum title similarity required before accepting a discovered DOI
-- `--delay-seconds 1.05`
-  - pacing for sequential fallback phases such as Semantic Scholar DOI discovery
-
-If a completed reference map still contains fallback split cases, rerun only those
-abstracts and merge the repaired results back into the existing output:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli reference-metadata \
-  --input data/primary/abstracts.json \
-  --output data/primary/reference_metadata.json \
-  --repair-failed-splits-from data/primary/reference_metadata.json \
-  --use-title-search \
-  --reference-splitting-backend openai \
-  --reference-splitting-model gpt-5-nano
-```
-
-### 8. Optional Claim Extraction
-
-If you want claim lists over the abstracts, run this after figure analysis so
-cached figure notes can be included in the `cllm` manuscript.
-
-```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli extract-claims
-```
-
-What it does:
-
-- reads `data/primary/abstracts.json`
-- reads the OpenAI figure-analysis cache under `data/cache/figure_analysis/` by
-  default so figure-analysis text can be appended when present
-- builds a manuscript from the title, introduction, methods, results, discussion, conclusion, and filtered additional-content fields
-- excludes references and acknowledgements from the claim prompt
-- writes a resumable cache under `data/cache/claim_analysis/`
-
-Current default OpenAI path:
-
-- provider: `openai`
-- model: `gpt-4o-2024-08-06`
-
-Useful explicit form:
-
-```bash
-PYTHONPATH=src .venv/bin/python -m ohbm2026.cli extract-claims \
-  --input data/primary/abstracts.json \
-  --image-analyses-input data/cache/figure_analysis/image_analyses_openai__<state-key>.json \
-  --claim-analyses-output data/cache/claim_analysis/claim_analyses_cllm__<state-key>.json \
-  --openai-model gpt-4o-2024-08-06
-```
-
-If you want the claims to appear in the UI, rerun:
-
-- `enrich`
-- `build-ui`
-
-### 9. Generate Embeddings
+### 5. Generate Embeddings
 
 Pick one or more embedding routes.
 
@@ -603,7 +482,7 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-minilm \
 
 This uses `claim_extraction.claims` from `data/primary/abstracts_enriched.json` and formats each extracted claim as a short bullet containing the claim statement itself.
 
-### 10. Apply Or Train Stage 2
+### 6. Apply Or Train The NeuroScape Stage-2 Embedding Model
 
 #### Apply the published NeuroScape stage-2 model
 
@@ -619,7 +498,7 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli apply-published-stage2
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli embed-stage2
 ```
 
-### 11. Build Semantic Analysis And Cluster Outputs
+### 7. Build Semantic Analysis And Cluster Outputs
 
 Community detection over an embedding bundle:
 
@@ -668,7 +547,7 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli compare-projections
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli optimize-projections
 ```
 
-### 12. Generate And Analyze Layout Proposals
+### 8. Generate And Analyze Layout Proposals
 
 The stable route for proposal generation currently lives in the script wrappers
 under `scripts/`, not in `ohbmcli`.
@@ -708,7 +587,7 @@ Use a fresh `--output-dir` whenever the layout label system, embeddings, or
 weights change. The default output-root hash does not encode every proposal
 option.
 
-### 13. Run Poster Sequencing And Proposal Experiments
+### 9. Run Poster Sequencing And Proposal Experiments
 
 Once a base proposal exists, the sequencing and comparison workflows are also
 script-driven. Write these outputs to fresh experiment directories or fresh
@@ -746,7 +625,7 @@ The same pattern applies to `scripts/sweep_diffusion_variants.py`,
 for the proposal, corpora, authors, embeddings, and output root rather than
 relying on older baked-in defaults.
 
-### 14. Build The Static UI
+### 10. Build The Static UI
 
 This is the current latest delivery step.
 
@@ -799,19 +678,16 @@ Open:
 
 If you already have raw abstracts:
 
-- rerun figure analysis
-- rerun `extract-claims` if claim prompts should reflect updated figure analyses
-- rerun `enrich`
+- rerun `ohbmcli enrich-abstracts` (per-component caches make it cheap; pass `--invalidate <component>` if a single model identifier changed)
 - rerun `build-ui`
 
-If you already have figures and only changed UI code:
+If you already have an enriched corpus and only changed UI code:
 
 - rerun `build-ui`
 
-If you already have fresh figure analyses and only changed claim extraction:
+If only one component model changed (e.g., new figure model):
 
-- rerun `extract-claims`
-- rerun `enrich`
+- rerun `ohbmcli enrich-abstracts --invalidate figures --figure-model-id <new>`
 - rerun `build-ui`
 
 If you already have embeddings but want new cluster evaluations:
@@ -861,19 +737,35 @@ If you want to rerun sequencing experiments on an existing proposal:
   - tiered field-level schema-drift classifier
     (HARD / SOFT / INFORMATIONAL); pure functions, no I/O
 - `src/ohbm2026/exceptions.py`
-  - typed Stage 1 exception hierarchy
-    (`Stage1Error`, `SchemaContractError`, `CheckpointError`,
-    `ProvenanceError`, `FigureFailureError`); re-exports
-    `GraphQLAPIError`
+  - typed cross-stage exception hierarchy rooted at
+    `OhbmStageError(RuntimeError)`. Stage 1: `Stage1Error` →
+    `SchemaContractError`, `CheckpointError`, `FigureFailureError`.
+    Stage 2: `Stage2Error` → `EnrichmentError`, `CacheVersionError`,
+    `ComponentFailureThresholdError`. `ProvenanceError` shared.
+    Re-exports `GraphQLAPIError`.
 - `src/ohbm2026/artifacts.py`
   - shared path helpers (`build_schema_artifact_path`,
     `build_provenance_path`, `build_fetch_checkpoint_path`,
-    `PRIMARY_ABSTRACTS_PATH`, `PRIMARY_WITHDRAWN_ABSTRACTS_PATH`),
-    state-key derivation
+    `build_enrich_provenance_path`, `build_enrich_cache_path`,
+    `PRIMARY_ABSTRACTS_PATH`, `PRIMARY_WITHDRAWN_ABSTRACTS_PATH`,
+    `PRIMARY_ENRICHED_CORPUS_PATH`), state-key derivation
+- `src/ohbm2026/enrich_stage.py`
+  - **Stage 2 orchestrator**. Entry point for
+    `ohbmcli enrich-abstracts`. Drives: backend discovery →
+    per-abstract figures + claims + references with per-component
+    caching → atomic SQLite + zlib write → provenance write → optional
+    Parquet export. The multi-component reference for the per-stage
+    contract (see [docs/per-stage-pattern.md](docs/per-stage-pattern.md)).
+- `src/ohbm2026/enrich_storage.py`
+  - SQLite + zlib I/O helper for Stage 2: `EnrichedCorpusWriter`
+    (atomic temp→rename), `read_one_by_id`, `iter_enriched`,
+    `corpus_metadata`. Stdlib only.
 - `src/ohbm2026/enrichment.py`
-  - markdown conversion, figure analysis, claim extraction, enrichment assembly
+  - markdown conversion, figure analysis, claim extraction building
+    blocks (wrapped by `enrich_stage.py`)
 - `src/ohbm2026/openalex.py`
-  - reference parsing and OpenAlex matching
+  - reference parsing and OpenAlex matching (wrapped by
+    `enrich_stage.py`'s references component)
 - `src/ohbm2026/neuroscape.py`
   - embeddings, stage-2 paths, semantic analysis, clustering, projections
 - `src/ohbm2026/ui.py`
@@ -883,29 +775,27 @@ If you want to rerun sequencing experiments on an existing proposal:
 
 ## Main Outputs By Stage
 
-- raw ingest
+- Stage 1 — raw ingest
   - `data/primary/abstracts.json` (accepted corpus)
   - `data/primary/abstracts_withdrawn.json` (withdrawn corpus, separate file)
+  - `data/primary/authors.json` (authors for the accepted corpus, fetched inline)
+  - `data/primary/authors_withdrawn.json` (authors for the withdrawn corpus)
+  - `data/primary/assets/` (downloaded methods/results figure images)
   - `data/inputs/abstracts_graphql_schema__<state-key>.json` (persisted upstream schema)
   - `data/inputs/abstracts_fetch_provenance__<state-key>.json` (provenance record)
-  - `data/inputs/assets/`
   - `data/cache/fetch_abstracts/checkpoint__<state-key>.json` (resume checkpoint; deleted on success)
+- Stage 2 — enriched corpus
+  - `data/primary/abstracts_enriched.sqlite` (SQLite + zlib(json) per row; canonical)
+  - `data/inputs/abstracts_enrich_provenance__<state-key>.json` (per-component model identifiers + cache hit/miss counts)
+  - `data/cache/figure_analysis/<cache-key>.json` (per-figure interpretations)
+  - `data/cache/claim_analysis/<cache-key>.json` (per-abstract claim lists)
+  - `data/cache/reference_metadata/<cache-key>.json` (per-reference resolutions)
+  - optional `data/primary/abstracts_enriched.parquet` (via `--export-parquet`)
 - manual and operator inputs
   - `data/inputs/abstracts_with_phenomena_with_theories_refined.csv`
   - `data/inputs/poster_layout/layout_assets/`
-- authors
-  - `data/inputs/authors.json`
-- figure analysis
-  - `data/cache/figure_analysis/image_analyses_ollama__<state-key>.json`
-  - `data/cache/figure_analysis/image_analyses_openai__<state-key>.json`
-- claim extraction
-  - `data/cache/claim_analysis/claim_analyses_cllm__<state-key>.json`
-- enriched corpus
-  - `data/primary/abstracts_enriched.json`
 - audit outputs
   - `data/outputs/experiments/title_audit/title_modifications.json`
-- references
-  - `data/primary/reference_metadata.json`
 - embeddings and clustering
   - `data/outputs/experiments/embeddings/*`
 - static site
