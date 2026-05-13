@@ -14,26 +14,43 @@ class CLITest(unittest.TestCase):
             ["--reuse-existing-assets-only", "--refresh-assets-from-existing-db"]
         )
 
-    def test_enrich_subcommand_delegates_to_enrich_main(self) -> None:
-        with mock.patch.object(cli.enrichment, "enrich_main", return_value=11) as enrich_main:
-            result = cli.main(["enrich", "--enriched-output", "custom.json"])
+    def test_enrich_abstracts_subcommand_delegates_to_enrich_stage_main(self) -> None:
+        # Import the module so we can patch its `.main` attribute. This
+        # also serves as a red-phase guard: the test fails on
+        # ImportError if `ohbm2026.enrich_stage` does not yet exist.
+        from ohbm2026 import enrich_stage as enrich_stage_module
+
+        with mock.patch.object(enrich_stage_module, "main", return_value=11) as es_main:
+            result = cli.main(["enrich-abstracts", "--enriched-output", "out.sqlite"])
 
         self.assertEqual(result, 11)
-        enrich_main.assert_called_once_with(["--enriched-output", "custom.json"])
+        es_main.assert_called_once_with(["--enriched-output", "out.sqlite"])
 
-    def test_extract_claims_subcommand_delegates_to_extract_claims_main(self) -> None:
-        with mock.patch.object(cli.enrichment, "extract_claims_main", return_value=12) as extract_claims_main:
-            result = cli.main(["extract-claims", "--max-abstracts", "5"])
+    def test_enrich_abstracts_accepts_every_option_from_contract(self) -> None:
+        """contracts/cli.md enumerates every flag; the subparser must
+        accept all of them. We assert by passing each one through and
+        checking the delegated argv."""
+        from ohbm2026 import enrich_stage as enrich_stage_module
 
-        self.assertEqual(result, 12)
-        extract_claims_main.assert_called_once_with(["--max-abstracts", "5"])
-
-    def test_analyze_figures_subcommand_delegates_to_figure_main(self) -> None:
-        with mock.patch.object(cli.enrichment, "analyze_figures_main", return_value=13) as figure_main:
-            result = cli.main(["analyze-figures", "--vision-max-images", "2"])
-
-        self.assertEqual(result, 13)
-        figure_main.assert_called_once_with(["--vision-max-images", "2"])
+        argv = [
+            "enrich-abstracts",
+            "--env-file", ".env",
+            "--source-corpus", "data/primary/abstracts.json",
+            "--enriched-output", "data/primary/abstracts_enriched.sqlite",
+            "--figure-model-id", "gpt-4.1-mini",
+            "--claims-model-id", "gpt-4o-2024-08-06",
+            "--reference-strategy-id", "refs.v1+openai-gpt-5-nano",
+            "--invalidate", "figures",
+            "--invalidate", "claims",
+            "--figure-failure-threshold", "0.05",
+            "--claim-failure-threshold", "0.05",
+            "--reference-failure-threshold", "1.0",
+            "--export-parquet", "data/primary/abstracts_enriched.parquet",
+        ]
+        with mock.patch.object(enrich_stage_module, "main", return_value=0) as es_main:
+            result = cli.main(argv)
+        self.assertEqual(result, 0)
+        es_main.assert_called_once_with(argv[1:])
 
     def test_embed_minilm_subcommand_delegates_to_minilm_main(self) -> None:
         with mock.patch.object(cli.neuroscape, "minilm_main", return_value=17) as minilm_main:
@@ -119,12 +136,10 @@ class CLITest(unittest.TestCase):
         self.assertEqual(result, 24)
         stage2_analysis_main.assert_called_once_with(["--num-neighbors", "25"])
 
-    def test_reference_metadata_subcommand_delegates_to_openalex_main(self) -> None:
-        with mock.patch.object(cli.openalex, "main", return_value=24) as openalex_main:
-            result = cli.main(["reference-metadata", "--use-title-search"])
-
-        self.assertEqual(result, 24)
-        openalex_main.assert_called_once_with(["--use-title-search"])
+    # NOTE: `reference-metadata`, `enrich`, `extract-claims`, and
+    # `analyze-figures` are REMOVED as standalone subcommands per
+    # FR-014. See `TestLegacyEnrichmentSubcommandsRemoved` below for
+    # the negative coverage.
 
     def test_title_audit_subcommand_delegates_to_titles_main(self) -> None:
         with mock.patch.object(cli.titles, "main", return_value=32) as titles_main:
@@ -196,6 +211,39 @@ class TestFetchAbstractsSubcommand(unittest.TestCase):
 
         self.assertEqual(result, 0)
         fs_main.assert_called_once_with(["--allow-empty"])
+
+
+class TestLegacyEnrichmentSubcommandsRemoved(unittest.TestCase):
+    """FR-014 — `enrich`, `analyze-figures`, `extract-claims`, and
+    `reference-metadata` are REMOVED. Operators use
+    `ohbmcli enrich-abstracts` and `--invalidate <component>` for
+    targeted refresh instead. No backward-compat alias.
+
+    Hermetic safety net: we mock every legacy main so that in red
+    phase (where the subcommands still route), the test fails fast
+    with no live API calls. Once the dispatch entries are removed
+    (T016), argparse rejects each name at parse time.
+    """
+
+    def test_enrich_subcommand_is_not_a_known_choice(self) -> None:
+        with mock.patch.object(cli.enrichment, "enrich_main", return_value=0):
+            with self.assertRaises(SystemExit):
+                cli.main(["enrich"])
+
+    def test_analyze_figures_subcommand_is_not_a_known_choice(self) -> None:
+        with mock.patch.object(cli.enrichment, "analyze_figures_main", return_value=0):
+            with self.assertRaises(SystemExit):
+                cli.main(["analyze-figures"])
+
+    def test_extract_claims_subcommand_is_not_a_known_choice(self) -> None:
+        with mock.patch.object(cli.enrichment, "extract_claims_main", return_value=0):
+            with self.assertRaises(SystemExit):
+                cli.main(["extract-claims"])
+
+    def test_reference_metadata_subcommand_is_not_a_known_choice(self) -> None:
+        with mock.patch.object(cli.openalex, "main", return_value=0):
+            with self.assertRaises(SystemExit):
+                cli.main(["reference-metadata"])
 
 
 class TestFetchWithdrawnSubcommand(unittest.TestCase):
