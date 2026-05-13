@@ -222,5 +222,165 @@ class AssetHelpersTest(unittest.TestCase):
         self.assertEqual(snapshot_payload["abstracts"][0]["id"], 123)
 
 
+class TestBatchedFetchHooks(unittest.TestCase):
+    """T009 — `fetch_content_batches` MUST expose callback hooks for
+    Stage 1's checkpoint lifecycle: one fired per record state change,
+    one fired when a whole batch finishes."""
+
+    def _content_payload(self, sid: int) -> dict[str, object]:
+        return {
+            "id": sid,
+            "title": [{"value": f"Title {sid}"}],
+            "accepted_for": {"value": "Poster"},
+            "authors": [{"author_order": 1, "id": sid * 10}],
+            "responses": [],
+            "poster_id": f"P-{sid}",
+        }
+
+    def test_on_batch_complete_fires_once_per_batch(self) -> None:
+        from ohbm2026 import assets as assets_module
+
+        captured_batches: list[list[int]] = []
+
+        def on_batch_complete(submission_ids: list[int]) -> None:
+            captured_batches.append(list(submission_ids))
+
+        def fake_fetch_abstract_content(api_key, submission_ids, **kwargs):
+            return [self._content_payload(sid) for sid in submission_ids]
+
+        with mock.patch.object(assets_module, "fetch_abstract_content", side_effect=fake_fetch_abstract_content):
+            results = list(
+                assets_module.fetch_content_batches(
+                    api_key="fake",
+                    submission_ids=[1, 2, 3, 4, 5],
+                    batch_size=2,
+                    on_batch_complete=on_batch_complete,
+                    on_record_state_change=lambda *_args, **_kwargs: None,
+                )
+            )
+
+        # 5 IDs / 2 per batch → 3 batches: [1,2], [3,4], [5]
+        self.assertEqual(captured_batches, [[1, 2], [3, 4], [5]])
+        self.assertEqual(len(results), 5)
+        self.assertEqual([r["id"] for r in results], [1, 2, 3, 4, 5])
+
+    def test_on_record_state_change_fires_for_every_record(self) -> None:
+        from ohbm2026 import assets as assets_module
+
+        seen: list[tuple[int, str]] = []
+
+        def on_record_state_change(sid: int, state: str) -> None:
+            seen.append((sid, state))
+
+        def fake_fetch_abstract_content(api_key, submission_ids, **kwargs):
+            return [self._content_payload(sid) for sid in submission_ids]
+
+        with mock.patch.object(assets_module, "fetch_abstract_content", side_effect=fake_fetch_abstract_content):
+            list(
+                assets_module.fetch_content_batches(
+                    api_key="fake",
+                    submission_ids=[10, 20],
+                    batch_size=2,
+                    on_batch_complete=lambda *_args, **_kwargs: None,
+                    on_record_state_change=on_record_state_change,
+                )
+            )
+
+        sids_seen = [sid for sid, _ in seen]
+        self.assertIn(10, sids_seen)
+        self.assertIn(20, sids_seen)
+        # Every record MUST end in a terminal state (done or
+        # failed-retryable) — never strictly "pending" at run end.
+        last_state_per_sid = {sid: state for sid, state in seen}
+        for sid in (10, 20):
+            self.assertIn(last_state_per_sid[sid], {"done", "failed-retryable"})
+
+
+class TestPerRecordStateTransitions(unittest.TestCase):
+    """T009 — state machine for per-record progress within a batch.
+
+    Legal sequence per data-model.md:
+        pending → corpus_fetched → figures_in_progress → done
+                                                       → failed-retryable
+                                ↘ done (when abstract has zero figures)
+    Backwards transitions MUST be rejected.
+    """
+
+    def test_pending_can_advance_to_corpus_fetched(self) -> None:
+        from ohbm2026.assets import advance_record_state
+
+        self.assertEqual(advance_record_state("pending", "corpus_fetched"), "corpus_fetched")
+
+    def test_corpus_fetched_can_advance_to_figures_in_progress(self) -> None:
+        from ohbm2026.assets import advance_record_state
+
+        self.assertEqual(
+            advance_record_state("corpus_fetched", "figures_in_progress"),
+            "figures_in_progress",
+        )
+
+    def test_corpus_fetched_can_advance_directly_to_done_when_no_figures(self) -> None:
+        from ohbm2026.assets import advance_record_state
+
+        self.assertEqual(advance_record_state("corpus_fetched", "done"), "done")
+
+    def test_figures_in_progress_can_advance_to_done_or_failed_retryable(self) -> None:
+        from ohbm2026.assets import advance_record_state
+
+        self.assertEqual(advance_record_state("figures_in_progress", "done"), "done")
+        self.assertEqual(
+            advance_record_state("figures_in_progress", "failed-retryable"),
+            "failed-retryable",
+        )
+
+    def test_backwards_transition_raises(self) -> None:
+        from ohbm2026.assets import advance_record_state
+
+        with self.assertRaises(ValueError):
+            advance_record_state("done", "pending")
+        with self.assertRaises(ValueError):
+            advance_record_state("corpus_fetched", "pending")
+        with self.assertRaises(ValueError):
+            advance_record_state("figures_in_progress", "corpus_fetched")
+
+
+class TestPosterIdPropagation(unittest.TestCase):
+    """T009 (FR-020) — normalize_abstract MUST surface the upstream
+    poster identifier as `poster_id` on the normalized record. If
+    upstream does not include any poster-identifier-shaped field,
+    the function MUST surface it loudly rather than fabricating one."""
+
+    def test_normalize_abstract_propagates_poster_id_when_present(self) -> None:
+        raw = {
+            "id": 42,
+            "title": [{"value": "Demo"}],
+            "accepted_for": {"value": "Poster"},
+            "authors": [{"author_order": 1, "id": 7}],
+            "responses": [],
+            "poster_id": "P-042",
+        }
+        normalized = normalize_abstract(raw)
+
+        self.assertEqual(normalized["poster_id"], "P-042")
+
+    def test_normalize_abstract_passes_through_alternative_poster_field_names(self) -> None:
+        # The implementation discovers the upstream field name from
+        # introspection at fetch time, so multiple input shapes can
+        # land in the normalized record. Whatever the discovered key
+        # was, normalize_abstract must expose it as `poster_id`.
+        for upstream_key in ("poster_id", "poster_number", "presentation_id"):
+            with self.subTest(upstream_key=upstream_key):
+                raw = {
+                    "id": 1,
+                    "title": [{"value": "X"}],
+                    "accepted_for": {"value": "Poster"},
+                    "authors": [],
+                    "responses": [],
+                    upstream_key: "P-1",
+                }
+                normalized = normalize_abstract(raw)
+                self.assertEqual(normalized["poster_id"], "P-1")
+
+
 if __name__ == "__main__":
     unittest.main()
