@@ -31,7 +31,14 @@ PRIMARY_WITHDRAWN_ABSTRACTS_PATH = PRIMARY_ROOT / "abstracts_withdrawn.json"
 PRIMARY_AUTHORS_PATH = PRIMARY_ROOT / "authors.json"
 PRIMARY_AUTHORS_WITHDRAWN_PATH = PRIMARY_ROOT / "authors_withdrawn.json"
 PRIMARY_ENRICHED_ABSTRACTS_PATH = PRIMARY_ROOT / "abstracts_enriched.json"
+PRIMARY_ENRICHED_CORPUS_PATH = PRIMARY_ROOT / "abstracts_enriched.sqlite"
 PRIMARY_REFERENCE_METADATA_PATH = PRIMARY_ROOT / "reference_metadata.json"
+ENRICH_COMPONENTS = ("figures", "claims", "references")
+_ENRICH_CACHE_NAMESPACES = {
+    "figures": "figure_analysis",
+    "claims": "claim_analysis",
+    "references": "reference_metadata",
+}
 EXPERIMENTS_ROOT = OUTPUTS_ROOT / "experiments"
 EXPORTED_SITES_ROOT = OUTPUTS_ROOT / "exported-sites"
 PROPOSALS_ROOT = OUTPUTS_ROOT / "proposals"
@@ -111,6 +118,21 @@ def build_schema_artifact_path(state_key: str) -> Path:
 
 def build_provenance_path(state_key: str) -> Path:
     return build_input_snapshot_path("abstracts_fetch_provenance", state_key)
+
+
+def build_enrich_provenance_path(state_key: str) -> Path:
+    return build_input_snapshot_path("abstracts_enrich_provenance", state_key)
+
+
+def build_enrich_cache_path(component: str, cache_key: str) -> Path:
+    if component not in ENRICH_COMPONENTS:
+        raise ValueError(
+            f"Unsupported Stage 2 component {component!r}; expected one of {ENRICH_COMPONENTS}"
+        )
+    if not cache_key or "/" in cache_key or "\\" in cache_key:
+        raise ValueError(f"Invalid cache_key {cache_key!r}")
+    namespace = _ENRICH_CACHE_NAMESPACES[component]
+    return CACHE_ROOT / namespace / f"{cache_key}.json"
 
 
 def build_fetch_checkpoint_path(state_key: str) -> Path:

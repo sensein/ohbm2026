@@ -134,6 +134,41 @@ class ArtifactHelpersTest(unittest.TestCase):
         self.assertEqual(artifacts.regeneration_action(running, expected_state_key=state_key), "resume")
         self.assertEqual(artifacts.regeneration_action(stale, expected_state_key=state_key), "selective_rebuild")
 
+    def test_primary_enriched_corpus_path_lives_under_primary(self) -> None:
+        path = artifacts.PRIMARY_ENRICHED_CORPUS_PATH
+
+        self.assertEqual(path, Path("data/primary/abstracts_enriched.sqlite"))
+        self.assertFalse(path.is_absolute(), "enriched corpus path must be project-relative")
+        self.assertEqual(path.suffix, ".sqlite")
+
+    def test_build_enrich_provenance_path_lives_under_inputs(self) -> None:
+        state_key = "abc123def456"
+        path = artifacts.build_enrich_provenance_path(state_key)
+
+        self.assertEqual(
+            path,
+            Path("data/inputs/abstracts_enrich_provenance__abc123def456.json"),
+        )
+        self.assertFalse(path.is_absolute(), "provenance path must be project-relative")
+        self.assertIn(state_key, path.name)
+
+    def test_build_enrich_cache_path_uses_component_namespace(self) -> None:
+        figures_path = artifacts.build_enrich_cache_path("figures", "a" * 64)
+        claims_path = artifacts.build_enrich_cache_path("claims", "b" * 64)
+        refs_path = artifacts.build_enrich_cache_path("references", "c" * 64)
+
+        self.assertEqual(figures_path, Path("data/cache/figure_analysis/" + "a" * 64 + ".json"))
+        self.assertEqual(claims_path, Path("data/cache/claim_analysis/" + "b" * 64 + ".json"))
+        self.assertEqual(refs_path, Path("data/cache/reference_metadata/" + "c" * 64 + ".json"))
+
+        for path in (figures_path, claims_path, refs_path):
+            self.assertFalse(path.is_absolute(), "cache path must be project-relative")
+
+        with self.assertRaises(ValueError):
+            artifacts.build_enrich_cache_path("nonsense", "deadbeef" * 8)
+        with self.assertRaises(ValueError):
+            artifacts.build_enrich_cache_path("figures", "../escape")
+
     def test_git_ignore_covers_local_artifact_paths(self) -> None:
         root = Path(__file__).resolve().parents[1]
         command = [
