@@ -337,6 +337,60 @@ def normalize_abstract(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Asset-download error kinds that are TERMINAL (not retryable):
+# the URL is malformed, the content type is not an image, or the
+# operator asked us not to issue new HTTP requests. Retrying these
+# would produce the same outcome.
+_TERMINAL_ASSET_ERRORS = frozenset(
+    {
+        "Skipped invalid URL",
+        "Skipped non-image URL",
+        "Skipped non-image content",
+        "Missing local asset from previous run",
+    }
+)
+
+
+def _resolve_figures(
+    abstract: dict[str, Any],
+    *,
+    assets_dir: Path,
+    asset_cache: dict[str, AssetDownload],
+    existing_assets: dict[str, Path],
+    reuse_existing_assets_only: bool,
+    timeout_start: float,
+    timeout_limit: float,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Resolve every figure URL on ``abstract`` into a local asset
+    descriptor. Returns (local_assets, has_retryable_failure). Reuses
+    on-disk files via ``find_existing_asset`` — same abstract id +
+    same source URL → matching ``asset_stem`` → zero HTTP requests
+    issued for that figure."""
+    local_assets: list[dict[str, Any]] = []
+    has_retryable_failure = False
+    for figure_url in abstract.get("figure_urls", []):
+        download = download_asset(
+            figure_url["source_url"],
+            assets_dir,
+            abstract["id"],
+            asset_cache,
+            existing_assets,
+            reuse_existing_assets_only=reuse_existing_assets_only,
+            timeout_start=timeout_start,
+            timeout_limit=timeout_limit,
+        )
+        local_assets.append(
+            normalize_local_asset(download, figure_url["question_name"])
+        )
+        if (
+            not download.downloaded
+            and download.error is not None
+            and download.error not in _TERMINAL_ASSET_ERRORS
+        ):
+            has_retryable_failure = True
+    return local_assets, has_retryable_failure
+
+
 def fetch_content_batches(
     *,
     api_key: str,
@@ -344,6 +398,8 @@ def fetch_content_batches(
     batch_size: int,
     on_batch_complete: "callable",
     on_record_state_change: "callable",
+    assets_dir: Path | None = None,
+    reuse_existing_assets_only: bool = False,
     timeout_start: float = DEFAULT_TIMEOUT_START_SECONDS,
     timeout_limit: float = DEFAULT_TIMEOUT_LIMIT_SECONDS,
 ):
@@ -353,9 +409,23 @@ def fetch_content_batches(
     finishes. Yields one normalized abstract per submission in input
     order.
 
-    Per-record transitions emitted (no-figures path; the orchestrator
-    can layer figure-resolution on top with additional transitions):
+    When ``assets_dir`` is provided, every record's figure URLs are
+    resolved inline against the existing on-disk asset cache before
+    yielding — matched files are reused (zero HTTP), unmatched ones
+    are downloaded. Per-record state transitions then include
+    ``figures_in_progress`` and end in ``done`` or
+    ``failed-retryable``.
+
+    When ``assets_dir`` is ``None`` (test path / corpus-only re-run),
+    figure resolution is skipped and the transitions are
     ``pending`` → ``corpus_fetched`` → ``done``."""
+    if assets_dir is not None:
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        existing_assets = build_existing_asset_index(assets_dir)
+    else:
+        existing_assets = {}
+    asset_cache: dict[str, AssetDownload] = {}
+
     for batch in chunked(submission_ids, batch_size):
         for sid in batch:
             on_record_state_change(sid, "pending")
@@ -368,8 +438,26 @@ def fetch_content_batches(
         for raw in raw_batch:
             sid = raw.get("id")
             on_record_state_change(sid, "corpus_fetched")
-            yield normalize_abstract(raw)
-            on_record_state_change(sid, "done")
+            normalized = normalize_abstract(raw)
+            if assets_dir is not None and normalized.get("figure_urls"):
+                on_record_state_change(sid, "figures_in_progress")
+                local_assets, retryable = _resolve_figures(
+                    normalized,
+                    assets_dir=assets_dir,
+                    asset_cache=asset_cache,
+                    existing_assets=existing_assets,
+                    reuse_existing_assets_only=reuse_existing_assets_only,
+                    timeout_start=timeout_start,
+                    timeout_limit=timeout_limit,
+                )
+                normalized["local_assets"] = local_assets
+                on_record_state_change(
+                    sid,
+                    "failed-retryable" if retryable else "done",
+                )
+            else:
+                on_record_state_change(sid, "done")
+            yield normalized
         on_batch_complete(list(batch))
 
 

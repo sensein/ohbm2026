@@ -42,6 +42,7 @@ from ohbm2026 import graphql_api as _gql
 from ohbm2026 import schema_diff as _schema_diff
 from ohbm2026.exceptions import (
     CheckpointError,
+    FigureFailureError,
     GraphQLAPIError,
     ProvenanceError,
     SchemaContractError,
@@ -80,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     except ProvenanceError as exc:
         print(f"[fetch-abstracts] provenance error: {exc}", file=sys.stderr)
         return EXIT_PROVENANCE_ERROR
+    except FigureFailureError as exc:
+        print(f"[fetch-abstracts] {exc}", file=sys.stderr)
+        return EXIT_FIGURE_FAILURE
     except GraphQLAPIError as exc:
         print(f"[fetch-abstracts] GraphQL error: {exc}", file=sys.stderr)
         return EXIT_GRAPHQL_ERROR
@@ -183,12 +187,16 @@ def _run(args: argparse.Namespace, argv: list[str]) -> int:
         # batch-level checkpoint is the persisted source of truth.
         pass
 
+    assets_dir = _resolve_assets_dir(cwd, args)
+
     for abstract in assets.fetch_content_batches(
         api_key=api_key,
         submission_ids=pending_ids,
         batch_size=args.batch_size,
         on_batch_complete=on_batch_complete,
         on_record_state_change=on_record_state_change,
+        assets_dir=assets_dir,
+        reuse_existing_assets_only=args.reuse_existing_assets_only,
         timeout_start=args.timeout_start_ms / 1000,
         timeout_limit=args.timeout_limit_seconds,
     ):
@@ -228,6 +236,22 @@ def _run(args: argparse.Namespace, argv: list[str]) -> int:
     _write_corpus(corpus_path, event_ids, abstracts_combined)
 
     figure_asset_count, figure_failure_count = _count_figure_outcomes(abstracts_combined)
+
+    # Figure-failure-rate gate: hard-fail only if the failure RATE
+    # exceeds the configured threshold over the attempts that actually
+    # touched the network (downloaded vs failed; terminal skips like
+    # invalid-URL don't count against the budget).
+    total_attempts = figure_asset_count + figure_failure_count
+    if (
+        total_attempts > 0
+        and (figure_failure_count / total_attempts) > args.figure_failure_threshold
+    ):
+        raise FigureFailureError(
+            f"figure-asset failure rate "
+            f"{figure_failure_count}/{total_attempts} "
+            f"({figure_failure_count / total_attempts:.1%}) exceeds "
+            f"--figure-failure-threshold={args.figure_failure_threshold:.1%}"
+        )
 
     provenance = _build_provenance_record(
         cwd=cwd,
@@ -286,6 +310,13 @@ def _resolve_corpus_path(cwd: Path, args: argparse.Namespace) -> Path:
         candidate = Path(args.corpus_output)
         return candidate if candidate.is_absolute() else (cwd / candidate)
     return cwd / artifacts.PRIMARY_ABSTRACTS_PATH
+
+
+def _resolve_assets_dir(cwd: Path, args: argparse.Namespace) -> Path:
+    if args.assets_dir:
+        candidate = Path(args.assets_dir)
+        return candidate if candidate.is_absolute() else (cwd / candidate)
+    return cwd / artifacts.INPUT_ASSETS_ROOT
 
 
 def _compute_state_key(args: argparse.Namespace) -> str:

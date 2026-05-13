@@ -344,6 +344,139 @@ class TestPerRecordStateTransitions(unittest.TestCase):
             advance_record_state("figures_in_progress", "corpus_fetched")
 
 
+class TestFetchContentBatchesFigureResolution(unittest.TestCase):
+    """T015 / fix-after-Phase-4: when ``assets_dir`` is provided,
+    ``fetch_content_batches`` resolves figure URLs inline AND reuses
+    on-disk files via ``asset_stem`` matching (zero HTTP for reused
+    figures). When ``assets_dir`` is ``None``, figure resolution is
+    skipped (the original no-figures path)."""
+
+    def _content_with_figure(self, sid: int, source_url: str) -> dict[str, object]:
+        return {
+            "id": sid,
+            "title": [{"value": f"Abs {sid}"}],
+            "accepted_for": {"value": "Poster"},
+            "authors": [],
+            "responses": [
+                {
+                    "question": {"question_name": "Methods Figure (Optional)"},
+                    "value": source_url,
+                },
+            ],
+            "program_code": f"{sid:04d}",
+        }
+
+    def test_figure_download_skipped_when_assets_dir_is_none(self) -> None:
+        from ohbm2026 import assets as assets_module
+
+        def fake_fetch_abstract_content(api_key, ids, **kwargs):
+            return [
+                self._content_with_figure(sid, f"https://example.org/{sid}.png")
+                for sid in ids
+            ]
+
+        with mock.patch.object(assets_module, "fetch_abstract_content", side_effect=fake_fetch_abstract_content), \
+             mock.patch.object(assets_module, "download_asset") as mock_download:
+            results = list(
+                assets_module.fetch_content_batches(
+                    api_key="fake",
+                    submission_ids=[1, 2],
+                    batch_size=2,
+                    on_batch_complete=lambda *a, **kw: None,
+                    on_record_state_change=lambda *a, **kw: None,
+                )
+            )
+
+        mock_download.assert_not_called()
+        self.assertEqual(len(results), 2)
+        self.assertEqual(results[0]["local_assets"], [])
+
+    def test_figure_download_runs_and_populates_local_assets(self) -> None:
+        from ohbm2026 import assets as assets_module
+        from ohbm2026.assets import AssetDownload
+
+        def fake_fetch_abstract_content(api_key, ids, **kwargs):
+            return [
+                self._content_with_figure(sid, f"https://example.org/{sid}.png")
+                for sid in ids
+            ]
+
+        def fake_download(source_url, destination_dir, abstract_id, cache, existing, **kwargs):
+            return AssetDownload(
+                source_url=source_url,
+                local_path=f"{destination_dir}/{abstract_id}_fake.png",
+                content_type="image/png",
+                downloaded=True,
+                error=None,
+            )
+
+        with TemporaryDirectory() as tmp:
+            assets_dir = Path(tmp)
+            with mock.patch.object(assets_module, "fetch_abstract_content", side_effect=fake_fetch_abstract_content), \
+                 mock.patch.object(assets_module, "download_asset", side_effect=fake_download) as mock_download:
+                results = list(
+                    assets_module.fetch_content_batches(
+                        api_key="fake",
+                        submission_ids=[1, 2],
+                        batch_size=2,
+                        on_batch_complete=lambda *a, **kw: None,
+                        on_record_state_change=lambda *a, **kw: None,
+                        assets_dir=assets_dir,
+                    )
+                )
+
+        self.assertEqual(mock_download.call_count, 2)
+        self.assertEqual(len(results[0]["local_assets"]), 1)
+        self.assertTrue(results[0]["local_assets"][0]["downloaded"])
+
+    def test_existing_on_disk_asset_is_reused_without_download_call(self) -> None:
+        """Same abstract_id + same source_url → same asset_stem → file
+        already on disk → ``download_asset`` reuses it (no new HTTP
+        request issued by the real ``download_asset`` function).
+
+        We test the integration through the real ``download_asset``
+        path here so the reuse semantics are exercised end to end —
+        we just pre-seed the destination directory with a file at the
+        expected stem."""
+        from ohbm2026 import assets as assets_module
+        from ohbm2026.assets import asset_stem
+
+        source_url = "https://example.org/abstract-1.png"
+        abstract_id = 1
+        stem = asset_stem(abstract_id, source_url)
+
+        def fake_fetch_abstract_content(api_key, ids, **kwargs):
+            return [self._content_with_figure(sid, source_url) for sid in ids]
+
+        with TemporaryDirectory() as tmp:
+            assets_dir = Path(tmp)
+            # Pre-seed an on-disk asset at the expected stem.
+            seeded = assets_dir / f"{stem}.png"
+            seeded.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+            with mock.patch.object(assets_module, "fetch_abstract_content", side_effect=fake_fetch_abstract_content), \
+                 mock.patch.object(assets_module, "urlopen_with_retries") as mock_urlopen:
+                results = list(
+                    assets_module.fetch_content_batches(
+                        api_key="fake",
+                        submission_ids=[abstract_id],
+                        batch_size=1,
+                        on_batch_complete=lambda *a, **kw: None,
+                        on_record_state_change=lambda *a, **kw: None,
+                        assets_dir=assets_dir,
+                    )
+                )
+
+        # Real download_asset ran; it found the seeded file and reused
+        # it — urlopen_with_retries (the actual network call) MUST NOT
+        # have been invoked.
+        mock_urlopen.assert_not_called()
+        local_assets = results[0]["local_assets"]
+        self.assertEqual(len(local_assets), 1)
+        self.assertTrue(local_assets[0]["downloaded"])
+        self.assertEqual(local_assets[0]["local_path"], str(seeded))
+
+
 class TestPosterIdPropagation(unittest.TestCase):
     """T009 (FR-020) — `normalize_abstract` MUST rename upstream
     `program_code` to `poster_id` on the normalized record.
