@@ -110,6 +110,23 @@
   surfaces MUST list the docs that need to be updated in the same change.
 - **CA-004**: Any integration that uses credentials MUST name the env vars or
   secret boundary and MUST NOT require checked-in tokens or copied secrets.
+- **CA-005**: Any new dataset, cache, export, or downloaded asset MUST land
+  in a gitignored path; the spec MUST NOT propose tracking generated data in
+  the repository.
+- **CA-006**: Error paths MUST be explicit: the spec MUST state how failures
+  in external calls, LLM/API steps, and pipeline stages are surfaced (re-
+  raised, requeued, or logged with context) rather than silently swallowed,
+  and MUST NOT rely on bypassing verification gates.
+- **CA-007**: Any dependency on artifacts the project does not own (upstream
+  checkpoints, vendor enumerations, API schemas, external file layouts) MUST
+  be discovered at runtime from metadata or introspection; the spec MUST
+  state how mismatches are detected and surfaced as errors rather than
+  matched against hardcoded lists.
+- **CA-008**: Any organizer-facing or downstream-consumer artifact produced
+  by this feature MUST ship with machine-readable provenance (inputs,
+  embedding bundle, config, code revision, command line, seed) co-located
+  with the artifact and free of absolute or user-home paths; the spec MUST
+  name the provenance file and what it contains.
 
 ## Success Criteria *(mandatory)*
 

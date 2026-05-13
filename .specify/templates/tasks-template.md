@@ -159,6 +159,18 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
 - [ ] TXXX Security hardening
 - [ ] TXXX Secret exposure review for docs, fixtures, logs, and generated outputs
+- [ ] TXXX Verify no data, caches, exports, or downloaded assets were committed
+      and that any new artifact roots are listed in `.gitignore`
+- [ ] TXXX Audit error handling: no bare excepts, no silent fallbacks, no
+      bypassed verification gates (`--no-verify`, skipped tests, disabled hooks)
+- [ ] TXXX Verify external-state dependencies (upstream checkpoints, vendor
+      schemas, API enums) are discovered at runtime, not hardcoded; mismatch
+      paths produce precise errors
+- [ ] TXXX Verify each organizer-facing or downstream artifact ships with
+      machine-readable provenance (inputs, bundle, config, revision, command,
+      seed) and no absolute/user-home paths
+- [ ] TXXX Run `.specify/scripts/bash/constitution-check.sh --full` and
+      address any reported violations
 - [ ] TXXX Run quickstart.md validation
 
 ---
@@ -251,7 +263,13 @@ With multiple developers:
 - [Story] label maps task to specific user story for traceability
 - Each user story should be independently completable and testable
 - Verify tests fail before implementing
-- Commit after each validated logical group and push once the requested change
-  is complete unless the requester explicitly says not to
+- Commit early and often: each validated logical slice gets its own
+  descriptive commit; do not batch hours of work into one commit, and push
+  once the requested change is complete unless the requester explicitly
+  says not to
+- Commits MUST NOT include data, caches, exports, downloaded assets, or
+  secrets; gitignore any new artifact root before writing to it
+- Never silence failures or bypass verification gates to make a task look
+  done; surface the error and address the root cause
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence

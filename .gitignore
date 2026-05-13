@@ -27,6 +27,9 @@ tmp/
 archive/
 memory/archive/
 
+# Local Claude Code session state
+.claude/
+
 # Local packaging and lock artifacts
 src/*.egg-info/
 uv.lock

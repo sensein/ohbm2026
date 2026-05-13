@@ -38,12 +38,28 @@
   missing before implementation begins.
 - Output paths preserve auditability: canonical raw data is not silently
   rewritten, and recorded experiments or proposal outputs use fresh directories.
+- All generated artifacts (datasets, caches, exports, downloaded assets) land
+  in gitignored roots; the plan does not introduce any new directory that
+  would commit data to the repository.
+- Error handling is explicit and loud: the plan does not introduce bare
+  excepts, silent fallbacks, or verification-gate bypasses (`--no-verify`,
+  skipped tests, disabled hooks); any temporary workaround is named with its
+  follow-up.
+- External-state dependencies (third-party checkpoints, vendor schemas, model
+  zoos, API enumerations) are discovered at runtime from metadata or
+  introspection, not matched against a hardcoded allow-list; mismatches
+  surface as precise errors, not silent skips.
+- Any artifact that will reach organizers, reviewers, or downstream consumers
+  ships with machine-readable provenance (inputs, embedding bundle, config,
+  code revision, command line, seed) alongside the artifact, and the
+  provenance contains no absolute or user-home paths.
 - Secrets stay outside the repo; required credentials are referenced by env var
   name only and redaction expectations are stated where relevant.
 - README/docs/plan updates are included whenever defaults, commands, inputs,
   outputs, or review surfaces change.
-- The delivery plan ends with local verification, a descriptive commit, and a
-  push unless the requester explicitly asks to keep the change unpublished.
+- The delivery plan commits each verified slice with a descriptive message
+  (not a single end-of-change commit) and ends with a push unless the
+  requester explicitly asks to keep the change unpublished.
 
 ## Project Structure
 
