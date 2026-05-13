@@ -584,7 +584,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-var", default="OHBM2026_API")
     parser.add_argument("--output", default=str(artifacts.PRIMARY_ABSTRACTS_PATH))
     parser.add_argument("--input-snapshot-dir", default=str(artifacts.INPUTS_ROOT))
-    parser.add_argument("--assets-dir", default=str(artifacts.INPUT_ASSETS_ROOT))
+    parser.add_argument("--assets-dir", default=str(artifacts.PRIMARY_ASSETS_ROOT))
     parser.add_argument("--batch-size", default=50, type=int)
     parser.add_argument("--reuse-existing-assets-only", action="store_true")
     parser.add_argument("--refresh-assets-from-existing-db", action="store_true")

@@ -14,7 +14,13 @@ OUTPUTS_ROOT = DATA_ROOT / "outputs"
 EXPORT_ROOT = Path("export")
 SCRATCH_ROOT = Path("tmp")
 FETCH_CHECKPOINT_WORKFLOW = "fetch_abstracts"
-INPUT_ASSETS_ROOT = INPUTS_ROOT / "assets"
+PRIMARY_ASSETS_ROOT = PRIMARY_ROOT / "assets"
+# Legacy alias retained briefly in case any out-of-tree script still
+# imports the old name; downstream code SHOULD use
+# PRIMARY_ASSETS_ROOT. The actual path now lives under
+# data/primary/assets (consistent with the rest of normalized
+# canonical data — see FR-008 Clarifications session 2026-05-13).
+INPUT_ASSETS_ROOT = PRIMARY_ASSETS_ROOT
 INPUT_AUTHORS_PATH = INPUTS_ROOT / "authors.json"
 INPUT_PHENOMENA_THEORIES_PATH = INPUTS_ROOT / "abstracts_with_phenomena_with_theories_refined.csv"
 INPUT_POSTER_LAYOUT_ROOT = INPUTS_ROOT / "poster_layout"

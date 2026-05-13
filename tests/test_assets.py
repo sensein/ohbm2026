@@ -29,7 +29,7 @@ class AssetHelpersTest(unittest.TestCase):
 
         self.assertEqual(args.output, str(artifacts.PRIMARY_ABSTRACTS_PATH))
         self.assertEqual(args.input_snapshot_dir, str(artifacts.INPUTS_ROOT))
-        self.assertEqual(args.assets_dir, str(artifacts.INPUT_ASSETS_ROOT))
+        self.assertEqual(args.assets_dir, str(artifacts.PRIMARY_ASSETS_ROOT))
 
     def test_extract_external_urls_deduplicates_and_cleans(self) -> None:
         urls = extract_external_urls(

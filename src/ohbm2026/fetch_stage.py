@@ -359,7 +359,7 @@ def _resolve_assets_dir(cwd: Path, args: argparse.Namespace) -> Path:
     if args.assets_dir:
         candidate = Path(args.assets_dir)
         return candidate if candidate.is_absolute() else (cwd / candidate)
-    return cwd / artifacts.INPUT_ASSETS_ROOT
+    return cwd / artifacts.PRIMARY_ASSETS_ROOT
 
 
 def _resolve_authors_path(cwd: Path, args: argparse.Namespace) -> Path:

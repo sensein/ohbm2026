@@ -106,6 +106,14 @@
   refresh authors invokes `ohbmcli fetch-abstracts` (or
   `fetch-withdrawn`); Stage 1's resumability handles the common
   case where abstracts are already fetched. (FR-024.)
+- Q: Should figure assets move from `data/inputs/assets/` to
+  `data/primary/assets/`? → A: Yes. Figure assets are normalized
+  downstream artifacts (locally-resolved binaries derived from
+  upstream URLs), not raw input snapshots. Moving them to
+  `data/primary/` matches the pattern set by `abstracts.json`,
+  `authors.json`, etc. The existing on-disk files migrate via
+  `mv data/inputs/assets data/primary/assets` (gitignored on both
+  sides — no commit impact). FR-008 enumerates the new path.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -363,13 +371,15 @@ suite catches it.
   field, semantically empty corpus, partial fetch. Silent fallbacks,
   bare excepts, and "log and continue" handlers are PROHIBITED.
 - **FR-008**: The fetch-abstracts stage MUST write all artifacts
-  under the existing gitignored data roots: the corpus snapshot
-  and the author roster (FR-023) under `data/primary/`; the
+  under the existing gitignored data roots: the corpus snapshot,
+  the author roster (FR-023), and figure assets under
+  `data/primary/` (`abstracts.json` / `abstracts_withdrawn.json`,
+  `authors.json` / `authors_withdrawn.json`, `assets/`); the
   GraphQL source snapshot, the GraphQL schema artifact, and the
   provenance record under `data/inputs/`; the resume checkpoint
-  under `data/cache/fetch_abstracts/`; figure assets under
-  `data/inputs/assets/`. The stage MUST refuse to write outside
-  the gitignored boundary even if explicitly directed to.
+  under `data/cache/fetch_abstracts/`. The stage MUST refuse to
+  write outside the gitignored boundary even if explicitly
+  directed to.
 - **FR-009**: The per-stage pattern documented for future stages MUST
   define and name each of the six contract elements: input contract,
   output contract, provenance contract, error-handling contract,
