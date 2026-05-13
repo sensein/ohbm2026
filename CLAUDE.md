@@ -157,4 +157,9 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
+at `specs/002-rewire-pipeline/plan.md`. The companion design artifacts
+under the same directory — `research.md`, `data-model.md`,
+`contracts/`, and `quickstart.md` — pin the Stage 1 fetch-abstracts
+rewire (resumable, schema-aware, provenance-bearing replacement for
+the old `ohbmcli ingest`).
 <!-- SPECKIT END -->

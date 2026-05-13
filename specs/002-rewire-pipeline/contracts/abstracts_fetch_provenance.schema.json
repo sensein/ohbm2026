@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "abstracts_fetch_provenance.schema.json",
+  "title": "Abstracts Fetch Provenance Record (Stage 1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "provenance_version",
+    "run_id",
+    "state_key",
+    "run_timestamp",
+    "code_revision",
+    "command_line",
+    "env_vars_consulted",
+    "endpoint_url",
+    "query_count",
+    "request_retry_count",
+    "retry_reasons",
+    "total_response_bytes",
+    "abstract_count",
+    "figure_asset_count",
+    "figure_failure_count",
+    "schema_artifact_path",
+    "schema_hash",
+    "schema_diff_vs_previous",
+    "checkpoint_path",
+    "resumed_from_previous_run"
+  ],
+  "properties": {
+    "provenance_version": {
+      "type": "string",
+      "const": "fetch.provenance.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "state_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "run_timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "code_revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_sha", "dirty"],
+      "properties": {
+        "git_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "dirty": { "type": "boolean" }
+      }
+    },
+    "command_line": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "env_vars_consulted": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Env var NAMES only. Values MUST NEVER appear (CA-004, Principle V)."
+    },
+    "endpoint_url": { "type": "string", "format": "uri" },
+    "query_count": { "type": "integer", "minimum": 0 },
+    "request_retry_count": { "type": "integer", "minimum": 0 },
+    "retry_reasons": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "total_response_bytes": { "type": "integer", "minimum": 0 },
+    "abstract_count": { "type": "integer", "minimum": 0 },
+    "figure_asset_count": { "type": "integer", "minimum": 0 },
+    "figure_failure_count": { "type": "integer", "minimum": 0 },
+    "schema_artifact_path": {
+      "type": "string",
+      "pattern": "^(?!/)(?!~)[^\\x00]+$",
+      "description": "Project-relative path. MUST NOT be absolute or ~-prefixed (CA-008)."
+    },
+    "schema_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "schema_diff_vs_previous": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/SchemaDiffSummary" }
+      ]
+    },
+    "checkpoint_path": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "string",
+          "pattern": "^(?!/)(?!~)[^\\x00]+$",
+          "description": "Project-relative path. MUST NOT be absolute or ~-prefixed."
+        }
+      ]
+    },
+    "resumed_from_previous_run": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "resumed_from_previous_run": { "const": true } } },
+      "then": { "properties": { "checkpoint_path": { "type": "string" } } }
+    }
+  ],
+  "$defs": {
+    "SchemaDiffSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previous_schema_hash", "current_schema_hash", "entries"],
+      "properties": {
+        "previous_schema_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "current_schema_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "entries": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SchemaDiffEntry" }
+        }
+      }
+    },
+    "SchemaDiffEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tier", "change_kind", "type_name", "field_name", "previous", "current", "downstream_consumers"],
+      "properties": {
+        "tier": { "type": "string", "enum": ["HARD", "SOFT", "INFORMATIONAL"] },
+        "change_kind": { "type": "string", "enum": ["added", "removed", "type_changed", "args_changed"] },
+        "type_name": { "type": "string", "minLength": 1 },
+        "field_name": { "type": "string", "minLength": 1 },
+        "previous": { "anyOf": [{ "type": "null" }, { "type": "object" }] },
+        "current": { "anyOf": [{ "type": "null" }, { "type": "object" }] },
+        "downstream_consumers": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Module names that declared this field in CONSUMED_ABSTRACT_FIELDS. Populated for SOFT (and for HARD when the field is also in the soft set). Empty for INFORMATIONAL."
+        }
+      }
+    }
+  }
+}

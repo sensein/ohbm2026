@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "abstracts_fetch_checkpoint.schema.json",
+  "title": "Abstracts Fetch Resume Checkpoint (Stage 1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "checkpoint_version",
+    "state_key",
+    "bound_schema_hash",
+    "started_at",
+    "last_updated_at",
+    "run_id",
+    "all_submission_ids",
+    "batch_size",
+    "completed_submission_ids",
+    "in_flight_batch"
+  ],
+  "properties": {
+    "checkpoint_version": {
+      "type": "string",
+      "const": "fetch.checkpoint.v1"
+    },
+    "state_key": { "type": "string", "pattern": "^[0-9a-f]{12}$" },
+    "bound_schema_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "last_updated_at": { "type": "string", "format": "date-time" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "all_submission_ids": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "description": "Ordered ID list resolved at fetch start. The 'cursor universe'."
+    },
+    "batch_size": { "type": "integer", "minimum": 1 },
+    "completed_submission_ids": {
+      "type": "array",
+      "items": { "type": "integer" },
+      "uniqueItems": true,
+      "description": "IDs whose corpus row AND ALL figure assets are terminal-state."
+    },
+    "in_flight_batch": {
+      "anyOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/InFlightBatch" }
+      ]
+    }
+  },
+  "$defs": {
+    "InFlightBatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["batch_index", "submission_ids", "per_record_state"],
+      "properties": {
+        "batch_index": { "type": "integer", "minimum": 0 },
+        "submission_ids": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "per_record_state": {
+          "type": "object",
+          "patternProperties": {
+            "^[0-9]+$": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "corpus_fetched",
+                "figures_in_progress",
+                "done",
+                "failed-retryable",
+                "failed-blocking"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}
