@@ -20,6 +20,7 @@ __all__ = [
     "SchemaContractError",
     "CheckpointError",
     "ProvenanceError",
+    "FigureFailureError",
 ]
 
 
@@ -55,4 +56,15 @@ class ProvenanceError(Stage1Error):
     absolute (starts with `/`) or user-home-relative (starts with `~`),
     either of which would make the bundle unportable to another
     machine and violates CA-008.
+    """
+
+
+class FigureFailureError(Stage1Error):
+    """Figure-asset failure rate exceeded the configured threshold.
+
+    Mapped to exit code 5 by Stage 1 (per contracts/cli.md). The
+    operator can rerun after fixing upstream (the existing local
+    files are reused; only the failures retry) or raise the
+    threshold via ``--figure-failure-threshold`` if upstream
+    flakiness is expected.
     """
