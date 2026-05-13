@@ -139,6 +139,47 @@ class TestPosterIdRequested(unittest.TestCase):
         )
 
 
+class TestWithdrawnIdsQuery(unittest.TestCase):
+    """FR-022 / probe 2026-05-13: withdrawn submissions live in a
+    separate corpus. The query filters on `decision_status=Withdrawn`
+    plus `complete=true` and `archived=false` so abandoned drafts
+    don't appear."""
+
+    def test_withdrawn_ids_query_filters_on_decision_status_withdrawn(self) -> None:
+        from ohbm2026.graphql_api import WITHDRAWN_IDS_QUERY
+
+        self.assertIn('decision_status: {_eq: "Withdrawn"}', WITHDRAWN_IDS_QUERY)
+        self.assertIn("complete: {_eq: true}", WITHDRAWN_IDS_QUERY)
+        # Must NOT include the accepted-only filter on accepted_for.
+        self.assertNotIn("accepted_for", WITHDRAWN_IDS_QUERY)
+
+    def test_withdrawn_ids_query_is_distinct_from_accepted_query(self) -> None:
+        from ohbm2026.graphql_api import ABSTRACT_IDS_QUERY, WITHDRAWN_IDS_QUERY
+
+        self.assertNotEqual(ABSTRACT_IDS_QUERY, WITHDRAWN_IDS_QUERY)
+
+    def test_fetch_withdrawn_ids_returns_event_and_submission_ids(self) -> None:
+        from ohbm2026 import graphql_api
+
+        with mock.patch.object(
+            graphql_api,
+            "graphql_request",
+            return_value={
+                "events": [{"id": 1001}],
+                "submissions": [{"id": 1201321}, {"id": 1244579}],
+            },
+        ) as mock_request:
+            events, sids = graphql_api.fetch_withdrawn_ids("fake-key")
+
+        self.assertEqual(events, [1001])
+        self.assertEqual(sids, [1201321, 1244579])
+        # Confirm the WITHDRAWN_IDS_QUERY was the body sent, not the
+        # accepted one (no accidental cross-wiring).
+        call = mock_request.call_args
+        self.assertEqual(call.args[1], graphql_api.WITHDRAWN_IDS_QUERY)
+        self.assertEqual(call.args[2], "withdrawn_ids")
+
+
 class TestStandbyChainRequested(unittest.TestCase):
     """T008 — the live content query MUST also request the program-
     session chain that carries poster standby time / location /

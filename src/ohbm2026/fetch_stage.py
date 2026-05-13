@@ -96,9 +96,24 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_GRAPHQL_ERROR
 
 
+CORPUS_KINDS = ("accepted", "withdrawn")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Stage 1: fetch OHBM 2026 abstracts + persist GraphQL schema"
+    )
+    parser.add_argument(
+        "--corpus-kind",
+        choices=CORPUS_KINDS,
+        default="accepted",
+        help=(
+            "Which corpus to fetch. `accepted` (default) uses "
+            "ABSTRACT_IDS_QUERY and writes data/primary/abstracts.json. "
+            "`withdrawn` uses WITHDRAWN_IDS_QUERY and writes "
+            "data/primary/abstracts_withdrawn.json. The two corpora "
+            "never mix; each has its own state-key namespace."
+        ),
     )
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--env-var", default="OHBM2026_API")
@@ -154,8 +169,10 @@ def _run(args: argparse.Namespace, argv: list[str]) -> int:
     )
 
     if checkpoint is None:
-        # Fresh run: enumerate submissions and initialize checkpoint.
-        event_ids, all_submission_ids = _gql.fetch_abstract_ids(api_key)
+        # Fresh run: enumerate submissions for the chosen corpus kind
+        # and initialize checkpoint.
+        ids_fetcher = _resolve_ids_fetcher(args.corpus_kind)
+        event_ids, all_submission_ids = ids_fetcher(api_key)
         checkpoint = _new_checkpoint(state_key, current_schema_hash, all_submission_ids, args.batch_size)
         _atomic_write_json(checkpoint_path, checkpoint)
     else:
@@ -309,7 +326,19 @@ def _resolve_corpus_path(cwd: Path, args: argparse.Namespace) -> Path:
     if args.corpus_output:
         candidate = Path(args.corpus_output)
         return candidate if candidate.is_absolute() else (cwd / candidate)
+    if args.corpus_kind == "withdrawn":
+        return cwd / artifacts.PRIMARY_WITHDRAWN_ABSTRACTS_PATH
     return cwd / artifacts.PRIMARY_ABSTRACTS_PATH
+
+
+def _resolve_ids_fetcher(corpus_kind: str):
+    """Return the appropriate ID-fetcher callable for the corpus kind.
+    Accepted uses fetch_abstract_ids; withdrawn uses
+    fetch_withdrawn_ids. The two have disjoint upstream filters and
+    must never be conflated."""
+    if corpus_kind == "withdrawn":
+        return _gql.fetch_withdrawn_ids
+    return _gql.fetch_abstract_ids
 
 
 def _resolve_assets_dir(cwd: Path, args: argparse.Namespace) -> Path:
@@ -320,10 +349,16 @@ def _resolve_assets_dir(cwd: Path, args: argparse.Namespace) -> Path:
 
 
 def _compute_state_key(args: argparse.Namespace) -> str:
+    ids_query = (
+        _gql.WITHDRAWN_IDS_QUERY
+        if args.corpus_kind == "withdrawn"
+        else _gql.ABSTRACT_IDS_QUERY
+    )
     basis = artifacts.build_dependency_basis(
         input_sources=[_gql.GRAPHQL_ENDPOINT],
         options={
-            "ids_query": _gql.ABSTRACT_IDS_QUERY,
+            "corpus_kind": args.corpus_kind,
+            "ids_query": ids_query,
             "content_query": _gql.ABSTRACT_CONTENTS_QUERY,
             "introspection_query": _gql.INTROSPECTION_QUERY,
             "batch_size": args.batch_size,

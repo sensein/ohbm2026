@@ -51,6 +51,16 @@
   VII); if the upstream does not expose any field that represents a
   poster identifier, the stage fails loudly rather than fabricating
   one. (FR-020.)
+- Q: A live count probe on 2026-05-13 returned 3244 accepted
+  submissions; historical artifacts (`abstracts_enriched.json`
+  Mar 13) reference 3333. The 89 missing IDs are all
+  `decision_status: Withdrawn`. Should withdrawn submissions be
+  captured? → A: Yes — but in a SEPARATE corpus. Stage 1 gains a
+  dedicated withdrawn-corpus mode (`--corpus-kind=withdrawn`) using
+  its own `WITHDRAWN_IDS_QUERY` and writing to
+  `data/primary/abstracts_withdrawn.json`. Accepted and withdrawn
+  corpora MUST NEVER mix in a single file or share a state-key
+  namespace. (FR-022.)
 - Q: Empirical schema probe (2026-05-13) — which upstream field IS
   the poster identifier, and where does poster standby time live?
   → A: Verified live against `https://app.oxfordabstracts.com/v1/graphql`.
@@ -419,6 +429,19 @@ suite catches it.
   populates them. Null leaves on individual entries are tolerated;
   what is NOT tolerated is upstream RENAMING any of these fields
   while we still ask for them — that is HARD-tier drift (FR-003).
+- **FR-022**: Stage 1 MUST support a separate withdrawn-corpus
+  mode. Selection: `--corpus-kind=withdrawn` (default `accepted`).
+  In withdrawn mode the stage uses a dedicated `WITHDRAWN_IDS_QUERY`
+  filtering on `complete=true AND decision_status="Withdrawn" AND
+  archived=false`, writes to `data/primary/abstracts_withdrawn.json`,
+  and derives a state-key whose dependency basis explicitly includes
+  `corpus_kind`. The accepted and withdrawn corpora MUST NEVER mix
+  in a single file. The schema artifact, provenance record, and
+  checkpoint for the withdrawn run also live under distinct
+  state-key-derived filenames so the two namespaces are isolated.
+  The CLI exposes both modes as discrete subcommands:
+  `ohbmcli fetch-abstracts` (accepted, default) and
+  `ohbmcli fetch-withdrawn` (forces corpus-kind=withdrawn).
 
 ### Key Entities
 

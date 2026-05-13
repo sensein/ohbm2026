@@ -33,9 +33,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch_abstracts_parser = subparsers.add_parser(
         "fetch-abstracts",
-        help="Stage 1: fetch OHBM 2026 abstracts + persist GraphQL schema",
+        help="Stage 1 (accepted): fetch accepted OHBM 2026 abstracts + persist GraphQL schema",
     )
     _copy_actions(fetch_abstracts_parser, fetch_stage._build_parser())
+
+    fetch_withdrawn_parser = subparsers.add_parser(
+        "fetch-withdrawn",
+        help="Stage 1 (withdrawn): fetch withdrawn-decision submissions into a separate corpus",
+    )
+    _copy_actions(fetch_withdrawn_parser, fetch_stage._build_parser())
 
     refresh_parser = subparsers.add_parser("refresh-assets", help="Refresh local figure assets from an existing normalized abstracts dataset")
     _copy_actions(refresh_parser, assets.build_parser())
@@ -157,6 +163,12 @@ def main(argv: list[str] | None = None) -> int:
 
     command, subcommand_argv = argv[0], argv[1:]
     if command == "fetch-abstracts":
+        return fetch_stage.main(subcommand_argv)
+    if command == "fetch-withdrawn":
+        # Force --corpus-kind=withdrawn unless the operator passed it
+        # explicitly to something else.
+        if "--corpus-kind" not in subcommand_argv:
+            subcommand_argv = list(subcommand_argv) + ["--corpus-kind", "withdrawn"]
         return fetch_stage.main(subcommand_argv)
     if command == "refresh-assets":
         return _run_refresh_assets(subcommand_argv)

@@ -70,6 +70,7 @@ def _patch_upstream(
     introspection: dict[str, object] | None = None,
     submission_ids: list[int] | None = None,
     content_factory=_fake_submission,
+    withdrawn_submission_ids: list[int] | None = None,
 ):
     """Context-manager helper: patches every upstream call in
     `ohbm2026.graphql_api` AND its name-imported reference inside
@@ -95,6 +96,11 @@ def _patch_upstream(
             graphql_api,
             "fetch_abstract_ids",
             return_value=([1001], list(submission_ids)),
+        ),
+        mock.patch.object(
+            graphql_api,
+            "fetch_withdrawn_ids",
+            return_value=([1001], list(withdrawn_submission_ids or [])),
         ),
         mock.patch.object(
             graphql_api,
@@ -354,6 +360,58 @@ class ResumabilityContractTests(unittest.TestCase):
         self.assertEqual(second, 0)
         # SC-009: the request set on resume MUST be the pending IDs only.
         self.assertEqual(sorted(set(seen_ids)), [3, 4])
+
+
+class WithdrawnCorpusKindTests(unittest.TestCase):
+    """FR-022: --corpus-kind=withdrawn dispatches to fetch_withdrawn_ids
+    and writes a separate `data/primary/abstracts_withdrawn.json`. The
+    accepted and withdrawn corpora MUST NEVER co-mingle on disk; the
+    state-key namespace separates their schema/provenance/checkpoint
+    artifacts too."""
+
+    def test_withdrawn_run_writes_separate_corpus_file(self) -> None:
+        from ohbm2026 import fetch_stage
+
+        with _run_in_tmp_repo() as tmp_name, mock.patch.dict(
+            os.environ, {"OHBM2026_API": "fake"}, clear=False
+        ), _StackedPatches(
+            _patch_upstream(submission_ids=[10, 20], withdrawn_submission_ids=[99, 88])
+        ):
+            tmp = Path(tmp_name)
+            with mock.patch("ohbm2026.fetch_stage.Path.cwd", return_value=tmp):
+                exit_code = fetch_stage.main(["--corpus-kind", "withdrawn"])
+            self.assertEqual(exit_code, 0)
+
+            withdrawn_corpus = tmp / "data" / "primary" / "abstracts_withdrawn.json"
+            accepted_corpus = tmp / "data" / "primary" / "abstracts.json"
+
+            self.assertTrue(
+                withdrawn_corpus.exists(),
+                "withdrawn corpus file must be written under data/primary/abstracts_withdrawn.json",
+            )
+            self.assertFalse(
+                accepted_corpus.exists(),
+                "withdrawn-mode run MUST NOT write to the accepted corpus path",
+            )
+
+            payload = json.loads(withdrawn_corpus.read_text(encoding="utf-8"))
+            ids = {a["id"] for a in payload["abstracts"]}
+            self.assertEqual(ids, {99, 88}, "withdrawn corpus must contain the withdrawn IDs only")
+
+    def test_accepted_and_withdrawn_have_different_state_keys(self) -> None:
+        from ohbm2026 import fetch_stage
+
+        accepted_args = fetch_stage._build_parser().parse_args([])
+        withdrawn_args = fetch_stage._build_parser().parse_args(["--corpus-kind", "withdrawn"])
+
+        accepted_key = fetch_stage._compute_state_key(accepted_args)
+        withdrawn_key = fetch_stage._compute_state_key(withdrawn_args)
+
+        self.assertNotEqual(
+            accepted_key,
+            withdrawn_key,
+            "accepted and withdrawn must use different state-key namespaces",
+        )
 
 
 class DiscoveryContractTests(unittest.TestCase):
