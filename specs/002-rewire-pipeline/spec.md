@@ -43,6 +43,14 @@
   summary with a "DOWNSTREAM IMPACT" tag, but Stage 1 still completes.
   Operators see both classes in one place; only the hard class halts
   the fetch.
+- Q: Should Stage 1 also retrieve the upstream-assigned poster
+  identifier for each accepted submission?
+  → A: Yes. Stage 1 MUST include the poster id on every normalized
+  corpus record. The exact upstream GraphQL field name is discovered
+  from the introspection result at implementation time (Principle
+  VII); if the upstream does not expose any field that represents a
+  poster identifier, the stage fails loudly rather than fabricating
+  one. (FR-020.)
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -208,6 +216,12 @@ suite catches it.
 - A new field is added upstream that no part of the pipeline reads
   → INFORMATIONAL entry in the schema-diff summary; no action
   required by Stage 1.
+- Upstream Oxford Abstracts does NOT expose a poster-identifier field
+  → Stage 1 fails loudly with a `SchemaContractError` naming the
+  type(s) and pattern of field names searched; does NOT fabricate a
+  placeholder; does NOT silently omit the field. The operator's
+  options are to (a) wait for upstream to expose the field, or
+  (b) downgrade FR-020 in a follow-up spec.
 - The `OHBM2026_API` env var is missing → fail immediately with a
   named error, do not attempt the request, do not overwrite local
   artifacts.
@@ -351,13 +365,29 @@ suite catches it.
   mismatch and requires explicit operator intent (e.g. an explicit
   flag) before proceeding. This prevents resuming a fetch across a
   schema change that may have altered the fields being collected.
+- **FR-020**: Stage 1 MUST retrieve the upstream-assigned poster
+  identifier for each accepted submission and persist it on the
+  normalized corpus record as a `poster_id` field. The upstream
+  GraphQL field name that represents the poster identifier MUST be
+  discovered at implementation time from the introspection result
+  (Principle VII applied to this field too); the stage MUST NOT
+  hardcode a guessed field name. If the upstream schema does NOT
+  expose any field representing a poster identifier, Stage 1 MUST
+  fail loudly with a typed error naming what was searched and what
+  was not found, rather than fabricating a placeholder or omitting
+  the field. The new `poster_id` field is part of the hard contract
+  Stage 1 maintains with downstream consumers; subsequent stages
+  may begin reading it once Stage 1 lands.
 
 ### Key Entities
 
 - **Corpus Snapshot**: The normalized accepted-abstract corpus produced
-  by the fetch stage. Shape and path identical to today's
+  by the fetch stage. Path identical to today's
   `data/primary/abstracts.json` (plus a sibling GraphQL source under
-  `data/inputs/abstracts_graphql__<state-key>.json`).
+  `data/inputs/abstracts_graphql__<state-key>.json`). Shape matches
+  today's shape plus the new `poster_id` field on each record
+  (FR-020) — every other user-visible field is preserved verbatim
+  (FR-006).
 - **GraphQL Schema Artifact**: A JSON file capturing the upstream
   Oxford Abstracts GraphQL schema introspection result at fetch time.
   Lives alongside the GraphQL source under `data/inputs/` with a
