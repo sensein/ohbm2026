@@ -56,6 +56,39 @@ class ArtifactHelpersTest(unittest.TestCase):
         path = artifacts.build_publish_path("ui-site")
         self.assertEqual(path, Path("export/ui-site"))
 
+    def test_build_schema_artifact_path_lives_under_inputs(self) -> None:
+        state_key = "abc123def456"
+        path = artifacts.build_schema_artifact_path(state_key)
+
+        self.assertEqual(
+            path,
+            Path("data/inputs/abstracts_graphql_schema__abc123def456.json"),
+        )
+        self.assertFalse(path.is_absolute(), "schema artifact path must be project-relative")
+        self.assertIn(state_key, path.name)
+
+    def test_build_provenance_path_lives_under_inputs(self) -> None:
+        state_key = "abc123def456"
+        path = artifacts.build_provenance_path(state_key)
+
+        self.assertEqual(
+            path,
+            Path("data/inputs/abstracts_fetch_provenance__abc123def456.json"),
+        )
+        self.assertFalse(path.is_absolute(), "provenance path must be project-relative")
+        self.assertIn(state_key, path.name)
+
+    def test_build_fetch_checkpoint_path_lives_under_cache(self) -> None:
+        state_key = "abc123def456"
+        path = artifacts.build_fetch_checkpoint_path(state_key)
+
+        self.assertEqual(
+            path,
+            Path("data/cache/fetch_abstracts/checkpoint__abc123def456.json"),
+        )
+        self.assertFalse(path.is_absolute(), "checkpoint path must be project-relative")
+        self.assertIn(state_key, path.name)
+
     def test_build_artifact_metadata_redacts_secret_values(self) -> None:
         basis = artifacts.build_dependency_basis(
             input_sources=[str(artifacts.PRIMARY_ABSTRACTS_PATH)],

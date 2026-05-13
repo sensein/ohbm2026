@@ -13,6 +13,7 @@ CACHE_ROOT = DATA_ROOT / "cache"
 OUTPUTS_ROOT = DATA_ROOT / "outputs"
 EXPORT_ROOT = Path("export")
 SCRATCH_ROOT = Path("tmp")
+FETCH_CHECKPOINT_WORKFLOW = "fetch_abstracts"
 INPUT_ASSETS_ROOT = INPUTS_ROOT / "assets"
 INPUT_AUTHORS_PATH = INPUTS_ROOT / "authors.json"
 INPUT_PHENOMENA_THEORIES_PATH = INPUTS_ROOT / "abstracts_with_phenomena_with_theories_refined.csv"
@@ -93,6 +94,18 @@ def build_state_key(dependency_basis: Mapping[str, Any], *, schema_version: str 
 
 def build_input_snapshot_path(source_name: str, state_key: str, *, suffix: str = ".json") -> Path:
     return INPUTS_ROOT / f"{source_name}__{state_key}{suffix}"
+
+
+def build_schema_artifact_path(state_key: str) -> Path:
+    return build_input_snapshot_path("abstracts_graphql_schema", state_key)
+
+
+def build_provenance_path(state_key: str) -> Path:
+    return build_input_snapshot_path("abstracts_fetch_provenance", state_key)
+
+
+def build_fetch_checkpoint_path(state_key: str) -> Path:
+    return build_cache_path(FETCH_CHECKPOINT_WORKFLOW, "checkpoint", state_key)
 
 
 def build_cache_path(workflow: str, artifact_name: str, state_key: str, *, suffix: str = ".json") -> Path:

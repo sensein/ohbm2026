@@ -35,8 +35,8 @@ description: "Task list for Rewire Pipeline Stage 1 — Fetch Abstracts + GraphQ
 
 **Purpose**: Confirm a clean pre-change baseline so we can detect regressions caused by this work.
 
-- [ ] T001 Refresh `.venv` and run baseline tests: `UV_CACHE_DIR=.uv-cache uv venv --python 3.11 .venv && PYTHONPATH=src .venv/bin/python -m unittest discover -s tests` — confirm only the known pre-existing `test_plot_poster_layout_floorplan` failure
-- [ ] T002 [P] Run baseline lint: `.specify/scripts/bash/constitution-check.sh --full` — confirm exit 0 before any changes land
+- [X] T001 Refresh `.venv` and run baseline tests: `UV_CACHE_DIR=.uv-cache uv venv --python 3.11 .venv && PYTHONPATH=src .venv/bin/python -m unittest discover -s tests` — confirm only the known pre-existing `test_plot_poster_layout_floorplan` failure
+- [X] T002 [P] Run baseline lint: `.specify/scripts/bash/constitution-check.sh --full` — confirm exit 0 before any changes land
 
 **Checkpoint**: Baseline is clean. Any new failure introduced from here on is owned by Stage 1 work.
 
@@ -48,10 +48,10 @@ description: "Task list for Rewire Pipeline Stage 1 — Fetch Abstracts + GraphQ
 
 **⚠️ CRITICAL**: No user story implementation may start until this phase is complete.
 
-- [ ] T003 [P] Add the new path helpers to `src/ohbm2026/artifacts.py`: `build_schema_artifact_path(state_key)`, `build_provenance_path(state_key)`, `build_fetch_checkpoint_path(state_key)`. Each returns a `pathlib.Path` under the project-relative gitignored roots per data-model.md State-Key Convention.
-- [ ] T004 [P] Create `src/ohbm2026/exceptions.py` defining typed exception hierarchy used across Stage 1: `Stage1Error(RuntimeError)` (base), `SchemaContractError(Stage1Error)` (HARD-tier drift), `CheckpointError(Stage1Error)` (resume validation failure), `ProvenanceError(Stage1Error)` (absolute/user-home path violation). Re-export `GraphQLAPIError` from `graphql_api.py` through this module for a single import surface.
-- [ ] T005 Verify the poster-id wiring landed during planning: `specs/002-rewire-pipeline/spec.md` contains `FR-020` and the Clarifications session entry, the Corpus Snapshot Key Entity mentions `poster_id`, and the Edge Case for "upstream does not expose a poster-identifier field" is present; `specs/002-rewire-pipeline/data-model.md` opens with the Corpus Snapshot section that mentions `poster_id`. This task is a consistency check, not an authoring task — the content was authored during planning. If anything is missing, restore it before proceeding.
-- [ ] T006 [P] Augment `tests/test_artifacts.py` with three new test cases: `test_build_schema_artifact_path_lives_under_inputs`, `test_build_provenance_path_lives_under_inputs`, `test_build_fetch_checkpoint_path_lives_under_cache`. Each asserts the returned path is project-relative, under the expected gitignored root, and contains the state-key segment. Tests MUST fail initially.
+- [X] T003 [P] Add the new path helpers to `src/ohbm2026/artifacts.py`: `build_schema_artifact_path(state_key)`, `build_provenance_path(state_key)`, `build_fetch_checkpoint_path(state_key)`. Each returns a `pathlib.Path` under the project-relative gitignored roots per data-model.md State-Key Convention.
+- [X] T004 [P] Create `src/ohbm2026/exceptions.py` defining typed exception hierarchy used across Stage 1: `Stage1Error(RuntimeError)` (base), `SchemaContractError(Stage1Error)` (HARD-tier drift), `CheckpointError(Stage1Error)` (resume validation failure), `ProvenanceError(Stage1Error)` (absolute/user-home path violation). Re-export `GraphQLAPIError` from `graphql_api.py` through this module for a single import surface.
+- [X] T005 Verify the poster-id wiring landed during planning: `specs/002-rewire-pipeline/spec.md` contains `FR-020` and the Clarifications session entry, the Corpus Snapshot Key Entity mentions `poster_id`, and the Edge Case for "upstream does not expose a poster-identifier field" is present; `specs/002-rewire-pipeline/data-model.md` opens with the Corpus Snapshot section that mentions `poster_id`. This task is a consistency check, not an authoring task — the content was authored during planning. If anything is missing, restore it before proceeding.
+- [X] T006 [P] Augment `tests/test_artifacts.py` with three new test cases: `test_build_schema_artifact_path_lives_under_inputs`, `test_build_provenance_path_lives_under_inputs`, `test_build_fetch_checkpoint_path_lives_under_cache`. Each asserts the returned path is project-relative, under the expected gitignored root, and contains the state-key segment. Tests MUST fail initially.
 
 **Checkpoint**: Foundation ready. The new symbols exist, the spec records the poster-id requirement, and the path-helper tests are red.
 
