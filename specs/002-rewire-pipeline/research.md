@@ -96,12 +96,21 @@ megabytes per record.
 
 **Decision**: Each downstream module that reads fields from
 `data/primary/abstracts.json` declares them in a module-level
-constant `CONSUMED_ABSTRACT_FIELDS: frozenset[str]` containing
-slash-separated field paths
-(e.g. `responses/question/question_name`, `title/value`). The
-new `schema_diff.collect_soft_contract_fields()` function imports
+constant `CONSUMED_ABSTRACT_FIELDS: frozenset[tuple[str, str]]`
+containing `(GraphQLTypeName, FieldName)` pairs that match the
+shape of `schema_diff.FieldIndexEntry`'s `(type_name,
+field_name)` key. The pairs are derived from the GraphQL types
+the fetch query selects against — for example, an
+`abstract["title"]["value"]` access in the JSON corresponds to
+the pair `("TitleResponse", "value")` if the schema names that
+type `TitleResponse`. The new
+`schema_diff.collect_soft_contract_fields()` function imports
 each `src/ohbm2026/*.py` module that participates and unions
-the declared sets.
+the declared sets into a single `set[tuple[str, str]]` that
+`compare()` can intersect with deltas directly. No JSON-path-to-
+GraphQL-tuple translation step is needed at classification time;
+the translation responsibility moves to the consuming module
+authoring its declaration.
 
 **Rationale**: An explicit per-module declaration is more
 maintainable than static AST inspection and lets the constitution-
