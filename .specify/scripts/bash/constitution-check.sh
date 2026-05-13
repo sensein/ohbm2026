@@ -53,8 +53,10 @@ fi
 secret_patterns='(^|[^A-Za-z0-9_])(sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[A-Z0-9]{16}|xox[baprs]-[A-Za-z0-9-]{20,})|-----BEGIN [A-Z ]*PRIVATE KEY-----'
 
 # Files exempt from the secret scan: this lint, the constitution itself
-# (which names example patterns in prose), CLAUDE.md, README.md, and the
-# behavioral test (which constructs synthetic token-shaped fixtures).
+# (which names example patterns in prose), CLAUDE.md, README.md, the
+# behavioral test (which constructs synthetic token-shaped fixtures),
+# and spec/plan/task docs under specs/ (which describe prohibited
+# patterns as part of documenting the rule).
 secret_excludes=(
   ':!**/constitution-check.sh'
   ':!**/constitution.md'
@@ -62,6 +64,7 @@ secret_excludes=(
   ':!CLAUDE.md'
   ':!README.md'
   ':!**/test_constitution_check.py'
+  ':!specs/**'
 )
 
 if [[ "${mode}" == "--staged" ]]; then
@@ -102,6 +105,7 @@ no_verify_excludes=(
   ':!.agents/**'
   ':!.specify/templates/**'
   ':!.specify/extensions/**'
+  ':!specs/**'
 )
 no_verify="$(git grep -nE -- '--no-verify' -- "${no_verify_excludes[@]}" 2>/dev/null || true)"
 if [[ -n "${no_verify}" ]]; then

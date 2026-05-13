@@ -187,6 +187,29 @@ class ConstitutionCheckTests(unittest.TestCase):
         self.assertIn("Principle VI", r.stderr)
         self.assertIn("--no-verify", r.stderr)
 
+    def test_no_verify_in_spec_doc_does_not_flag(self):
+        # Spec/plan/task docs under specs/ describe prohibited patterns
+        # (e.g. "No --no-verify, no skipped tests") as part of documenting
+        # the rule. They MUST NOT be flagged — same exemption that
+        # CLAUDE.md, README.md, docs/, and constitution.md already get.
+        self._stage(
+            "specs/099-example/tasks.md",
+            "- never use `--no-verify` to bypass hooks\n",
+        )
+        _run(["git", "commit", "-q", "-m", "spec doc mention"], cwd=self.tmp)
+        r = _run([str(self.script), "--full"], cwd=self.tmp, check=False)
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+
+    def test_secret_shape_in_spec_doc_does_not_flag(self):
+        # Spec docs may mention example token shapes when describing
+        # what MUST NOT be committed. Same logic as above.
+        self._stage(
+            "specs/099-example/spec.md",
+            "Tokens like `sk-" + "x" * 40 + "` MUST stay in .env.\n",
+        )
+        r = _run([str(self.script), "--staged"], cwd=self.tmp, check=False)
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
