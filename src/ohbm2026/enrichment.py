@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 
 from ohbm2026 import artifacts
 from ohbm2026.assets import extract_target_figure_urls
-from ohbm2026.graphql_api import fetch_author_details, get_api_key, load_dotenv
+from ohbm2026.graphql_api import load_dotenv
 from ohbm2026.titles import cleaned_abstract_title
 
 SECTION_ORDER = [
@@ -280,26 +280,6 @@ def unique_preserve_order(values: list[str]) -> list[str]:
             seen.add(value)
             result.append(value)
     return result
-
-
-def extract_author_ids(database: dict[str, Any]) -> list[int]:
-    author_ids = {
-        author["id"]
-        for abstract in database.get("abstracts", [])
-        for author in abstract.get("authors", [])
-        if isinstance(author.get("id"), int)
-    }
-    return sorted(author_ids)
-
-
-def build_author_database(base_database: dict[str, Any], api_key: str) -> dict[str, Any]:
-    author_ids = extract_author_ids(base_database)
-    authors = fetch_author_details(api_key, author_ids)
-    return {
-        "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "author_count": len(authors),
-        "authors": authors,
-    }
 
 
 def build_sections_markdown(abstract: dict[str, Any]) -> tuple[dict[str, str], list[dict[str, str]]]:
@@ -1355,37 +1335,6 @@ def enrich_database(
         "event_ids": base_database.get("event_ids", []),
         "abstracts": enriched_abstracts,
     }
-
-
-def build_authors_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Export author metadata for OHBM 2026 abstracts")
-    parser.add_argument("--input", default=str(artifacts.PRIMARY_ABSTRACTS_PATH))
-    parser.add_argument("--authors-output", default=str(artifacts.INPUT_AUTHORS_PATH))
-    parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--ohbm-api-var", default="OHBM2026_API")
-    return parser
-
-
-def parse_authors_args(argv: list[str] | None = None) -> argparse.Namespace:
-    return build_authors_parser().parse_args(argv)
-
-
-def authors_main(argv: list[str] | None = None) -> int:
-    args = parse_authors_args(argv)
-    base_database = load_json(Path(args.input))
-    author_database = build_author_database(base_database, get_api_key(Path(args.env_file), args.ohbm_api_var))
-    write_json(Path(args.authors_output), author_database)
-    print(
-        json.dumps(
-            {
-                "input": args.input,
-                "authors_output": args.authors_output,
-                "author_count": author_database["author_count"],
-            },
-            indent=2,
-        )
-    )
-    return 0
 
 
 def build_enrich_parser() -> argparse.ArgumentParser:
