@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "abstracts_graphql_schema.schema.json",
+  "title": "Abstracts GraphQL Schema Artifact (Stage 1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fetched_at",
+    "endpoint_url",
+    "state_key",
+    "schema_hash",
+    "introspection_raw",
+    "field_index"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "fetch.schema.v1"
+    },
+    "fetched_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "endpoint_url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "state_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "schema_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "introspection_raw": {
+      "type": "object",
+      "description": "Unmodified data.__schema block returned by the GraphQL introspection query."
+    },
+    "field_index": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/FieldIndexEntry" }
+    }
+  },
+  "$defs": {
+    "FieldIndexEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type_name", "field_name", "wrapping_kinds", "named_type", "args_signature"],
+      "properties": {
+        "type_name": { "type": "string", "minLength": 1 },
+        "field_name": { "type": "string", "minLength": 1 },
+        "wrapping_kinds": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["NON_NULL", "LIST"] }
+        },
+        "named_type": { "type": "string", "minLength": 1 },
+        "args_signature": { "type": "string" }
+      }
+    }
+  }
+}
