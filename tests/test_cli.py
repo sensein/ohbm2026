@@ -196,5 +196,31 @@ class TestFetchAbstractsSubcommand(unittest.TestCase):
         fs_main.assert_called_once_with(["--allow-empty"])
 
 
+class TestFetchWithdrawnSubcommand(unittest.TestCase):
+    """FR-022 — `ohbmcli fetch-withdrawn` is a distinct subcommand
+    that delegates to fetch_stage.main with --corpus-kind=withdrawn
+    automatically appended."""
+
+    def test_fetch_withdrawn_appends_corpus_kind_withdrawn(self) -> None:
+        from ohbm2026 import fetch_stage as fetch_stage_module
+
+        with mock.patch.object(fetch_stage_module, "main", return_value=0) as fs_main:
+            result = cli.main(["fetch-withdrawn", "--allow-empty"])
+
+        self.assertEqual(result, 0)
+        fs_main.assert_called_once_with(["--allow-empty", "--corpus-kind", "withdrawn"])
+
+    def test_fetch_withdrawn_respects_explicit_corpus_kind(self) -> None:
+        # If the operator explicitly passes --corpus-kind, we do NOT
+        # override it (defensive — supports future read-only modes).
+        from ohbm2026 import fetch_stage as fetch_stage_module
+
+        with mock.patch.object(fetch_stage_module, "main", return_value=0) as fs_main:
+            result = cli.main(["fetch-withdrawn", "--corpus-kind", "accepted"])
+
+        self.assertEqual(result, 0)
+        fs_main.assert_called_once_with(["--corpus-kind", "accepted"])
+
+
 if __name__ == "__main__":
     unittest.main()

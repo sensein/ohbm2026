@@ -29,6 +29,27 @@ query abstract_ids {
 }
 """
 
+# Withdrawn submissions: distinct corpus, distinct query body, distinct
+# state-key namespace. The downstream pipeline keeps these in a separate
+# file (`data/primary/abstracts_withdrawn.json`) and never mixes them
+# with accepted. Empirically (2026-05-13 probe) the 89 abstracts that
+# were Accepted at the March snapshot but are no longer in the live
+# Accepted set are all `decision_status: Withdrawn`, with `complete=true`
+# and `archived=false`. Their `accepted_for.value` is null (which is why
+# the existing accepted-only filter correctly excludes them).
+WITHDRAWN_IDS_QUERY = """
+query withdrawn_ids {
+  events {
+    id
+  }
+  submissions(
+    where: {complete: {_eq: true}, decision_status: {_eq: "Withdrawn"}, archived: {_eq: false}}
+  ) {
+    id
+  }
+}
+"""
+
 ABSTRACT_CONTENTS_QUERY = """
 query abstract_contents($submission_ids: [Int!]!) {
   events {
@@ -302,6 +323,27 @@ def fetch_abstract_ids(
         api_key,
         ABSTRACT_IDS_QUERY,
         "abstract_ids",
+        timeout_start=timeout_start,
+        timeout_limit=timeout_limit,
+    )
+    event_ids = [item["id"] for item in data.get("events", [])]
+    abstract_ids = [item["id"] for item in data.get("submissions", [])]
+    return event_ids, abstract_ids
+
+
+def fetch_withdrawn_ids(
+    api_key: str,
+    timeout_start: float = DEFAULT_TIMEOUT_START_SECONDS,
+    timeout_limit: float = DEFAULT_TIMEOUT_LIMIT_SECONDS,
+) -> tuple[list[int], list[int]]:
+    """Return the (event_ids, submission_ids) tuple for the withdrawn
+    corpus — submissions with decision_status='Withdrawn'. Separate
+    from `fetch_abstract_ids` so the two corpora never share an ID
+    list or state-key namespace (FR-022)."""
+    data = graphql_request(
+        api_key,
+        WITHDRAWN_IDS_QUERY,
+        "withdrawn_ids",
         timeout_start=timeout_start,
         timeout_limit=timeout_limit,
     )

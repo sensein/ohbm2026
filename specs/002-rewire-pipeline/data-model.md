@@ -6,6 +6,19 @@ entity is referenced but its shape is unchanged from today's
 `data/primary/abstracts.json` (FR-006); only the new and extended
 artifacts are detailed below.
 
+## Corpus Files
+
+Stage 1 produces TWO distinct corpus files, each populated by a
+distinct upstream filter and a distinct state-key namespace
+(FR-022). They MUST NEVER mix:
+
+| File | Filter | Driven by |
+|---|---|---|
+| `data/primary/abstracts.json` | `complete=true AND accepted_for.value IS NOT NULL` | `ohbmcli fetch-abstracts` |
+| `data/primary/abstracts_withdrawn.json` | `complete=true AND decision_status="Withdrawn" AND archived=false` | `ohbmcli fetch-withdrawn` |
+
+Both files share the same per-record schema (described below).
+
 ## Corpus Snapshot
 
 `data/primary/abstracts.json` shape is preserved from the previous
