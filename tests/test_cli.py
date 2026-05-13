@@ -5,13 +5,6 @@ from ohbm2026 import cli
 
 
 class CLITest(unittest.TestCase):
-    def test_ingest_subcommand_delegates_to_ingest_main(self) -> None:
-        with mock.patch.object(cli.assets, "main", return_value=7) as ingest_main:
-            result = cli.main(["ingest", "--batch-size", "10"])
-
-        self.assertEqual(result, 7)
-        ingest_main.assert_called_once_with(["--batch-size", "10"])
-
     def test_refresh_assets_appends_refresh_flag(self) -> None:
         with mock.patch.object(cli.assets, "main", return_value=3) as ingest_main:
             result = cli.main(["refresh-assets", "--reuse-existing-assets-only"])

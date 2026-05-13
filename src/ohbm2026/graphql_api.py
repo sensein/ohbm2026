@@ -36,6 +36,7 @@ query abstract_contents($submission_ids: [Int!]!) {
   }
   submissions(where: {id: {_in: $submission_ids}}) {
     id
+    program_code
     title {
       value
     }
@@ -51,6 +52,82 @@ query abstract_contents($submission_ids: [Int!]!) {
         question_name
       }
       value
+    }
+    program_sessions_submissions {
+      start_time
+      end_time
+      display_order
+      program_session {
+        id
+        name
+        start_time
+        end_time
+        program_date {
+          program_date
+        }
+        program_location {
+          name
+        }
+        program_type {
+          name
+        }
+        program_track {
+          name
+        }
+      }
+    }
+  }
+}
+"""
+
+# Canonical GraphQL introspection query (graphql-spec). Persisted
+# alongside the corpus snapshot so Stage 1 can detect upstream schema
+# drift on every run. The query is a standard protocol contract, not a
+# project-specific assumption — Principle VII applies to the data we
+# fetch, not the introspection protocol itself.
+INTROSPECTION_QUERY = """
+query IntrospectionQuery {
+  __schema {
+    queryType { name }
+    types {
+      kind
+      name
+      description
+      fields(includeDeprecated: true) {
+        name
+        description
+        type {
+          kind
+          name
+          ofType {
+            kind
+            name
+            ofType {
+              kind
+              name
+              ofType {
+                kind
+                name
+              }
+            }
+          }
+        }
+        args {
+          name
+          type {
+            kind
+            name
+            ofType {
+              kind
+              name
+              ofType {
+                kind
+                name
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -189,6 +266,31 @@ def chunked(values: list[int], chunk_size: int) -> list[list[int]]:
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
     return [values[index : index + chunk_size] for index in range(0, len(values), chunk_size)]
+
+
+def fetch_schema_introspection(
+    api_key: str,
+    timeout_start: float = DEFAULT_TIMEOUT_START_SECONDS,
+    timeout_limit: float = DEFAULT_TIMEOUT_LIMIT_SECONDS,
+) -> dict[str, Any]:
+    """Send the canonical introspection query and return the
+    `data.__schema` block. Raises `GraphQLAPIError` on transport
+    failure (re-raised from `urlopen_with_retries`)."""
+    try:
+        data = graphql_request(
+            api_key,
+            INTROSPECTION_QUERY,
+            "IntrospectionQuery",
+            timeout_start=timeout_start,
+            timeout_limit=timeout_limit,
+        )
+    except (HTTPError, URLError, OSError, TimeoutError, ValueError) as exc:
+        reason = getattr(exc, "reason", str(exc))
+        raise GraphQLAPIError(f"Introspection request failed: {reason}") from exc
+    schema = data.get("__schema")
+    if schema is None:
+        raise GraphQLAPIError("Introspection response missing __schema block")
+    return schema
 
 
 def fetch_abstract_ids(

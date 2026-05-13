@@ -3,7 +3,16 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ohbm2026 import artifacts, assets, enrichment, neuroscape, openalex, titles, ui
+from ohbm2026 import (
+    artifacts,
+    assets,
+    enrichment,
+    fetch_stage,
+    neuroscape,
+    openalex,
+    titles,
+    ui,
+)
 
 
 def _copy_actions(target: argparse.ArgumentParser, source: argparse.ArgumentParser) -> None:
@@ -22,8 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    ingest_parser = subparsers.add_parser("ingest", help="Fetch abstracts and figure assets from Oxford Abstracts")
-    _copy_actions(ingest_parser, assets.build_parser())
+    fetch_abstracts_parser = subparsers.add_parser(
+        "fetch-abstracts",
+        help="Stage 1: fetch OHBM 2026 abstracts + persist GraphQL schema",
+    )
+    _copy_actions(fetch_abstracts_parser, fetch_stage._build_parser())
 
     refresh_parser = subparsers.add_parser("refresh-assets", help="Refresh local figure assets from an existing normalized abstracts dataset")
     _copy_actions(refresh_parser, assets.build_parser())
@@ -144,8 +156,8 @@ def main(argv: list[str] | None = None) -> int:
         raise AssertionError("argparse should exit before reaching this branch")
 
     command, subcommand_argv = argv[0], argv[1:]
-    if command == "ingest":
-        return assets.main(subcommand_argv)
+    if command == "fetch-abstracts":
+        return fetch_stage.main(subcommand_argv)
     if command == "refresh-assets":
         return _run_refresh_assets(subcommand_argv)
     if command == "authors":
