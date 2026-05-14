@@ -6,7 +6,6 @@ import sys
 from ohbm2026 import (
     artifacts,
     assets,
-    embed_stage,
     enrich_stage,
     enrichment,
     fetch_stage,
@@ -15,6 +14,7 @@ from ohbm2026 import (
     titles,
     ui,
 )
+from ohbm2026.embed import stage as embed_stage
 
 
 def _copy_actions(target: argparse.ArgumentParser, source: argparse.ArgumentParser) -> None:
@@ -59,21 +59,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stage 3: generate the multi-model embeddings matrix (per-component bundles)",
     )
     _copy_actions(embed_matrix_parser, embed_stage.build_parser())
-
-    minilm_parser = subparsers.add_parser("embed-minilm", help="Generate local MiniLM embeddings")
-    _copy_actions(minilm_parser, neuroscape.build_minilm_parser())
-
-    hf_parser = subparsers.add_parser(
-        "embed-hf",
-        help="Generate local Hugging Face sentence-transformer embeddings",
-    )
-    _copy_actions(hf_parser, neuroscape.build_hf_parser())
-
-    voyage_parser = subparsers.add_parser("embed-voyage", help="Generate Voyage embeddings")
-    _copy_actions(voyage_parser, neuroscape.build_voyage_parser())
-
-    openai_parser = subparsers.add_parser("embed-openai", help="Generate OpenAI embeddings")
-    _copy_actions(openai_parser, neuroscape.build_openai_parser())
 
     stage2_parser = subparsers.add_parser("embed-stage2", help="Train and apply a local NeuroScape stage-2 model")
     _copy_actions(stage2_parser, neuroscape.build_stage2_parser())
@@ -172,14 +157,6 @@ def main(argv: list[str] | None = None) -> int:
         return enrich_stage.main(subcommand_argv)
     if command == "embed-matrix":
         return embed_stage.main(subcommand_argv)
-    if command == "embed-minilm":
-        return neuroscape.minilm_main(subcommand_argv)
-    if command == "embed-hf":
-        return neuroscape.hf_main(subcommand_argv)
-    if command == "embed-voyage":
-        return neuroscape.voyage_main(subcommand_argv)
-    if command == "embed-openai":
-        return neuroscape.openai_main(subcommand_argv)
     if command == "embed-stage2":
         return neuroscape.stage2_main(subcommand_argv)
     if command == "apply-published-stage2":

@@ -5,7 +5,7 @@ Canonical invocation:
 
     PYTHONPATH=src .venv/bin/python scripts/run_embed_matrix.py [options]
 
-Forwards ``sys.argv[1:]`` to ``ohbm2026.embed_stage.main`` and returns
+Forwards ``sys.argv[1:]`` to ``ohbm2026.embed.stage.main`` and returns
 its exit code. Mirrors ``scripts/run_enrich_abstracts.py``.
 """
 
@@ -19,7 +19,7 @@ _SRC_DIR = _REPO_ROOT / "src"
 if _SRC_DIR.exists() and str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from ohbm2026.embed_stage import main  # noqa: E402  (post sys.path setup)
+from ohbm2026.embed.stage import main  # noqa: E402  (post sys.path setup)
 
 
 if __name__ == "__main__":

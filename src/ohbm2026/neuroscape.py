@@ -283,74 +283,6 @@ def build_embedding_output_name(
     return f"{prefix}_{model_name_slug(model_name)}_{embedding_variant_name(embedding_fields)}"
 
 
-def voyage_embed(
-    texts: list[str],
-    api_key: str,
-    model: str = DEFAULT_VOYAGE_MODEL,
-    batch_size: int = 64,
-) -> list[list[float]]:
-    endpoint = "https://api.voyageai.com/v1/embeddings"
-    vectors: list[list[float]] = []
-    for text_batch in chunked(list(range(len(texts))), batch_size):
-        batch_inputs = [texts[index] for index in text_batch]
-        payload = json.dumps(
-            {"input": batch_inputs, "model": model, "input_type": "document"}
-        ).encode("utf-8")
-        request = Request(
-            endpoint,
-            data=payload,
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=600) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise NeuroScapeError(f"Voyage embeddings failed with HTTP {exc.code}: {body}") from exc
-        except URLError as exc:
-            raise NeuroScapeError(f"Voyage embeddings failed: {exc.reason}") from exc
-        vectors.extend(item["embedding"] for item in parsed.get("data", []))
-    return vectors
-
-
-def openai_embed(
-    texts: list[str],
-    api_key: str,
-    model: str = "text-embedding-3-small",
-    batch_size: int = 128,
-    dimensions: int | None = None,
-) -> list[list[float]]:
-    endpoint = "https://api.openai.com/v1/embeddings"
-    vectors: list[list[float]] = []
-    for text_batch in chunked(list(range(len(texts))), batch_size):
-        batch_inputs = [texts[index] for index in text_batch]
-        payload_dict: dict[str, Any] = {
-            "input": batch_inputs,
-            "model": model,
-            "encoding_format": "float",
-        }
-        if dimensions is not None:
-            payload_dict["dimensions"] = dimensions
-        payload = json.dumps(payload_dict).encode("utf-8")
-        request = Request(
-            endpoint,
-            data=payload,
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=600) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
-        except HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            raise NeuroScapeError(f"OpenAI embeddings failed with HTTP {exc.code}: {body}") from exc
-        except URLError as exc:
-            raise NeuroScapeError(f"OpenAI embeddings failed: {exc.reason}") from exc
-        vectors.extend(item["embedding"] for item in parsed.get("data", []))
-    return vectors
-
-
 def sentence_transformer_embed(
     texts: list[str],
     model_name: str = DEFAULT_HF_MODEL,
@@ -367,14 +299,6 @@ def sentence_transformer_embed(
         normalize_embeddings=False,
     )
     return embeddings.tolist()
-
-
-def minilm_embed(
-    texts: list[str],
-    model_name: str = DEFAULT_MINILM_MODEL,
-    local_files_only: bool = False,
-) -> list[list[float]]:
-    return sentence_transformer_embed(texts, model_name=model_name, local_files_only=local_files_only)
 
 
 def write_embedding_bundle(
@@ -2350,149 +2274,6 @@ def run_sentence_transformer_embedding(args: argparse.Namespace, output_prefix: 
     return 0
 
 
-def build_minilm_parser() -> argparse.ArgumentParser:
-    parser = build_sentence_transformer_parser(
-        "Generate local MiniLM embeddings for OHBM 2026 abstracts",
-        DEFAULT_MINILM_MODEL,
-    )
-    parser.add_argument("--minilm-model", dest="model", help=argparse.SUPPRESS)
-    return parser
-
-
-def minilm_main(argv: list[str] | None = None) -> int:
-    args = build_minilm_parser().parse_args(argv)
-    if args.output_name is None:
-        args.output_name = f"minilm_{embedding_variant_name(args.fields)}"
-    return run_sentence_transformer_embedding(args, output_prefix="minilm")
-
-
-def build_hf_parser() -> argparse.ArgumentParser:
-    return build_sentence_transformer_parser(
-        "Generate local Hugging Face sentence-transformer embeddings for OHBM 2026 abstracts",
-        DEFAULT_HF_MODEL,
-    )
-
-
-def hf_main(argv: list[str] | None = None) -> int:
-    args = build_hf_parser().parse_args(argv)
-    return run_sentence_transformer_embedding(args, output_prefix="hf")
-
-
-def build_voyage_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate Voyage embeddings for OHBM 2026 abstracts")
-    parser.add_argument("--input", default=str(artifacts.PRIMARY_ENRICHED_ABSTRACTS_PATH))
-    parser.add_argument("--title-input", default=str(artifacts.PRIMARY_ABSTRACTS_PATH))
-    parser.add_argument("--embeddings-dir", default=str(artifacts.EMBEDDINGS_ROOT))
-    parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--voyage-api-var", default="VOYAGE_API")
-    parser.add_argument("--voyage-model", default=DEFAULT_VOYAGE_MODEL)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--fields", nargs="+", default=list(DEFAULT_EMBEDDING_FIELDS))
-    return parser
-
-
-def voyage_main(argv: list[str] | None = None) -> int:
-    from ohbm2026.graphql_api import get_api_key
-
-    args = build_voyage_parser().parse_args(argv)
-    abstracts = load_embedding_inputs(Path(args.input))
-    embedding_fields = normalize_embedding_fields(args.fields)
-    title_lookup = load_title_lookup(Path(args.title_input)) if "title" in embedding_fields else None
-    embedding_texts = build_embedding_texts(abstracts, embedding_fields, title_lookup=title_lookup)
-    output_dir = Path(args.embeddings_dir) / f"voyage_{embedding_variant_name(embedding_fields)}"
-    vectors = voyage_embed(
-        embedding_texts,
-        get_api_key(Path(args.env_file), args.voyage_api_var),
-        model=args.voyage_model,
-        batch_size=args.batch_size,
-    )
-    bundle = write_embedding_bundle(
-        output_dir,
-        output_dir.name,
-        args.voyage_model,
-        abstracts,
-        vectors,
-        embedding_fields=embedding_fields,
-    )
-    write_json(output_dir / "neighbors.json", compute_neighbors(bundle["ids"], bundle["matrix"]))
-    print(
-        json.dumps(
-            {
-                "input": args.input,
-                "title_input": args.title_input,
-                "embeddings_dir": str(output_dir),
-                "model_name": args.voyage_model,
-                "batch_size": args.batch_size,
-                "embedding_fields": embedding_fields,
-                "abstract_count": len(abstracts),
-            },
-            indent=2,
-        )
-    )
-    return 0
-
-
-def build_openai_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate OpenAI embeddings for OHBM 2026 abstracts")
-    parser.add_argument("--input", default=str(artifacts.PRIMARY_ENRICHED_ABSTRACTS_PATH))
-    parser.add_argument("--title-input", default=str(artifacts.PRIMARY_ABSTRACTS_PATH))
-    parser.add_argument("--embeddings-dir", default=str(artifacts.EMBEDDINGS_ROOT))
-    parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--openai-api-var", default="OPENAI_API_KEY")
-    parser.add_argument("--openai-model", default="text-embedding-3-small")
-    parser.add_argument("--output-name")
-    parser.add_argument("--fields", nargs="+", default=list(DEFAULT_EMBEDDING_FIELDS))
-    parser.add_argument("--dimensions", type=int)
-    return parser
-
-
-def openai_main(argv: list[str] | None = None) -> int:
-    from ohbm2026.graphql_api import get_api_key
-
-    args = build_openai_parser().parse_args(argv)
-    abstracts = load_embedding_inputs(Path(args.input))
-    embedding_fields = normalize_embedding_fields(args.fields)
-    title_lookup = load_title_lookup(Path(args.title_input)) if "title" in embedding_fields else None
-    embedding_texts = build_embedding_texts(abstracts, embedding_fields, title_lookup=title_lookup)
-    output_name = build_embedding_output_name(
-        args.openai_model,
-        embedding_fields,
-        output_name=args.output_name,
-        prefix="openai",
-    )
-    output_dir = Path(args.embeddings_dir) / output_name
-    vectors = openai_embed(
-        embedding_texts,
-        get_api_key(Path(args.env_file), args.openai_api_var),
-        model=args.openai_model,
-        dimensions=args.dimensions,
-    )
-    bundle = write_embedding_bundle(
-        output_dir,
-        output_dir.name,
-        args.openai_model,
-        abstracts,
-        vectors,
-        embedding_fields=embedding_fields,
-    )
-    write_json(output_dir / "neighbors.json", compute_neighbors(bundle["ids"], bundle["matrix"]))
-    print(
-        json.dumps(
-            {
-                "input": args.input,
-                "title_input": args.title_input,
-                "embeddings_dir": str(output_dir),
-                "model_name": args.openai_model,
-                "embedding_fields": embedding_fields,
-                "abstract_count": len(abstracts),
-                "dimensions": args.dimensions,
-            },
-            indent=2,
-        )
-    )
-    return 0
-
-
 def build_stage2_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Train and apply a local NeuroScape stage-2 model from an existing stage-1 embedding bundle"
@@ -3075,29 +2856,30 @@ def manifest_main(argv: list[str] | None = None) -> int:
     return 0
 
 
-# ---------- Stage 3 composition helper ----------
+# ---------- Stage 3 composition helpers (re-exported from embed_compose) ----------
 #
-# Downstream tools (cluster-benchmark, UMAP plotter, projection
-# comparator, UI export) previously consumed multi-component bundles
-# like `voyage_stage1` or `minilm_claims`. Stage 3 produces per-
-# component bundles only; `compose_recipe` re-creates the multi-
-# component view at read time by mean-pooling the relevant
-# per-component vectors per abstract.
-#
-# Contract (Stage 3 data-model.md §5):
-#   - components: list of component names (e.g. ["title", "results"]).
-#   - For each abstract present in AT LEAST ONE of the listed bundles,
-#     compute the mean of its component vectors over the components
-#     it has — abstracts missing a given component do not contribute
-#     to their own mean for that component.
-#   - An abstract present in zero of the requested bundles is excluded.
+# The canonical Stage 3 surface lives in `ohbm2026.embed.compose`. We
+# re-export here so existing callers that imported from neuroscape.py
+# keep working. New callers should `from ohbm2026.embed.compose import
+# compose_recipe, apply_published_stage2_to_matrix`.
 
-def compose_recipe(
+from ohbm2026.embed.compose import (  # noqa: E402 -- public re-export
+    apply_published_stage2_to_matrix,
+    compose_recipe,
+)
+
+# The function bodies below remain as the implementation source but
+# are unreachable through the public name (the import above shadows
+# them). They are removed in a follow-up cleanup commit; keeping the
+# old definitions during the move makes the refactor diff smaller.
+
+def _legacy_compose_recipe(
     components: list[str],
     *,
     model_key: str,
     bundles_root: Path | None = None,
     partial: bool = False,
+    corpus_state_key: str | None = None,
 ) -> dict[str, Any]:
     """Compose a multi-component recipe by averaging per-component bundles.
 
@@ -3129,17 +2911,44 @@ def compose_recipe(
         bundles_root = Path("data/outputs/embeddings")
     suffix = "_partial" if partial else ""
     source_bundles: list[Path] = []
+
+    def _resolve(component: str) -> Path:
+        """Locate the bundle dir for one component.
+
+        Path resolution order:
+        1. State-key keyed: `<root>/<model>/<component>__<state_key>/`
+           (when `corpus_state_key` is given; otherwise pick the
+           lexically-latest match).
+        2. Bare per-model layout: `<root>/<model>/<component>/`.
+        3. Legacy flat layout: `<root>/<model_key>_<component>/`.
+        """
+        model_dir = Path(bundles_root) / model_key
+        if corpus_state_key is not None:
+            candidate = model_dir / f"{component}{suffix}__{corpus_state_key}"
+            if candidate.exists():
+                return candidate
+        # Auto-resolve to the lexically-latest state_key suffix.
+        if model_dir.exists():
+            keyed = sorted(model_dir.glob(f"{component}{suffix}__*"))
+            if keyed:
+                return keyed[-1]
+        bare = model_dir / f"{component}{suffix}"
+        if bare.exists():
+            return bare
+        legacy = Path(bundles_root) / f"{model_key}_{component}{suffix}"
+        if legacy.exists():
+            return legacy
+        return bare  # caller raises FileNotFoundError below
+
     # First pass: load each per-component bundle's ids + vectors.
-    # New layout: <bundles_root>/<model_key>/<component>[_partial]/
-    # Falls back to the legacy flat layout <bundles_root>/<model_key>_<component>/.
     loaded: list[tuple[str, list[int], "np.ndarray"]] = []
     for component in components:
-        primary = Path(bundles_root) / model_key / f"{component}{suffix}"
-        legacy = Path(bundles_root) / f"{model_key}_{component}{suffix}"
-        bundle_dir = primary if primary.exists() else legacy
+        bundle_dir = _resolve(component)
         if not bundle_dir.exists():
             raise FileNotFoundError(
-                f"compose_recipe: component bundle missing — tried {primary} and {legacy}"
+                f"compose_recipe: component bundle missing for "
+                f"{model_key}/{component} under {bundles_root} "
+                f"(corpus_state_key={corpus_state_key!r})"
             )
         ids_path = bundle_dir / "ids.npy"
         vectors_path = bundle_dir / "vectors.npy"
@@ -3214,7 +3023,7 @@ def compose_recipe(
     }
 
 
-def apply_published_stage2_to_matrix(
+def _legacy_apply_published_stage2_to_matrix(
     voyage_matrix: Any,
     *,
     model_path: Path,
@@ -3222,13 +3031,7 @@ def apply_published_stage2_to_matrix(
     batch_size: int = 256,
     dropout: float = 0.05,
 ) -> tuple[Any, str]:
-    """Apply the published NeuroScape Stage 2 model to a raw Voyage
-    matrix and return `(projected_matrix, model_version)`.
-
-    The model is loaded fresh per call — fine for occasional use; the
-    matrix-orchestrator path caches the loaded model in-process for
-    repeated calls across components.
-    """
+    """Legacy in-tree implementation; kept until follow-up cleanup."""
     import numpy as np
     if voyage_matrix.shape[1] != 1024:
         raise NeuroScapeError(

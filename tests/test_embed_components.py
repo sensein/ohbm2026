@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import unittest
 
-from ohbm2026 import embed_components
+from ohbm2026.embed import components as embed_components
 
 
 def _record(

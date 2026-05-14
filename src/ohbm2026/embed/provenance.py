@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from ohbm2026 import embed_storage
+from ohbm2026.embed import storage as embed_storage
 from ohbm2026.exceptions import ProvenanceError
 
 __all__ = [

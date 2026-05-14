@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ohbm2026.local/schemas/stage3/provenance.schema.json",
+  "title": "Stage 3 embeddings-matrix run provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "state_key",
+    "corpus_state_key",
+    "corpus_source_path",
+    "corpus_source_hash",
+    "command_line",
+    "code_revision",
+    "started_at",
+    "completed_at",
+    "wall_clock_seconds",
+    "cache_version",
+    "cache_root",
+    "failure_threshold",
+    "batch_size",
+    "concurrency_policy",
+    "env_vars_consulted",
+    "bundles"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "stage3.provenance.v1"
+    },
+    "state_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "corpus_state_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "corpus_source_path": {
+      "type": "string",
+      "pattern": "^(?!/|~).*"
+    },
+    "corpus_source_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "command_line": {
+      "type": "string"
+    },
+    "code_revision": {
+      "type": "string",
+      "minLength": 7
+    },
+    "seed": {
+      "type": ["integer", "null"]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "wall_clock_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "cache_version": {
+      "const": "embed.matrix.v1"
+    },
+    "cache_root": {
+      "type": "string",
+      "pattern": "^(?!/|~).*"
+    },
+    "failure_threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "batch_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "concurrency_policy": {
+      "type": "string"
+    },
+    "env_vars_consulted": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Names only — never the values."
+    },
+    "bundles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bundle_path",
+          "model_key",
+          "model_id",
+          "model_version",
+          "component",
+          "present_count",
+          "failure_count",
+          "truncated_count",
+          "cache_hit_count",
+          "cache_miss_count",
+          "wall_clock_seconds"
+        ],
+        "properties": {
+          "bundle_path": {
+            "type": "string",
+            "pattern": "^(?!/|~).*"
+          },
+          "model_key": {"type": "string"},
+          "model_id": {"type": "string"},
+          "model_version": {"type": "string"},
+          "component": {"type": "string"},
+          "present_count": {"type": "integer", "minimum": 0},
+          "failure_count": {"type": "integer", "minimum": 0},
+          "truncated_count": {"type": "integer", "minimum": 0},
+          "cache_hit_count": {"type": "integer", "minimum": 0},
+          "cache_miss_count": {"type": "integer", "minimum": 0},
+          "wall_clock_seconds": {"type": "number", "minimum": 0},
+          "status": {"type": "string", "enum": ["ok", "failed", "partial", "skipped"]}
+        }
+      }
+    }
+  }
+}

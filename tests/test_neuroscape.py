@@ -9,8 +9,6 @@ from ohbm2026.neuroscape import (
     build_embedding_output_name,
     build_claim_embedding_text,
     build_distinct_color_map,
-    build_hf_parser,
-    build_openai_parser,
     build_embedding_visualization_title,
     build_apply_pretrained_stage2_parser,
     build_cluster_benchmark_parser,
@@ -641,23 +639,6 @@ class NeuroScapeHelpersTest(unittest.TestCase):
 
         self.assertEqual(set(color_map), {"A", "B", "C"})
         self.assertEqual(len(set(color_map.values())), 3)
-
-    def test_build_hf_parser_defaults_to_sentence_transformer_model(self) -> None:
-        parser = build_hf_parser()
-        args = parser.parse_args([])
-
-        self.assertEqual(args.model, "sentence-transformers/all-MiniLM-L6-v2")
-        self.assertEqual(args.embeddings_dir, "data/outputs/experiments/embeddings")
-        self.assertEqual(args.env_file, ".env")
-        self.assertFalse(args.local_files_only)
-
-    def test_build_openai_parser_defaults_to_openai_model(self) -> None:
-        parser = build_openai_parser()
-        args = parser.parse_args([])
-
-        self.assertEqual(args.openai_model, "text-embedding-3-small")
-        self.assertEqual(args.openai_api_var, "OPENAI_API_KEY")
-        self.assertIsNone(args.dimensions)
 
     def test_build_projection_compare_parser_defaults(self) -> None:
         parser = build_projection_compare_parser()

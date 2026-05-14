@@ -1,4 +1,4 @@
-"""Tests for `neuroscape.compose_recipe`.
+"""Tests for `embed_compose.compose_recipe`.
 
 The composition contract is documented in
 `specs/005-embeddings-matrix/data-model.md` §5: union-of-ids per
@@ -13,7 +13,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ohbm2026 import embed_storage, neuroscape
+from ohbm2026.embed import compose as embed_compose
+from ohbm2026.embed import storage as embed_storage
+from ohbm2026.exceptions import EmbeddingError
 
 
 class _Tmp:
@@ -60,7 +62,7 @@ class ComposeRecipeTests(unittest.TestCase):
         _write_bundle(self.fx.path, "voyage_results", [2, 3], results_vecs)
         _write_bundle(self.fx.path, "voyage_conclusion", [1, 3], conclusion_vecs)
 
-        recipe = neuroscape.compose_recipe(
+        recipe = embed_compose.compose_recipe(
             ["title", "results", "conclusion"],
             model_key="voyage",
             bundles_root=self.fx.path,
@@ -84,7 +86,7 @@ class ComposeRecipeTests(unittest.TestCase):
 
     def test_missing_bundle_raises(self) -> None:
         with self.assertRaises(FileNotFoundError):
-            neuroscape.compose_recipe(
+            embed_compose.compose_recipe(
                 ["title"], model_key="voyage", bundles_root=self.fx.path,
             )
 
@@ -97,8 +99,8 @@ class ComposeRecipeTests(unittest.TestCase):
             self.fx.path, "voyage_results", [1],
             np.zeros((1, 8), dtype=np.float32),
         )
-        with self.assertRaises(neuroscape.NeuroScapeError):
-            neuroscape.compose_recipe(
+        with self.assertRaises(EmbeddingError):
+            embed_compose.compose_recipe(
                 ["title", "results"], model_key="voyage", bundles_root=self.fx.path,
             )
 
@@ -107,7 +109,7 @@ class ComposeRecipeTests(unittest.TestCase):
         # vectors unchanged (mean over a single value == that value).
         vecs = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
         _write_bundle(self.fx.path, "voyage_title", [10, 20], vecs)
-        recipe = neuroscape.compose_recipe(
+        recipe = embed_compose.compose_recipe(
             ["title"], model_key="voyage", bundles_root=self.fx.path,
         )
         np.testing.assert_array_equal(recipe["ids"], [10, 20])

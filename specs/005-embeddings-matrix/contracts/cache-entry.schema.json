@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ohbm2026.local/schemas/stage3/cache-entry.schema.json",
+  "title": "Stage 3 per-abstract embedding cache entry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cache_version",
+    "abstract_id",
+    "component",
+    "model_id",
+    "model_version",
+    "input_hash",
+    "vector",
+    "dim",
+    "embedded_at"
+  ],
+  "properties": {
+    "cache_version": {
+      "const": "embed.matrix.v1"
+    },
+    "abstract_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "component": {
+      "type": "string",
+      "enum": [
+        "title",
+        "introduction",
+        "methods",
+        "results",
+        "conclusion",
+        "claims",
+        "inference_claims"
+      ]
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "vector": {
+      "type": "array",
+      "items": {"type": "number"},
+      "minItems": 1
+    },
+    "dim": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "truncated": {
+      "type": "boolean"
+    },
+    "truncation_strategy": {
+      "type": ["string", "null"],
+      "enum": [
+        "truncate_end",
+        "truncate_middle",
+        "chunk_mean_pool",
+        "fail_per_abstract",
+        null
+      ]
+    },
+    "tokens_used": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "embedded_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

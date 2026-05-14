@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ohbm2026 import embed_storage
+from ohbm2026.embed import storage as embed_storage
 from ohbm2026.exceptions import EmbeddingContractError
 
 

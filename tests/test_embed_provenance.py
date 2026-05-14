@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ohbm2026 import embed_provenance
+from ohbm2026.embed import provenance as embed_provenance
 from ohbm2026.exceptions import ProvenanceError
 
 

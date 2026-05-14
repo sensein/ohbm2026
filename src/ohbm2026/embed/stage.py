@@ -37,7 +37,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
-from ohbm2026 import embed_components, embed_hf, embed_openai, embed_provenance, embed_storage, embed_voyage
+from ohbm2026.embed import components as embed_components
+from ohbm2026.embed import hf as embed_hf
+from ohbm2026.embed import openai as embed_openai
+from ohbm2026.embed import provenance as embed_provenance
+from ohbm2026.embed import storage as embed_storage
+from ohbm2026.embed import voyage as embed_voyage
 from ohbm2026.exceptions import (
     ComponentAssemblyError,
     EmbeddingBudgetError,
@@ -875,16 +880,13 @@ def _run_neuroscape_derivation(
             f"is missing; run `--models voyage,neuroscape` together"
         )
     # Lazy-import to avoid pulling in torch when only local-text models are used.
-    from ohbm2026 import neuroscape
+    from ohbm2026.embed import compose as embed_compose
     start = time.perf_counter()
-    output_dir = Path(embeddings_root) / f"neuroscape_{component}"
+    output_dir = Path(embeddings_root) / "neuroscape" / f"{component}__{corpus_state_key}"
     bundle = embed_storage.load_bundle(voyage_bundle_dir)
     voyage_matrix = bundle["vectors"]
     ids = bundle["ids"]
-    # Reuse the existing apply_published_stage2 transform via the
-    # `neuroscape.apply_published_stage2_to_matrix` API surface if it
-    # exists; otherwise call the legacy bundle-applying function.
-    apply_fn = getattr(neuroscape, "apply_published_stage2_to_matrix", None)
+    apply_fn = getattr(embed_compose, "apply_published_stage2_to_matrix", None)
     if apply_fn is None:
         # Fallback: use the bundle-level API.
         # The legacy `apply_published_stage2` reads the voyage bundle dir

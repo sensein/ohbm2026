@@ -18,7 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ohbm2026 import embed_stage, embed_storage
+from ohbm2026.embed import stage as embed_stage
+from ohbm2026.embed import storage as embed_storage
 from ohbm2026.exceptions import (
     EmbeddingBudgetError,
     EmbeddingContractError,

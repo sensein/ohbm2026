@@ -52,34 +52,6 @@ class CLITest(unittest.TestCase):
         self.assertEqual(result, 0)
         es_main.assert_called_once_with(argv[1:])
 
-    def test_embed_minilm_subcommand_delegates_to_minilm_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "minilm_main", return_value=17) as minilm_main:
-            result = cli.main(["embed-minilm", "--embeddings-dir", "custom"])
-
-        self.assertEqual(result, 17)
-        minilm_main.assert_called_once_with(["--embeddings-dir", "custom"])
-
-    def test_embed_hf_subcommand_delegates_to_hf_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "hf_main", return_value=18) as hf_main:
-            result = cli.main(["embed-hf", "--model", "neuml/pubmedbert-base-embeddings"])
-
-        self.assertEqual(result, 18)
-        hf_main.assert_called_once_with(["--model", "neuml/pubmedbert-base-embeddings"])
-
-    def test_embed_voyage_subcommand_delegates_to_voyage_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "voyage_main", return_value=19) as voyage_main:
-            result = cli.main(["embed-voyage", "--voyage-model", "test-model", "--batch-size", "16"])
-
-        self.assertEqual(result, 19)
-        voyage_main.assert_called_once_with(["--voyage-model", "test-model", "--batch-size", "16"])
-
-    def test_embed_openai_subcommand_delegates_to_openai_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "openai_main", return_value=20) as openai_main:
-            result = cli.main(["embed-openai", "--openai-model", "text-embedding-3-small"])
-
-        self.assertEqual(result, 20)
-        openai_main.assert_called_once_with(["--openai-model", "text-embedding-3-small"])
-
     def test_embed_stage2_subcommand_delegates_to_stage2_main(self) -> None:
         with mock.patch.object(cli.neuroscape, "stage2_main", return_value=21) as stage2_main:
             result = cli.main(["embed-stage2", "--epochs", "5"])

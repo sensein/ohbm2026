@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ohbm2026.local/schemas/stage3/bundle.schema.json",
+  "title": "Stage 3 embedding bundle metadata.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bundle_name",
+    "model_key",
+    "model_id",
+    "model_version",
+    "component",
+    "corpus_state_key",
+    "corpus_source_path",
+    "count",
+    "present_count",
+    "missing_count",
+    "missing_ids",
+    "dim",
+    "dtype",
+    "long_input_strategy",
+    "truncated_count",
+    "failure_count",
+    "batch_size",
+    "embedded_at",
+    "ids"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "stage3.bundle.v1"
+    },
+    "bundle_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(_[a-z0-9-]+)+(_partial)?$"
+    },
+    "model_key": {
+      "type": "string",
+      "enum": ["voyage", "minilm", "openai", "pubmedbert", "neuroscape"]
+    },
+    "model_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "component": {
+      "type": "string",
+      "enum": [
+        "title",
+        "introduction",
+        "methods",
+        "results",
+        "conclusion",
+        "claims",
+        "inference_claims"
+      ]
+    },
+    "corpus_state_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{12}$"
+    },
+    "corpus_source_path": {
+      "type": "string",
+      "pattern": "^(?!/|~).*"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total accepted abstracts in the source corpus."
+    },
+    "present_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Rows in vectors.npy. Equals count minus missing_count."
+    },
+    "missing_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "missing_ids": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "description": "Abstracts absent from this component's text (e.g., empty methods section)."
+    },
+    "dim": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "dtype": {
+      "const": "float32"
+    },
+    "long_input_strategy": {
+      "type": "string",
+      "enum": [
+        "truncate_end",
+        "truncate_middle",
+        "chunk_mean_pool",
+        "fail_per_abstract"
+      ]
+    },
+    "long_input_params": {
+      "type": ["object", "null"],
+      "description": "Strategy-specific params (chunk_window, chunk_overlap, pooling) for chunk_mean_pool; null for truncate_*"
+    },
+    "truncated_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "truncated_ids": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "maxItems": 256
+    },
+    "failure_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failure_ids": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "maxItems": 256
+    },
+    "concurrency": {
+      "type": "object",
+      "required": ["policy"],
+      "properties": {
+        "policy": {"type": "string", "enum": ["serial", "static", "dynamic", "n/a"]},
+        "start": {"type": ["integer", "null"]},
+        "min_observed": {"type": ["integer", "null"]},
+        "max_observed": {"type": ["integer", "null"]},
+        "rate_limit_429_count": {"type": ["integer", "null"]}
+      }
+    },
+    "batch_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "request_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "wall_clock_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "embedded_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ids": {
+      "type": "array",
+      "items": {"type": "integer"},
+      "description": "MUST match ids.npy element-wise and length-wise."
+    },
+    "embedding_fields": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Backward-compat for legacy consumers; mirrors [component]"
+    },
+    "embedding_name": {
+      "type": "string",
+      "description": "Backward-compat for legacy consumers; equals bundle_name"
+    },
+    "model_name": {
+      "type": "string",
+      "description": "Backward-compat for legacy consumers; equals model_id"
+    }
+  }
+}
