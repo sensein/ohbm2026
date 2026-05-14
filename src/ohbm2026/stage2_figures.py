@@ -108,11 +108,29 @@ def compress_image(
 
     The caller transmits `jpeg_bytes` to the model and stores the
     dict on the figure-interpretation record.
+
+    Raises `EnrichmentError` for inputs Pillow refuses to decode
+    (corrupt PNG, exceeded decompression-bomb safety limit, etc.)
+    — the per-figure threshold logic counts these as failures
+    instead of crashing the whole run.
     """
     from PIL import Image
+    # Pillow's default `MAX_IMAGE_PIXELS = 178956970` flags any
+    # image above ~179M pixels as a potential decompression bomb.
+    # OHBM poster scans regularly exceed this (e.g., a 16384x16384
+    # PNG = 268M pixels). Raise the cap to a generous bound (1B
+    # pixels) — still bounded enough to refuse genuinely malicious
+    # gigapixel inputs.
+    Image.MAX_IMAGE_PIXELS = 1_000_000_000
 
     original_bytes = len(image_bytes)
-    with Image.open(io.BytesIO(image_bytes)) as src:
+    try:
+        src_cm = Image.open(io.BytesIO(image_bytes))
+    except (Image.UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
+        raise EnrichmentError(
+            f"figures: Pillow refused to decode image ({type(exc).__name__}: {exc})"
+        ) from exc
+    with src_cm as src:
         # Force RGB so JPEG encode never fails on palette / RGBA.
         img = src.convert("RGB")
         native_max = image_quality.native_max_dim(img)
