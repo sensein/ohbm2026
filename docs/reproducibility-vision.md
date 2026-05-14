@@ -110,8 +110,10 @@ The defaults that future users should treat as current project reality are:
   `data/primary/abstracts_enriched.sqlite` (the Stage 2.1 canonical
   artifact; the legacy `abstracts_enriched.json` is archived)
 - Stage 3 embeddings are per-component bundles under
-  `data/outputs/embeddings/<model_key>/<component>/` for `voyage`,
-  `minilm`, `openai`, `pubmedbert`, and the derived `neuroscape`.
+  `data/outputs/embeddings/<model_key>/<component>__<state_key>/`
+  for `voyage`, `minilm`, `openai`, `pubmedbert`, and the derived
+  `neuroscape`. The state-key suffix lets historical corpora coexist;
+  removing stale bundles is `rm -rf <model_key>/<component>__<old_state_key>`.
   Multi-component recipes (`stage1`, `methods-results`,
   `title-results-conclusion`, etc.) are composed at consumption time
   via `neuroscape.compose_recipe([...], model_key=<m>)` — no
@@ -162,7 +164,7 @@ The usual order is:
    corpus at `data/primary/abstracts_enriched.sqlite` plus
    per-component caches under `data/cache/figure_analysis/`,
    `data/cache/claim_analysis/`, `data/cache/reference_metadata/`,
-   plus `data/inputs/abstracts_enrich_provenance__<state-key>.json`.
+   plus `data/provenance/abstracts_enrich_provenance__<state-key>.json`.
    Use `--invalidate <component>` to force a single component to
    re-run; pass `--export-parquet PATH` (with the `parquet` optional
    extra installed) to emit a Parquet copy.
@@ -183,7 +185,7 @@ Abstracts API.
    plus the persisted GraphQL schema introspection at
    `data/inputs/abstracts_graphql_schema__<state-key>.json` and a
    machine-readable provenance record at
-   `data/inputs/abstracts_fetch_provenance__<state-key>.json`. The
+   `data/provenance/abstracts_fetch_provenance__<state-key>.json`. The
    stage is resumable from per-record checkpoint and detects
    upstream schema drift (HARD / SOFT / INFORMATIONAL tiers).
 3. optionally run `ohbmcli fetch-withdrawn` to fetch the SEPARATE

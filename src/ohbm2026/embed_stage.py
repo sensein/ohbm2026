@@ -286,10 +286,24 @@ def _resolve_long_input(model_key: str, args: argparse.Namespace) -> str:
 # ---- per-bundle orchestration ----------------------------------------
 
 
-def _bundle_dir_for(model_key: str, component: str, embeddings_root: Path, *, partial: bool) -> Path:
-    """Per-model folder layout: `<embeddings_root>/<model_key>/<component>[_partial]/`."""
+def _bundle_dir_for(
+    model_key: str,
+    component: str,
+    embeddings_root: Path,
+    *,
+    partial: bool,
+    corpus_state_key: str,
+) -> Path:
+    """Layout: `<embeddings_root>/<model_key>/<component>[_partial]__<state_key>/`.
+
+    Encoding the corpus state_key in the directory name means that
+    re-running Stage 3 against a fresh Stage 2 corpus produces a
+    new directory rather than overwriting the prior one. Operators
+    can list / glob to discover historical bundles and remove
+    stale state keys with `rm -rf <model_key>/<component>__<old_state_key>`.
+    """
     suffix = "_partial" if partial else ""
-    return Path(embeddings_root) / model_key / f"{component}{suffix}"
+    return Path(embeddings_root) / model_key / f"{component}{suffix}__{corpus_state_key}"
 
 
 def _model_version_for(client: Any, fallback_model_id: str) -> str:
@@ -359,17 +373,25 @@ def run_single_bundle(
         partial_suffix = not is_default_component
 
     bundle_dir = _bundle_dir_for(
-        model_key, component, embeddings_root, partial=partial_suffix
+        model_key,
+        component,
+        embeddings_root,
+        partial=partial_suffix,
+        corpus_state_key=corpus_state_key,
     )
 
-    # 3. State-key guard (FR-013): refuse overwrite if prior bundle's
-    #    corpus_state_key differs.
+    # 3. State-key safety: the directory now embeds the state_key, so
+    # cross-state collisions cannot happen by accident. We still
+    # check that if a directory at this exact path exists, it was
+    # written against the same state_key (defends against manual
+    # edits or operator copy-pastes).
     prior_state = embed_storage.bundle_corpus_state_key(bundle_dir)
     if prior_state and prior_state != corpus_state_key:
         raise EmbeddingError(
-            f"existing bundle at {bundle_dir} was built against corpus_state_key="
+            f"existing bundle at {bundle_dir} has metadata.corpus_state_key="
             f"{prior_state!r}; refusing to overwrite with run at {corpus_state_key!r}. "
-            f"Pass --invalidate {model_key}_{component} or archive the prior bundle."
+            f"The directory was likely renamed manually. Pass --invalidate "
+            f"{model_key}_{component} or move the prior bundle aside."
         )
 
     # 4. Build client lazily; capture model_id + version for cache-keying.

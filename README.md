@@ -297,7 +297,7 @@ What it does:
 - persists the upstream GraphQL schema introspection alongside at
   `data/inputs/abstracts_graphql_schema__<state-key>.json`
 - writes a machine-readable provenance record at
-  `data/inputs/abstracts_fetch_provenance__<state-key>.json`
+  `data/provenance/abstracts_fetch_provenance__<state-key>.json`
 - writes a resumable checkpoint under
   `data/cache/fetch_abstracts/checkpoint__<state-key>.json` (deleted
   on full completion)
@@ -374,7 +374,7 @@ What it does:
   lookup; ~21 MB for the 3244-abstract corpus per the benchmark in
   `specs/003-enrich-abstracts/research.md`)
 - writes provenance to
-  `data/inputs/abstracts_enrich_provenance__<state-key>.json`
+  `data/provenance/abstracts_enrich_provenance__<state-key>.json`
   with names-only env vars, per-component model identifiers, and
   cache hit/miss counts
 
@@ -460,8 +460,11 @@ Canonical components (FR-006):
 The opt-in `inference_claims` component covers ~12% of abstracts and
 requires `--allow-partial inference_claims`.
 
-Bundles land at `data/outputs/embeddings/<model_key>/<component>/`
+Bundles land at `data/outputs/embeddings/<model_key>/<component>__<state-key>/`
 with `vectors.npy`, `ids.npy`, `metadata.json`, and `provenance.json`.
+The state-key suffix lets re-runs against a fresh enriched corpus
+coexist alongside prior versions; old corpora can be cleaned via
+`rm -rf data/outputs/embeddings/*/*__<old_state_key>`.
 
 Behavior:
 - Per-abstract cache writes (`data/cache/embeddings/<model_key>/`)
@@ -792,11 +795,11 @@ If you want to rerun sequencing experiments on an existing proposal:
   - `data/primary/authors_withdrawn.json` (authors for the withdrawn corpus)
   - `data/primary/assets/` (downloaded methods/results figure images)
   - `data/inputs/abstracts_graphql_schema__<state-key>.json` (persisted upstream schema)
-  - `data/inputs/abstracts_fetch_provenance__<state-key>.json` (provenance record)
+  - `data/provenance/abstracts_fetch_provenance__<state-key>.json` (provenance record)
   - `data/cache/fetch_abstracts/checkpoint__<state-key>.json` (resume checkpoint; deleted on success)
 - Stage 2 — enriched corpus
   - `data/primary/abstracts_enriched.sqlite` (SQLite + zlib(json) per row; canonical)
-  - `data/inputs/abstracts_enrich_provenance__<state-key>.json` (per-component model identifiers + cache hit/miss counts)
+  - `data/provenance/abstracts_enrich_provenance__<state-key>.json` (per-component model identifiers + cache hit/miss counts)
   - `data/cache/figure_analysis/<cache-key>.json` (per-figure interpretations)
   - `data/cache/claim_analysis/<cache-key>.json` (per-abstract claim lists)
   - `data/cache/reference_metadata/<cache-key>.json` (per-reference resolutions)
