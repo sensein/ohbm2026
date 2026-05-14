@@ -751,6 +751,7 @@ def run_matrix(args: argparse.Namespace) -> int:
                     voyage_bundle_dir=voyage_bundles_by_component.get(component),
                     embeddings_root=embeddings_root,
                     corpus_state_key=corpus_state_key,
+                    neuroscape_model_path=getattr(args, "neuroscape_model_path", None),
                 )
                 bundles.append(result)
             except EmbeddingError as exc:
@@ -871,9 +872,17 @@ def _run_neuroscape_derivation(
     voyage_bundle_dir: Path | None,
     embeddings_root: Path,
     corpus_state_key: str,
+    neuroscape_model_path: Path | None = None,
 ) -> BundleResult:
     """Apply the published NeuroScape Stage 2 transform to a Voyage
-    component bundle."""
+    component bundle.
+
+    `neuroscape_model_path` is the path to the published Stage-2
+    checkpoint. The matrix orchestrator passes
+    `args.neuroscape_model_path`; standalone callers can pass
+    `None` only if their tests patch `apply_published_stage2_to_matrix`
+    (in which case the model path is not consulted).
+    """
     if voyage_bundle_dir is None or not voyage_bundle_dir.exists():
         raise EmbeddingError(
             f"neuroscape_{component}: required upstream voyage_{component} bundle "
@@ -886,18 +895,11 @@ def _run_neuroscape_derivation(
     bundle = embed_storage.load_bundle(voyage_bundle_dir)
     voyage_matrix = bundle["vectors"]
     ids = bundle["ids"]
-    apply_fn = getattr(embed_compose, "apply_published_stage2_to_matrix", None)
-    if apply_fn is None:
-        # Fallback: use the bundle-level API.
-        # The legacy `apply_published_stage2` reads the voyage bundle dir
-        # and writes a new bundle dir; we adapt to the orchestrator's
-        # storage layer.
-        raise EmbeddingError(
-            "neuroscape application: apply_published_stage2_to_matrix not "
-            "available in neuroscape.py — install the [neuroscape] extra "
-            "or run `ohbmcli apply-published-stage2` manually"
-        )
-    transformed, model_version = apply_fn(voyage_matrix)
+    apply_fn = embed_compose.apply_published_stage2_to_matrix
+    kwargs: dict[str, Any] = {}
+    if neuroscape_model_path is not None:
+        kwargs["model_path"] = Path(neuroscape_model_path)
+    transformed, model_version = apply_fn(voyage_matrix, **kwargs)
     import numpy as np
     embed_storage.write_bundle(
         output_dir,
@@ -1037,6 +1039,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--pubmedbert-model-id", default=embed_hf.DEFAULT_PUBMEDBERT_MODEL,
+    )
+    parser.add_argument(
+        "--neuroscape-model-path",
+        default=None,
+        help=(
+            "Path to the published NeuroScape Stage-2 checkpoint. Required "
+            "when --models includes 'neuroscape'."
+        ),
     )
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--concurrency-start", type=int, default=DEFAULT_CONCURRENCY_START)
