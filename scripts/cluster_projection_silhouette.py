@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 from sklearn.metrics import silhouette_score
 
-from ohbm2026.neuroscape import (
+from ohbm2026.analyze import (
     DEFAULT_UMAP_MIN_DIST,
     DEFAULT_UMAP_NEIGHBORS,
     NeuroScapeError,

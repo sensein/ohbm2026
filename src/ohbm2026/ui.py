@@ -16,7 +16,7 @@ import numpy as np
 
 from ohbm2026 import artifacts
 from ohbm2026.enrichment import default_image_analysis_cache_path
-from ohbm2026.neuroscape import parse_string_list_value
+from ohbm2026.analyze import parse_string_list_value
 from ohbm2026.titles import cleaned_abstract_title
 
 DEFAULT_RAW_INPUT = str(artifacts.PRIMARY_ABSTRACTS_PATH)

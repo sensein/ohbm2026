@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ohbm2026 import artifacts
-from ohbm2026.neuroscape import (
+from ohbm2026.analyze import (
     align_semantic_records,
     load_annotation_lookup,
     load_embedding_bundle,

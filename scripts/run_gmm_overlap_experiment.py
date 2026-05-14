@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 from sklearn.mixture import GaussianMixture
 
-from ohbm2026.neuroscape import load_embedding_bundle, prepare_clustering_matrix
+from ohbm2026.analyze import load_embedding_bundle, prepare_clustering_matrix
 
 
 def build_parser() -> argparse.ArgumentParser:

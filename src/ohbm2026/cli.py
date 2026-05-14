@@ -3,11 +3,11 @@ from __future__ import annotations
 import argparse
 import sys
 
+from ohbm2026 import analyze as neuroscape
 from ohbm2026 import (
     artifacts,
     assets,
     enrichment,
-    neuroscape,
     titles,
     ui,
 )

@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from ohbm2026 import artifacts
-from ohbm2026.neuroscape import build_knn_graph, compute_clustering_metrics, load_embedding_bundle, parse_string_list_value
+from ohbm2026.analyze import build_knn_graph, compute_clustering_metrics, load_embedding_bundle, parse_string_list_value
 
 UNKNOWN_LABEL = "Unknown"
 
