@@ -11,6 +11,7 @@ from ohbm2026 import (
     titles,
     ui,
 )
+from ohbm2026.analyze import stage as analyze_stage
 from ohbm2026.enrich import stage as enrich_stage
 from ohbm2026.fetch import stage as fetch_stage
 from ohbm2026.embed import stage as embed_stage
@@ -58,6 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stage 3: generate the multi-model embeddings matrix (per-component bundles)",
     )
     _copy_actions(embed_matrix_parser, embed_stage.build_parser())
+
+    analyze_matrix_parser = subparsers.add_parser(
+        "analyze-matrix",
+        help="Stage 4: run the (model, input, kind) analysis matrix and write the canonical rollup",
+    )
+    _copy_actions(analyze_matrix_parser, analyze_stage.build_parser())
 
     stage2_parser = subparsers.add_parser("embed-stage2", help="Train and apply a local NeuroScape stage-2 model")
     _copy_actions(stage2_parser, neuroscape.build_stage2_parser())
@@ -156,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
         return enrich_stage.main(subcommand_argv)
     if command == "embed-matrix":
         return embed_stage.main(subcommand_argv)
+    if command == "analyze-matrix":
+        return analyze_stage.main(subcommand_argv)
     if command == "embed-stage2":
         return neuroscape.stage2_main(subcommand_argv)
     if command == "apply-published-stage2":
