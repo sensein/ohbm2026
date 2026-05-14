@@ -67,6 +67,19 @@ class HFBatchClient:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self.model_id)
+            # Many sentence-transformers models ship with a tighter
+            # `max_seq_length` (e.g. all-MiniLM-L6-v2 defaults to 256)
+            # than the underlying BERT-base architecture supports (512).
+            # We raise the cap to `chunk_window` so the encoder respects
+            # the full chunk our tokenizer produces — without this the
+            # encoder would silently truncate each chunk to its
+            # training-time cap, defeating chunk_mean_pool.
+            try:
+                self._model.max_seq_length = max(
+                    self.chunk_window, int(getattr(self._model, "max_seq_length", 0) or 0)
+                )
+            except (AttributeError, TypeError):
+                pass
         return self._model
 
     def _encode(self, texts: list[str]) -> list[list[float]]:
@@ -84,33 +97,39 @@ class HFBatchClient:
         return [list(v) for v in out]
 
     def _split_into_chunks(self, text: str) -> list[str]:
-        """Split `text` into overlapping windows by token-approximate
-        character count. This is the same fixed-width recipe used by
-        the legacy `neuroscape.hf_embed` chunking path — a fully
-        token-correct version requires the tokenizer, which is left
-        to the underlying SentenceTransformer.
+        """Token-level chunking via the model's own tokenizer.
 
-        We use character windows of `chunk_window * 4` chars as a
-        proxy for `chunk_window` tokens (~4 chars/token on English
-        scientific text); good enough to keep batches small without
-        being aggressive about the actual token limit.
+        Uses HuggingFace's `return_overflowing_tokens=True` so each
+        chunk is exactly `chunk_window` tokens (with `chunk_overlap`
+        tokens of overlap with its neighbor). Decoded back to text so
+        the standard `model.encode()` path handles special tokens
+        consistently with the model's training distribution.
+
+        This is the canonical correct chunking — char-based windows
+        misalign with the tokenizer (different chars/token in
+        scientific text vs the rough 4-char heuristic), and silently
+        leave the encoder truncating each chunk internally.
         """
         if not text:
             return []
-        win_chars = self.chunk_window * 4
-        overlap_chars = self.chunk_overlap * 4
-        if len(text) <= win_chars:
-            return [text]
-        chunks: list[str] = []
-        step = max(1, win_chars - overlap_chars)
-        for start in range(0, len(text), step):
-            chunk = text[start : start + win_chars]
-            if not chunk:
-                break
-            chunks.append(chunk)
-            if start + win_chars >= len(text):
-                break
-        return chunks
+        model = self._ensure_model()
+        tokenizer = model.tokenizer
+        encoded = tokenizer(
+            text,
+            max_length=self.chunk_window,
+            truncation=True,
+            stride=self.chunk_overlap,
+            return_overflowing_tokens=True,
+            add_special_tokens=False,
+            return_attention_mask=False,
+        )
+        chunk_token_lists = encoded.get("input_ids") or []
+        if not chunk_token_lists:
+            return [""]
+        return [
+            tokenizer.decode(ids, skip_special_tokens=True)
+            for ids in chunk_token_lists
+        ]
 
     def embed_batch(self, texts: list[str]) -> tuple[list[list[float]], dict]:
         """Embed a batch of texts.
