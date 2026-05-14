@@ -98,7 +98,7 @@ def _patch_upstream(
     withdrawn_submission_ids: list[int] | None = None,
 ):
     """Context-manager helper: patches every upstream call in
-    `ohbm2026.graphql_api` AND its name-imported reference inside
+    `ohbm2026.fetch.graphql_api` AND its name-imported reference inside
     `ohbm2026.assets` so fetch_stage.main() can run hermetically.
 
     Both targets are patched because `assets.py` imports
@@ -107,7 +107,7 @@ def _patch_upstream(
     and the test would silently hit the live endpoint.
     """
     from ohbm2026 import assets as assets_module
-    from ohbm2026 import graphql_api
+    from ohbm2026.fetch import graphql_api as graphql_api
 
     introspection = introspection or _fake_introspection()
     submission_ids = submission_ids if submission_ids is not None else [1, 2, 3]
@@ -527,7 +527,7 @@ class DiscoveryContractTests(unittest.TestCase):
     def test_introspection_call_happens_before_content_calls(self) -> None:
         from ohbm2026 import assets as assets_module
         from ohbm2026.fetch import stage as fetch_stage
-        from ohbm2026 import graphql_api
+        from ohbm2026.fetch import graphql_api as graphql_api
 
         call_order: list[str] = []
 

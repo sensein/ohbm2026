@@ -15,7 +15,7 @@ stages can mirror the pattern.
 
 from __future__ import annotations
 
-from ohbm2026.graphql_api import GraphQLAPIError
+from ohbm2026.fetch.graphql_api import GraphQLAPIError
 
 __all__ = [
     "GraphQLAPIError",

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ohbm2026.enrichment import html_to_markdown
-from ohbm2026.openalex import (
+from ohbm2026.enrich.openalex import (
     extract_reference_entries_heuristic,
     llm_reference_split_request,
     normalize_reference_match_text,

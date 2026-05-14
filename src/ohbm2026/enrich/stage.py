@@ -45,7 +45,7 @@ from typing import Any, Callable, Iterable, Iterator, Optional
 from ohbm2026 import artifacts as artifacts_module
 from ohbm2026.enrich import storage as enrich_storage
 from ohbm2026 import enrichment as enrichment_module
-from ohbm2026 import openalex as openalex_module
+from ohbm2026.enrich import openalex as openalex_module
 from ohbm2026.enrich import figures as stage2_figures
 from ohbm2026.enrich import claims as stage2_claims
 from ohbm2026.enrich import references as stage2_references

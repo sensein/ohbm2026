@@ -8,7 +8,7 @@ from pathlib import Path
 from openai import OpenAI
 from pydantic import BaseModel
 
-from ohbm2026.graphql_api import load_dotenv
+from ohbm2026.fetch.graphql_api import load_dotenv
 
 
 class SmokeResponse(BaseModel):

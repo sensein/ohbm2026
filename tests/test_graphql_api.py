@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-from ohbm2026.graphql_api import (
+from ohbm2026.fetch.graphql_api import (
     chunked,
     extract_value_field,
     is_valid_external_url,
@@ -72,7 +72,7 @@ class TestIntrospectionQuery(unittest.TestCase):
     """
 
     def test_introspection_query_constant_is_a_full_schema_query(self) -> None:
-        from ohbm2026 import graphql_api
+        from ohbm2026.fetch import graphql_api as graphql_api
 
         query = getattr(graphql_api, "INTROSPECTION_QUERY", None)
         self.assertIsNotNone(query, "graphql_api must define INTROSPECTION_QUERY")
@@ -82,7 +82,7 @@ class TestIntrospectionQuery(unittest.TestCase):
         self.assertIn("queryType", query)
 
     def test_fetch_schema_introspection_returns_data_schema_block(self) -> None:
-        from ohbm2026 import graphql_api
+        from ohbm2026.fetch import graphql_api as graphql_api
 
         expected_schema = {
             "queryType": {"name": "Query"},
@@ -104,8 +104,8 @@ class TestIntrospectionRetry(unittest.TestCase):
     exhaustion raises GraphQLAPIError."""
 
     def test_exhausted_retries_raise_graphqlapierror(self) -> None:
-        from ohbm2026 import graphql_api
-        from ohbm2026.graphql_api import GraphQLAPIError
+        from ohbm2026.fetch import graphql_api as graphql_api
+        from ohbm2026.fetch.graphql_api import GraphQLAPIError
 
         # urlopen_with_retries already implements the retry loop; if it
         # gives up, it re-raises the underlying error. Simulate that by
@@ -128,7 +128,7 @@ class TestPosterIdRequested(unittest.TestCase):
     """
 
     def test_abstract_contents_query_requests_program_code(self) -> None:
-        from ohbm2026.graphql_api import ABSTRACT_CONTENTS_QUERY
+        from ohbm2026.fetch.graphql_api import ABSTRACT_CONTENTS_QUERY
 
         self.assertIn(
             "program_code",
@@ -146,7 +146,7 @@ class TestWithdrawnIdsQuery(unittest.TestCase):
     don't appear."""
 
     def test_withdrawn_ids_query_filters_on_decision_status_withdrawn(self) -> None:
-        from ohbm2026.graphql_api import WITHDRAWN_IDS_QUERY
+        from ohbm2026.fetch.graphql_api import WITHDRAWN_IDS_QUERY
 
         self.assertIn('decision_status: {_eq: "Withdrawn"}', WITHDRAWN_IDS_QUERY)
         self.assertIn("complete: {_eq: true}", WITHDRAWN_IDS_QUERY)
@@ -154,12 +154,12 @@ class TestWithdrawnIdsQuery(unittest.TestCase):
         self.assertNotIn("accepted_for", WITHDRAWN_IDS_QUERY)
 
     def test_withdrawn_ids_query_is_distinct_from_accepted_query(self) -> None:
-        from ohbm2026.graphql_api import ABSTRACT_IDS_QUERY, WITHDRAWN_IDS_QUERY
+        from ohbm2026.fetch.graphql_api import ABSTRACT_IDS_QUERY, WITHDRAWN_IDS_QUERY
 
         self.assertNotEqual(ABSTRACT_IDS_QUERY, WITHDRAWN_IDS_QUERY)
 
     def test_fetch_withdrawn_ids_returns_event_and_submission_ids(self) -> None:
-        from ohbm2026 import graphql_api
+        from ohbm2026.fetch import graphql_api as graphql_api
 
         with mock.patch.object(
             graphql_api,
@@ -189,13 +189,13 @@ class TestStandbyChainRequested(unittest.TestCase):
     once scheduling lands."""
 
     def test_abstract_contents_query_requests_program_sessions_submissions(self) -> None:
-        from ohbm2026.graphql_api import ABSTRACT_CONTENTS_QUERY
+        from ohbm2026.fetch.graphql_api import ABSTRACT_CONTENTS_QUERY
 
         # The fetch query must traverse the junction table.
         self.assertIn("program_sessions_submissions", ABSTRACT_CONTENTS_QUERY)
 
     def test_abstract_contents_query_requests_session_metadata_chain(self) -> None:
-        from ohbm2026.graphql_api import ABSTRACT_CONTENTS_QUERY
+        from ohbm2026.fetch.graphql_api import ABSTRACT_CONTENTS_QUERY
 
         # Each linked program_session contributes day, location, type,
         # track, and the standby time window.

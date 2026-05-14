@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from ohbm2026 import artifacts, assets
-from ohbm2026 import graphql_api as _gql
+from ohbm2026.fetch import graphql_api as _gql
 from ohbm2026.fetch import schema_diff as _schema_diff
 from ohbm2026.exceptions import (
     CheckpointError,

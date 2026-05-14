@@ -8,7 +8,6 @@ from ohbm2026 import (
     assets,
     enrichment,
     neuroscape,
-    openalex,
     titles,
     ui,
 )
