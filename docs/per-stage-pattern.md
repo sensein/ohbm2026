@@ -212,6 +212,51 @@ Stage 2 reference:
   time. Mismatches raise `EnrichmentError` with the offending
   response captured for post-hoc diagnosis (CA-007 / Principle VII).
 
+## Stage 2.1 production wiring
+
+Stage 2 shipped the per-stage pattern scaffolding with
+`NotImplementedError` stubs at the three `_call_*` seams. Stage 2.1
+(`specs/004-enrich-production-wiring/`) wires production runners
+through those seams and keeps the orchestrator surface unchanged:
+
+- **Figures**: `src/ohbm2026/stage2_figures.py` —
+  `run_figure_component(abstract, model_id, flex_enabled, client, cwd)`
+  groups all figures of one abstract into a single OpenAI Responses
+  API call with manuscript text as context. In-memory JPEG-q85
+  compression at 1024 px (`compress_image`) + a four-field local
+  quality probe (`src/ohbm2026/image_quality.py`:
+  `laplacian_variance`, `mean_brightness`, `native_max_dim`,
+  `compression_ratio`) populate `local_quality_estimate` on every
+  record. Pydantic `FigureInterpretationResponse` + a fixed
+  `model_quality_estimate` enum validate the response server-side.
+- **Claims**: `src/ohbm2026/stage2_claims.py` —
+  `run_claims_component(abstract, ..., figure_interpretations)`
+  issues a single agentic Responses API call with three function
+  tools registered (`verify_source_quote`, `lookup_eco_code`,
+  `dedupe_check`). The model orchestrates extract → verify →
+  annotate → dedupe internally. Post-response validation drops
+  claims whose source quote isn't a substring of the manuscript
+  OR whose `evidence_eco_codes` include off-vocabulary ECO IDs.
+- **References**: `src/ohbm2026/stage2_references.py` is a thin
+  adapter to the existing `openalex.collect_reference_metadata`
+  async pipeline.
+- **Flex tier**: `src/ohbm2026/flex_tier.py` —
+  `call_with_flex_fallback(...)` wraps each LLM call with a 1-flex +
+  1-standard retry budget; defaults to flex ON; per-component
+  disable flags `--no-flex-figures` / `--no-flex-claims`.
+- **Concurrency**: `enrich_stage._run_component_concurrent`
+  fans out per-abstract work across a `ThreadPoolExecutor`
+  (default 30 in flight). Per-component caps via
+  `--concurrency-figures` / `--concurrency-claims`.
+- **ECO v1 vocabulary** lives at `src/ohbm2026/data/eco_top_codes.json`
+  (committed source). The claims component's `lookup_eco_code`
+  tool draws from it without network access.
+- **Provenance extensions**: per-component `flex_tier_enabled`,
+  `flex_timeout_count`, `tier_fallback_count`,
+  `retry_exhaustion_count`, `prompt_tokens_cached/uncached`,
+  `completion_tokens`, `wall_clock_seconds`,
+  `latency_p50/p95_ms`; top-level `eco_vocabulary_version`.
+
 ## Adding a New Stage
 
 When you write Stage N:

@@ -80,7 +80,7 @@ Optional dependency groups (only install what a workflow needs):
 
 - Embeddings via HF/MiniLM: `uv pip install --python .venv/bin/python sentence-transformers`
 - Projections/UMAP: `uv pip install --python .venv/bin/python plotly umap-learn`
-- Claim extraction: `uv pip install --python .venv/bin/python git+https://github.com/OpenEvalProject/cllm.git`
+- Stage 2 enrichment (figures + claims + references via OpenAI Responses API): `uv pip install --python .venv/bin/python ".[enrich]"`
 - Headless layout review: `uv pip install --python .venv/bin/python ".[review]"` then `playwright install chromium`
 
 ## CLI entrypoint
@@ -112,7 +112,11 @@ All library code lives in `src/ohbm2026/`:
 - `exceptions.py` — typed cross-stage exception hierarchy rooted at `OhbmStageError(RuntimeError)`. Stage 1 subtree: `Stage1Error` → `SchemaContractError`, `CheckpointError`, `FigureFailureError`. Stage 2 subtree: `Stage2Error` → `EnrichmentError`, `CacheVersionError`, `ComponentFailureThresholdError`. `ProvenanceError` is shared (both stages enforce the no-absolute-/-no-`~` path-boundary rule). Re-exports `GraphQLAPIError`.
 - `enrich_stage.py` — **Stage 2 orchestrator** for `ohbmcli enrich-abstracts`; reads the accepted corpus, runs figures + claims + references components with per-component caching keyed by `sha256(input || model_id)`, writes the enriched corpus as SQLite + zlib(json) per row, writes provenance with model identifiers and cache hit/miss counts. Optional Parquet export via `--export-parquet PATH` (lazy-imports `pyarrow`).
 - `enrich_storage.py` — `EnrichedCorpusWriter` SQLite I/O helper for Stage 2 (atomic temp→rename) plus `read_one_by_id` / `iter_enriched` / `corpus_metadata`. Stdlib only.
-- `enrichment.py` — Stage 2 building blocks (markdown conversion, figure-analysis LLM calls, claim extraction via `cllm`). Wrapped by `enrich_stage.py` rather than refactored in this round (per research.md §9).
+- `enrichment.py` — Stage 2 building blocks (markdown conversion, legacy figure-analysis helpers). Wrapped (not refactored) by `enrich_stage.py`. Stage 2.1 replaces the `cllm`-based claim-extraction path with the agentic OpenAI Responses API call in `stage2_claims.py`.
+- `stage2_figures.py`, `stage2_claims.py`, `stage2_references.py` — Stage 2.1 per-component production runners. Figures: per-abstract grouped vision call with local JPEG-q85 compression + a four-field quality probe (`image_quality.py`). Claims: agentic Responses API call with three function tools (`verify_source_quote`, `lookup_eco_code`, `dedupe_check`) returning Pydantic-validated, ECO-annotated claims. References: thin adapter to the existing `openalex.collect_reference_metadata` pipeline.
+- `flex_tier.py` — OpenAI flex-tier retry/fallback helper used by figures + claims (1 flex attempt + 1 standard retry; default timeouts 120s figures / 180s claims).
+- `image_quality.py` — pure Pillow helpers for the local quality probe.
+- `data/eco_top_codes.json` — committed-source ECO v1 controlled vocabulary (9 top-level codes from ECO:0000000).
 - `openalex.py` — reference parsing pipeline: markdown normalization → LLM-assisted splitting (validated lexically against source) → DOI/PMID lookup → OpenAlex title search → Semantic Scholar fallback. Wrapped by Stage 2's references component.
 - `neuroscape.py` — embeddings (MiniLM/HF/OpenAI/Voyage), stage-2 projection (apply published NeuroScape model or train local), semantic community detection, k-sweep clustering benchmarks, UMAP, projection comparison/optimization.
 - `titles.py` — title normalization rules (used by `title-audit`).
@@ -145,8 +149,8 @@ The directory hierarchy is part of the contract — don't write to other roots:
 Current canonical defaults (the UI consumes these):
 
 - Stage 2 single entry: `ohbmcli enrich-abstracts` (`scripts/run_enrich_abstracts.py`). Reads `data/primary/abstracts.json`, writes `data/primary/abstracts_enriched.sqlite` + per-component caches + `data/inputs/abstracts_enrich_provenance__<state-key>.json`. Optional `--export-parquet PATH`.
-- figure-interpretation model: OpenAI (`gpt-4.1-mini`), cached under `data/cache/figure_analysis/<cache-key>.json`.
-- claims-extraction model: `cllm` with OpenAI (`gpt-4o-2024-08-06`), cached under `data/cache/claim_analysis/<cache-key>.json`.
+- figure-interpretation model: OpenAI `gpt-5.4-mini` (flex tier on by default), per-abstract grouped Responses API call with manuscript-text context + in-memory JPEG-q85@1024px compression + a four-field local quality probe. Cached under `data/cache/figure_analysis/<cache-key>.json`.
+- claims-extraction: agentic OpenAI Responses API call with `gpt-5.4-mini` (flex tier on by default) — three function tools (verify_source_quote, lookup_eco_code, dedupe_check); Pydantic-validated structured output annotated with ECO v1 codes. Cached under `data/cache/claim_analysis/<cache-key>.json` (key = `sha256(manuscript || model_id || vocabulary_version)`). The legacy `cllm` zero-shot path was removed in Stage 2.1.
 - reference-resolution strategy: `refs.v1+openai-gpt-5-nano` (multi-stage: LLM-assisted splitting → DOI/PMID → OpenAlex title search → Semantic Scholar fallback), cached under `data/cache/reference_metadata/<cache-key>.json`.
 - embedding bundles in use by the UI: `voyage_stage2_published` (semantic 25-cluster lens) and `minilm_claims` (claims 28-cluster lens via `clustering_benchmark_25_30`).
 - UI projection: `minilm_stage1/umap_title-introduction-methods-results-conclusion.json`.

@@ -41,7 +41,7 @@ Oxford Abstracts source corpus into local, reproducible artifacts:
 - `data/primary/abstracts.json`
 - `data/inputs/assets/`
 - `data/cache/figure_analysis/image_analyses_<backend>__<state-key>.json`
-- `data/cache/claim_analysis/claim_analyses_cllm__<state-key>.json`
+- `data/cache/claim_analysis/<cache-key>.json` (Stage 2.1; key = `sha256(manuscript || claims_model_id || eco_vocabulary_version)`)
 - `data/outputs/experiments/title_audit/title_modifications.json`
 - `data/primary/abstracts_enriched.json`
 - `data/primary/reference_metadata.json`

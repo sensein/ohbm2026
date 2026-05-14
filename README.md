@@ -54,8 +54,9 @@ Core artifacts:
   - downloaded local figure files, restricted to methods/results figures
 - `data/cache/figure_analysis/image_analyses_<backend>__<state-key>.json`
   - resumable figure-analysis cache with direct state-key lookup
-- `data/cache/claim_analysis/claim_analyses_cllm__<state-key>.json`
-  - resumable `cllm` claim-extraction cache with direct state-key lookup
+- `data/cache/claim_analysis/<cache-key>.json`
+  - resumable claim-extraction cache (Stage 2.1: keyed by
+    `sha256(manuscript || claims_model_id || eco_vocabulary_version)`)
 - `data/outputs/experiments/title_audit/title_modifications.json`
   - audit log of cleaned abstract titles versus original raw titles
 - `data/primary/abstracts_enriched.json`
@@ -115,7 +116,7 @@ Optional, depending on which branch of the pipeline you run:
 - `ollama`
 - local Ollama model `qwen3.5:35b`
 - Hugging Face access for downloading sentence-transformer models
-- OpenAI API access for hosted figure analysis, OpenAI embeddings, and `cllm` claim extraction
+- OpenAI API access for Stage 2.1 enrichment (`gpt-5.4-mini` default; figures + agentic claims via the Responses API) and OpenAI embeddings
 - Voyage API access for Voyage embeddings
 - OpenAlex API key for authenticated reference matching
 
@@ -130,7 +131,7 @@ Common keys:
 - `OPENAI_API_KEY`
   - required for Stage 2's `enrich-abstracts` (figure interpretation, claims extraction, OpenAI-backed reference splitting) and for OpenAI embeddings
 - `ANTHROPIC_API_KEY`
-  - optional alternative claims-extraction backend (rare; default is OpenAI via cllm)
+  - currently unused by Stage 2.1 — the default claims path is OpenAI Responses API. Reserved for a future Anthropic alternative.
 - `VOYAGE_API`
   - required for Voyage embeddings
 - `OPENALEX_API`
@@ -152,7 +153,7 @@ Use this as the quick answer to "what do I need before I run this step?"
 | --- | --- | --- | --- |
 | `ohbmcli fetch-abstracts` / `fetch-withdrawn` | `OHBM2026_API` | none | Stage 1 — accepted + withdrawn corpora; authors fetched inline |
 | `ohbmcli refresh-assets` | none | none | Uses the existing local normalized corpus |
-| `ohbmcli enrich-abstracts` | `OPENAI_API_KEY`; optional `OPENALEX_API` (recommended) | `cllm` installed in `.venv` | Stage 2 — figures + claims + references with per-component caches. `--invalidate <component>` forces a component re-run; `--export-parquet PATH` emits a Parquet copy (needs the `parquet` optional extra). |
+| `ohbmcli enrich-abstracts` | `OPENAI_API_KEY`; optional `OPENALEX_API` (recommended) | `.[enrich]` optional extra (openai>=2.0 + Pillow>=10 + pydantic>=2) | Stage 2.1 — figures + agentic claims + references with per-component caches. Default model `gpt-5.4-mini`, flex tier ON by default. Flags: `--invalidate <component>`, `--no-flex-figures` / `--no-flex-claims`, `--concurrency-figures N` / `--concurrency-claims N` (default 30 each), `--figure-model-id` / `--claims-model-id` / `--reference-strategy-id`, `--export-parquet PATH` (needs the `parquet` extra). |
 | `ohbmcli title-audit` | none | none | Reads local normalized corpus only |
 | `ohbmcli embed-minilm` / `embed-hf` | optional `HF_TOKEN` | `sentence-transformers` | `HF_TOKEN` is only needed for gated/private Hub access |
 | `ohbmcli embed-openai` | `OPENAI_API_KEY` | none | Hosted embedding route |
@@ -190,11 +191,14 @@ Interactive projections:
 UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python plotly umap-learn
 ```
 
-Claim extraction:
+Stage 2.1 enrichment (figures + agentic claims via OpenAI Responses API + references):
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python git+https://github.com/OpenEvalProject/cllm.git
+UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python ".[enrich]"
 ```
+
+Installs `openai>=2.0` + `Pillow>=10` + `pydantic>=2`. The legacy
+`cllm` zero-shot claim-extraction path is removed in Stage 2.1.
 
 Headless layout review:
 
