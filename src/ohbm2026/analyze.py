@@ -98,6 +98,20 @@ def unique_strings(values: list[str]) -> list[str]:
     return result
 
 
+def extract_primary_topic(abstract: dict[str, Any]) -> str:
+    for response in abstract.get("responses", []):
+        if str(response.get("question_name") or "").strip().lower() == "primary parent category & sub-category":
+            values = parse_string_list_value(response.get("value"))
+            if values:
+                return values[0]
+    return "Unknown"
+
+
+def load_embedding_inputs(path: Path) -> list[dict[str, Any]]:
+    database = json.loads(path.read_text(encoding="utf-8"))
+    return database.get("abstracts", [])
+
+
 def configure_huggingface_auth(env_path: Path) -> str | None:
     env_values = load_dotenv(env_path)
     token = None
@@ -126,15 +140,6 @@ def extract_raw_keywords(abstract: dict[str, Any]) -> list[str]:
         if str(response.get("question_name") or "").strip().lower() == "keywords":
             return parse_string_list_value(response.get("value"))
     return []
-
-
-def extract_primary_topic(abstract: dict[str, Any]) -> str:
-    for response in abstract.get("responses", []):
-        if str(response.get("question_name") or "").strip().lower() == "primary parent category & sub-category":
-            values = parse_string_list_value(response.get("value"))
-            if values:
-                return values[0]
-    return "Unknown"
 
 
 def load_annotation_lookup(
@@ -283,24 +288,6 @@ def build_embedding_output_name(
     return f"{prefix}_{model_name_slug(model_name)}_{embedding_variant_name(embedding_fields)}"
 
 
-def sentence_transformer_embed(
-    texts: list[str],
-    model_name: str = DEFAULT_HF_MODEL,
-    local_files_only: bool = False,
-) -> list[list[float]]:
-    from sentence_transformers import SentenceTransformer
-
-    model = SentenceTransformer(model_name, local_files_only=local_files_only)
-    embeddings = model.encode(
-        texts,
-        batch_size=64,
-        show_progress_bar=True,
-        convert_to_numpy=True,
-        normalize_embeddings=False,
-    )
-    return embeddings.tolist()
-
-
 def write_embedding_bundle(
     output_dir: Path,
     embedding_name: str,
@@ -379,11 +366,6 @@ def write_neuroscape_manifest(output_path: Path) -> None:
             ),
         },
     )
-
-
-def load_embedding_inputs(path: Path) -> list[dict[str, Any]]:
-    database = json.loads(path.read_text(encoding="utf-8"))
-    return database.get("abstracts", [])
 
 
 def normalize_hidden_dimensions(values: list[int] | tuple[int, ...]) -> tuple[int, int, int]:
@@ -2213,67 +2195,6 @@ def write_stage2_analysis(
     write_semantic_analysis(output_dir, graph, community_result, cluster_summaries)
 
 
-def build_sentence_transformer_parser(
-    description: str,
-    default_model: str,
-) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("--input", default=str(artifacts.PRIMARY_ENRICHED_ABSTRACTS_PATH))
-    parser.add_argument("--title-input", default=str(artifacts.PRIMARY_ABSTRACTS_PATH))
-    parser.add_argument("--embeddings-dir", default=str(artifacts.EMBEDDINGS_ROOT))
-    parser.add_argument("--env-file", default=".env")
-    parser.add_argument("--output-name")
-    parser.add_argument("--fields", nargs="+", default=list(DEFAULT_EMBEDDING_FIELDS))
-    parser.add_argument("--local-files-only", action="store_true")
-    parser.add_argument("--model", default=default_model)
-    return parser
-
-
-def run_sentence_transformer_embedding(args: argparse.Namespace, output_prefix: str) -> int:
-    configure_huggingface_auth(Path(args.env_file))
-    abstracts = load_embedding_inputs(Path(args.input))
-    embedding_fields = normalize_embedding_fields(args.fields)
-    title_lookup = load_title_lookup(Path(args.title_input)) if "title" in embedding_fields else None
-    embedding_texts = build_embedding_texts(abstracts, embedding_fields, title_lookup=title_lookup)
-    output_name = build_embedding_output_name(
-        args.model,
-        embedding_fields,
-        output_name=args.output_name,
-        prefix=output_prefix,
-    )
-    output_dir = Path(args.embeddings_dir) / output_name
-    vectors = sentence_transformer_embed(
-        embedding_texts,
-        model_name=args.model,
-        local_files_only=args.local_files_only,
-    )
-    bundle = write_embedding_bundle(
-        output_dir,
-        output_dir.name,
-        args.model,
-        abstracts,
-        vectors,
-        embedding_fields=embedding_fields,
-    )
-    write_json(output_dir / "neighbors.json", compute_neighbors(bundle["ids"], bundle["matrix"]))
-    print(
-        json.dumps(
-            {
-                "input": args.input,
-                "title_input": args.title_input,
-                "embeddings_dir": str(output_dir),
-                "model_name": args.model,
-                "embedding_fields": embedding_fields,
-                "abstract_count": len(abstracts),
-                "env_file": args.env_file,
-                "local_files_only": args.local_files_only,
-            },
-            indent=2,
-        )
-    )
-    return 0
-
-
 def build_stage2_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Train and apply a local NeuroScape stage-2 model from an existing stage-1 embedding bundle"
@@ -2873,192 +2794,3 @@ from ohbm2026.embed.compose import (  # noqa: E402 -- public re-export
 # them). They are removed in a follow-up cleanup commit; keeping the
 # old definitions during the move makes the refactor diff smaller.
 
-def _legacy_compose_recipe(
-    components: list[str],
-    *,
-    model_key: str,
-    bundles_root: Path | None = None,
-    partial: bool = False,
-    corpus_state_key: str | None = None,
-) -> dict[str, Any]:
-    """Compose a multi-component recipe by averaging per-component bundles.
-
-    Returns a dict matching the legacy stage-1 bundle shape so that
-    existing consumers can switch from `load_stage1_bundle(path)` to
-    `compose_recipe([...], model_key=...)` with minimal code change:
-
-        {
-            "ids": numpy.ndarray[int64, shape=(n_union,)],
-            "matrix": numpy.ndarray[float32, shape=(n_union, dim)],
-            "metadata": {
-                "model_key": str,
-                "components": list[str],
-                "dim": int,
-                "n_union": int,
-                "present_count_per_id": numpy.ndarray[int8, shape=(n_union,)],
-                "missing_per_id": dict[int, list[str]],
-                "source_bundles": list[str],   # bundle paths
-            },
-        }
-
-    Raises FileNotFoundError if any of the requested per-component
-    bundles is missing on disk. Raises NeuroScapeError if the bundles
-    have inconsistent dimensions.
-    """
-    import numpy as np
-
-    if bundles_root is None:
-        bundles_root = Path("data/outputs/embeddings")
-    suffix = "_partial" if partial else ""
-    source_bundles: list[Path] = []
-
-    def _resolve(component: str) -> Path:
-        """Locate the bundle dir for one component.
-
-        Path resolution order:
-        1. State-key keyed: `<root>/<model>/<component>__<state_key>/`
-           (when `corpus_state_key` is given; otherwise pick the
-           lexically-latest match).
-        2. Bare per-model layout: `<root>/<model>/<component>/`.
-        3. Legacy flat layout: `<root>/<model_key>_<component>/`.
-        """
-        model_dir = Path(bundles_root) / model_key
-        if corpus_state_key is not None:
-            candidate = model_dir / f"{component}{suffix}__{corpus_state_key}"
-            if candidate.exists():
-                return candidate
-        # Auto-resolve to the lexically-latest state_key suffix.
-        if model_dir.exists():
-            keyed = sorted(model_dir.glob(f"{component}{suffix}__*"))
-            if keyed:
-                return keyed[-1]
-        bare = model_dir / f"{component}{suffix}"
-        if bare.exists():
-            return bare
-        legacy = Path(bundles_root) / f"{model_key}_{component}{suffix}"
-        if legacy.exists():
-            return legacy
-        return bare  # caller raises FileNotFoundError below
-
-    # First pass: load each per-component bundle's ids + vectors.
-    loaded: list[tuple[str, list[int], "np.ndarray"]] = []
-    for component in components:
-        bundle_dir = _resolve(component)
-        if not bundle_dir.exists():
-            raise FileNotFoundError(
-                f"compose_recipe: component bundle missing for "
-                f"{model_key}/{component} under {bundles_root} "
-                f"(corpus_state_key={corpus_state_key!r})"
-            )
-        ids_path = bundle_dir / "ids.npy"
-        vectors_path = bundle_dir / "vectors.npy"
-        if ids_path.exists() and vectors_path.exists():
-            ids = np.load(ids_path, allow_pickle=False).tolist()
-            vectors = np.load(vectors_path, allow_pickle=False).astype(np.float32, copy=False)
-        else:
-            # Legacy bundle (no ids.npy alongside).
-            meta_path = bundle_dir / "metadata.json"
-            if not meta_path.exists() or not vectors_path.exists():
-                raise FileNotFoundError(
-                    f"compose_recipe: bundle missing required files at {bundle_dir}"
-                )
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            ids = list(meta.get("ids") or [])
-            vectors = np.load(vectors_path, allow_pickle=False).astype(np.float32, copy=False)
-        if vectors.ndim != 2 or vectors.shape[0] != len(ids):
-            raise NeuroScapeError(
-                f"compose_recipe: bundle shape mismatch at {bundle_dir} — "
-                f"ids={len(ids)} vectors={vectors.shape}"
-            )
-        loaded.append((component, ids, vectors))
-        source_bundles.append(bundle_dir)
-
-    # Determine the union of ids + the canonical dim.
-    union_ids: list[int] = sorted({aid for _, ids, _ in loaded for aid in ids})
-    dims = {v.shape[1] for _, _, v in loaded}
-    if len(dims) != 1:
-        raise NeuroScapeError(
-            f"compose_recipe: component bundles have inconsistent dim: {sorted(dims)}"
-        )
-    dim = dims.pop()
-    n = len(union_ids)
-    id_to_row = {aid: row for row, aid in enumerate(union_ids)}
-
-    accum = np.zeros((n, dim), dtype=np.float64)
-    counts = np.zeros((n,), dtype=np.int32)
-    missing_per_id: dict[int, list[str]] = {aid: [] for aid in union_ids}
-
-    for component, ids, vectors in loaded:
-        present_ids = set(ids)
-        # Add contributions from present rows.
-        for aid, vec in zip(ids, vectors):
-            row = id_to_row[aid]
-            accum[row] += vec
-            counts[row] += 1
-        # Record absence for the rest.
-        for aid in union_ids:
-            if aid not in present_ids:
-                missing_per_id[aid].append(component)
-
-    if (counts == 0).any():
-        zero_rows = np.where(counts == 0)[0]
-        raise NeuroScapeError(
-            f"compose_recipe: {len(zero_rows)} abstract(s) had zero component "
-            f"contributions — this should be impossible given union semantics"
-        )
-
-    matrix = (accum / counts[:, None]).astype(np.float32, copy=False)
-    return {
-        "ids": np.asarray(union_ids, dtype=np.int64),
-        "matrix": matrix,
-        "metadata": {
-            "model_key": model_key,
-            "components": list(components),
-            "dim": int(dim),
-            "n_union": int(n),
-            "present_count_per_id": counts.astype(np.int8, copy=False),
-            "missing_per_id": missing_per_id,
-            "source_bundles": [str(b) for b in source_bundles],
-        },
-    }
-
-
-def _legacy_apply_published_stage2_to_matrix(
-    voyage_matrix: Any,
-    *,
-    model_path: Path,
-    device: str | None = None,
-    batch_size: int = 256,
-    dropout: float = 0.05,
-) -> tuple[Any, str]:
-    """Legacy in-tree implementation; kept until follow-up cleanup."""
-    import numpy as np
-    if voyage_matrix.shape[1] != 1024:
-        raise NeuroScapeError(
-            f"published NeuroScape stage-2 expects 1024-dim input; got {voyage_matrix.shape[1]}"
-        )
-    if not Path(model_path).exists():
-        raise NeuroScapeError(
-            f"published NeuroScape stage-2 model not found at {model_path}"
-        )
-    model, torch_device = load_pretrained_stage2_model(
-        Path(model_path),
-        input_dimension=int(voyage_matrix.shape[1]),
-        hidden_dimensions=PUBLISHED_STAGE2_HIDDEN_DIMENSIONS,
-        output_dimension=PUBLISHED_STAGE2_OUTPUT_DIMENSION,
-        dropout=dropout,
-        device=device,
-    )
-    projected = apply_stage2_model(
-        model,
-        np.asarray(voyage_matrix, dtype=np.float32),
-        batch_size=batch_size,
-        device=torch_device,
-    )
-    # Use the model file's hash as a stable version identifier.
-    import hashlib as _hashlib
-    h = _hashlib.sha256(Path(model_path).read_bytes()).hexdigest()[:12]
-    return projected, f"neuroscape-stage2-published@{h}"
-
-
-from ohbm2026 import artifacts
