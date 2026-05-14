@@ -17,7 +17,7 @@ import sys
 import unittest
 from unittest import mock
 
-from ohbm2026 import stage2_claims
+from ohbm2026.enrich import claims as stage2_claims
 from ohbm2026.exceptions import EnrichmentError
 
 
@@ -276,7 +276,7 @@ class AgenticClaimsTests(unittest.TestCase):
         self.assertEqual(summary.claims_count, 0)
 
     def test_cache_key_includes_vocabulary_version(self) -> None:
-        from ohbm2026.stage2_claims import _hash_for_cache
+        from ohbm2026.enrich.claims import _hash_for_cache
         vocab = stage2_claims.load_eco_vocabulary()
         k1 = _hash_for_cache("manuscript", "gpt-5.4-mini", vocab["vocabulary_version"])
         k2 = _hash_for_cache("manuscript", "gpt-5.4-mini", "eco.v2")

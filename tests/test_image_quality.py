@@ -10,7 +10,7 @@ import unittest
 
 from PIL import Image, ImageFilter, ImageDraw
 
-from ohbm2026 import image_quality
+from ohbm2026.enrich import image_quality as image_quality
 
 
 def _synth_sharp(size: int = 200) -> Image.Image:

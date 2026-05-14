@@ -13,7 +13,7 @@ import unittest
 
 import openai
 
-from ohbm2026 import flex_tier
+from ohbm2026.enrich import flex_tier as flex_tier
 from ohbm2026.exceptions import EnrichmentError
 
 

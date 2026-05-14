@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import unittest
 
-from ohbm2026 import stage2_references
+from ohbm2026.enrich import references as stage2_references
 from ohbm2026.exceptions import EnrichmentError
 
 
@@ -57,7 +57,7 @@ class ReferencesWireUpTests(unittest.TestCase):
         )
         # Resolver returned empty; no records produced. Verify the
         # internal cache-key helper:
-        from ohbm2026.stage2_references import _cache_key
+        from ohbm2026.enrich.references import _cache_key
         self.assertNotEqual(_cache_key("ref-alpha", "v1"), _cache_key("ref-alpha", "v2"))
 
     def test_empty_references_block_returns_empty(self) -> None:

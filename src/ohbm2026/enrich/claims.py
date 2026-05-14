@@ -28,7 +28,7 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field
 
-from ohbm2026 import flex_tier
+from ohbm2026.enrich import flex_tier as flex_tier
 from ohbm2026 import enrichment as enrichment_module
 from ohbm2026.exceptions import ContextLengthExceededError, EnrichmentError
 

@@ -17,8 +17,8 @@ class CLITest(unittest.TestCase):
     def test_enrich_abstracts_subcommand_delegates_to_enrich_stage_main(self) -> None:
         # Import the module so we can patch its `.main` attribute. This
         # also serves as a red-phase guard: the test fails on
-        # ImportError if `ohbm2026.enrich_stage` does not yet exist.
-        from ohbm2026 import enrich_stage as enrich_stage_module
+        # ImportError if `ohbm2026.enrich.stage` does not yet exist.
+        from ohbm2026.enrich import stage as enrich_stage_module
 
         with mock.patch.object(enrich_stage_module, "main", return_value=11) as es_main:
             result = cli.main(["enrich-abstracts", "--enriched-output", "out.sqlite"])
@@ -30,7 +30,7 @@ class CLITest(unittest.TestCase):
         """contracts/cli.md enumerates every flag; the subparser must
         accept all of them. We assert by passing each one through and
         checking the delegated argv."""
-        from ohbm2026 import enrich_stage as enrich_stage_module
+        from ohbm2026.enrich import stage as enrich_stage_module
 
         argv = [
             "enrich-abstracts",
@@ -170,13 +170,13 @@ class TestIngestSubcommandRemoved(unittest.TestCase):
 class TestFetchAbstractsSubcommand(unittest.TestCase):
     """T011 — `ohbmcli fetch-abstracts` wires to fetch_stage.main.
 
-    Hermetic safety net: if `ohbm2026.fetch_stage` does not exist
+    Hermetic safety net: if `ohbm2026.fetch.stage` does not exist
     yet (red phase), the test fails on ImportError before any other
     code runs — no live API call possible.
     """
 
     def test_fetch_abstracts_delegates_to_fetch_stage_main(self) -> None:
-        from ohbm2026 import fetch_stage as fetch_stage_module
+        from ohbm2026.fetch import stage as fetch_stage_module
 
         with mock.patch.object(fetch_stage_module, "main", return_value=0) as fs_main:
             result = cli.main(["fetch-abstracts", "--allow-empty"])
@@ -224,7 +224,7 @@ class TestFetchWithdrawnSubcommand(unittest.TestCase):
     automatically appended."""
 
     def test_fetch_withdrawn_appends_corpus_kind_withdrawn(self) -> None:
-        from ohbm2026 import fetch_stage as fetch_stage_module
+        from ohbm2026.fetch import stage as fetch_stage_module
 
         with mock.patch.object(fetch_stage_module, "main", return_value=0) as fs_main:
             result = cli.main(["fetch-withdrawn", "--allow-empty"])
@@ -235,7 +235,7 @@ class TestFetchWithdrawnSubcommand(unittest.TestCase):
     def test_fetch_withdrawn_respects_explicit_corpus_kind(self) -> None:
         # If the operator explicitly passes --corpus-kind, we do NOT
         # override it (defensive — supports future read-only modes).
-        from ohbm2026 import fetch_stage as fetch_stage_module
+        from ohbm2026.fetch import stage as fetch_stage_module
 
         with mock.patch.object(fetch_stage_module, "main", return_value=0) as fs_main:
             result = cli.main(["fetch-withdrawn", "--corpus-kind", "accepted"])

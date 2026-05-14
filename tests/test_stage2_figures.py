@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from PIL import Image, ImageDraw
 
-from ohbm2026 import stage2_figures
+from ohbm2026.enrich import figures as stage2_figures
 from ohbm2026.exceptions import EnrichmentError
 
 

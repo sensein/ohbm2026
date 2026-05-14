@@ -6,14 +6,14 @@ import sys
 from ohbm2026 import (
     artifacts,
     assets,
-    enrich_stage,
     enrichment,
-    fetch_stage,
     neuroscape,
     openalex,
     titles,
     ui,
 )
+from ohbm2026.enrich import stage as enrich_stage
+from ohbm2026.fetch import stage as fetch_stage
 from ohbm2026.embed import stage as embed_stage
 
 

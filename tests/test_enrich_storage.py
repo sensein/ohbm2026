@@ -47,7 +47,7 @@ def _record(abstract_id: int, *, payload_size: int = 800) -> dict[str, object]:
 
 class TestRoundTrip(unittest.TestCase):
     def test_write_then_read_one_round_trips_record_bytes(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -65,7 +65,7 @@ class TestRoundTrip(unittest.TestCase):
 
     def test_zlib_round_trip_at_raw_blob_level(self) -> None:
         """The on-disk payload column is `zlib(json(record))`."""
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -88,7 +88,7 @@ class TestRoundTrip(unittest.TestCase):
             self.assertEqual(decoded["id"], 42)
 
     def test_duplicate_id_in_same_write_raises(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -104,7 +104,7 @@ class TestRoundTrip(unittest.TestCase):
 
 class TestRandomByID(unittest.TestCase):
     def test_random_lookup_returns_correct_payloads_for_100_ids(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         ids = list(range(1, 251))
         with TemporaryDirectory() as tmp:
@@ -126,7 +126,7 @@ class TestRandomByID(unittest.TestCase):
 
     def test_random_lookup_average_latency_is_under_ten_ms(self) -> None:
         """SC-006: under 10 ms random by ID."""
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         ids = list(range(1, 251))
         with TemporaryDirectory() as tmp:
@@ -151,7 +151,7 @@ class TestRandomByID(unittest.TestCase):
         self.assertLess(avg_ms, 10.0, f"random lookup avg {avg_ms:.3f} ms exceeds SC-006 budget")
 
     def test_missing_id_returns_none(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -167,7 +167,7 @@ class TestRandomByID(unittest.TestCase):
 
 class TestSequentialIteration(unittest.TestCase):
     def test_iter_enriched_yields_all_records_in_id_order(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         ids = list(range(1, 51))
         with TemporaryDirectory() as tmp:
@@ -189,7 +189,7 @@ class TestAtomicWrite(unittest.TestCase):
         """The writer writes to a temp path; the rename only happens on
         successful close. An exception inside the with-block MUST leave
         the canonical path absent (or unchanged)."""
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -210,7 +210,7 @@ class TestAtomicWrite(unittest.TestCase):
     def test_pre_existing_canonical_file_is_preserved_on_failure(self) -> None:
         """A pre-existing 'previous good' SQLite file at the canonical
         path MUST remain untouched if the new run aborts."""
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -240,7 +240,7 @@ class TestAtomicWrite(unittest.TestCase):
             )
 
     def test_no_stray_temp_files_after_clean_run(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -257,7 +257,7 @@ class TestAtomicWrite(unittest.TestCase):
 
 class TestCorpusMetadataTable(unittest.TestCase):
     def test_corpus_metadata_seeded_with_version_and_state_key(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         with TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "out.sqlite"
@@ -316,7 +316,7 @@ class TestEnrichedRecordSchema(unittest.TestCase):
             self.assertIsInstance(value, type_map[expected], f"{path} type mismatch")
 
     def test_round_tripped_record_satisfies_contract_schema(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         schema = self._load_contract_schema()
         defs = schema["$defs"]

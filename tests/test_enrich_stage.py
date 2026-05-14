@@ -193,7 +193,7 @@ def _patch_components(
     backend_availability=None,
 ):
     """Patch the three Stage 2.1 per-abstract production seams + the
-    backend-availability classifier on `ohbm2026.enrich_stage`. Each
+    backend-availability classifier on `ohbm2026.enrich.stage`. Each
     runner is a callable that takes a per-abstract signature and
     returns a `(records_list, RunSummary)` tuple.
 
@@ -204,7 +204,7 @@ def _patch_components(
     behavior even though the production path runs references
     corpus-wide before per-abstract dispatch.
     """
-    from ohbm2026 import enrich_stage
+    from ohbm2026.enrich import stage as enrich_stage
 
     patches = []
     if figure_runner is not None:
@@ -310,7 +310,7 @@ class _StackedPatches:
 
 
 def _default_backend_availability():
-    from ohbm2026 import enrich_stage
+    from ohbm2026.enrich import stage as enrich_stage
 
     return enrich_stage.BackendAvailability(
         figures_backend="openai",
@@ -333,7 +333,9 @@ def _ref_count(record: dict) -> int:
 def _default_runners():
     """Standard per-abstract runners that return deterministic synthetic
     `(records_list, RunSummary)` tuples for the new Stage 2.1 seams."""
-    from ohbm2026 import stage2_figures, stage2_claims, stage2_references
+    from ohbm2026.enrich import figures as stage2_figures
+    from ohbm2026.enrich import claims as stage2_claims
+    from ohbm2026.enrich import references as stage2_references
 
     figure_calls = []
     claims_calls = []
@@ -413,11 +415,11 @@ def _seed_assets(tmp: Path, abstracts: list[dict]) -> None:
 
 
 def _run_and_capture(tmp: Path, argv: list[str], env: dict[str, str] | None = None) -> int:
-    from ohbm2026 import enrich_stage
+    from ohbm2026.enrich import stage as enrich_stage
 
     env = env or {"OPENAI_API_KEY": "fake-key", "OPENALEX_API": "fake-alex"}
     with mock.patch.dict(os.environ, env, clear=False):
-        with mock.patch("ohbm2026.enrich_stage.Path.cwd", return_value=tmp):
+        with mock.patch("ohbm2026.enrich.stage.Path.cwd", return_value=tmp):
             return enrich_stage.main(argv)
 
 
@@ -468,7 +470,7 @@ class InputContractTests(_RepoFixture):
     def test_missing_required_api_key_exits_non_zero(self) -> None:
         """A configured backend that needs OPENAI_API_KEY MUST refuse to
         run with no key (Principle VI: fail loudly, no fallback)."""
-        from ohbm2026 import enrich_stage
+        from ohbm2026.enrich import stage as enrich_stage
 
         tmp = self.tmp_repo()
         _write_source_corpus(tmp, [_abstract(1)])
@@ -479,7 +481,7 @@ class InputContractTests(_RepoFixture):
         )
         with _StackedPatches(_patch_components(backend_availability=unavailable)):
             with mock.patch.dict(os.environ, {}, clear=True):
-                with mock.patch("ohbm2026.enrich_stage.Path.cwd", return_value=tmp):
+                with mock.patch("ohbm2026.enrich.stage.Path.cwd", return_value=tmp):
                     rc = enrich_stage.main([])
         self.assertNotEqual(rc, 0)
 
@@ -567,7 +569,7 @@ class OutputContractTests(_RepoFixture):
             rc = _run_and_capture(tmp, [])
         self.assertEqual(rc, 0)
 
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
         meta = enrich_storage.corpus_metadata(tmp / "data" / "primary" / "abstracts_enriched.sqlite")
         self.assertEqual(meta["storage_version"], enrich_storage.STORAGE_VERSION)
         self.assertEqual(meta["corpus_kind"], "accepted")
@@ -735,7 +737,7 @@ class ErrorContractTests(_RepoFixture):
         self.assertEqual(rc, 4)
 
     def test_cache_version_mismatch_exits_seven(self) -> None:
-        from ohbm2026 import enrich_storage
+        from ohbm2026.enrich import storage as enrich_storage
 
         tmp = self.tmp_repo()
         abstracts = [_abstract(1)]
@@ -752,7 +754,7 @@ class ErrorContractTests(_RepoFixture):
         # Approach: write a wildcard entry that the orchestrator
         # tries to load OR provide a config-level cache_version
         # override. We use the latter via a hidden test seam.
-        from ohbm2026 import enrich_stage
+        from ohbm2026.enrich import stage as enrich_stage
 
         fr, cr, rr, *_ = _default_runners()
         patches = _patch_components(
@@ -869,7 +871,7 @@ class DiscoveryContractTests(_RepoFixture):
         self.assertEqual(rc, 5)
 
     def test_classify_backend_availability_returns_typed_dataclass(self) -> None:
-        from ohbm2026 import enrich_stage
+        from ohbm2026.enrich import stage as enrich_stage
 
         result = enrich_stage._classify_backend_availability(
             env={"OPENAI_API_KEY": "k"}, dotenv_path=None,
@@ -1244,7 +1246,7 @@ class ConcurrencyContractTests(_RepoFixture):
         self.assertGreater(max_observed["n"], 1)
 
     def test_default_concurrency_is_30(self) -> None:
-        from ohbm2026 import enrich_stage
+        from ohbm2026.enrich import stage as enrich_stage
         parser = enrich_stage._build_parser()
         args = parser.parse_args([])
         self.assertEqual(args.concurrency_figures, 30)

@@ -22,8 +22,8 @@ from typing import Any, Callable, Iterable, Literal
 
 from pydantic import BaseModel, Field
 
-from ohbm2026 import flex_tier
-from ohbm2026 import image_quality
+from ohbm2026.enrich import flex_tier as flex_tier
+from ohbm2026.enrich import image_quality as image_quality
 from ohbm2026.exceptions import ContextLengthExceededError, EnrichmentError
 
 __all__ = [

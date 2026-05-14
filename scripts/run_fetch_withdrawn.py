@@ -25,7 +25,7 @@ _SRC_DIR = _REPO_ROOT / "src"
 if _SRC_DIR.exists() and str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from ohbm2026.fetch_stage import main  # noqa: E402  (post sys.path setup)
+from ohbm2026.fetch.stage import main  # noqa: E402  (post sys.path setup)
 
 
 if __name__ == "__main__":

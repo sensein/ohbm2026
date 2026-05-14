@@ -39,7 +39,7 @@ from typing import Any
 
 from ohbm2026 import artifacts, assets
 from ohbm2026 import graphql_api as _gql
-from ohbm2026 import schema_diff as _schema_diff
+from ohbm2026.fetch import schema_diff as _schema_diff
 from ohbm2026.exceptions import (
     CheckpointError,
     FigureFailureError,
@@ -478,7 +478,7 @@ def _iter_consumer_modules() -> list[object]:
     out: list[object] = []
     for mod_name in (
         "ohbm2026.assets",
-        "ohbm2026.fetch_stage",
+        "ohbm2026.fetch.stage",
     ):
         try:
             mod = importlib.import_module(mod_name)

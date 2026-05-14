@@ -63,7 +63,7 @@ def _list_of(inner: dict[str, object]) -> dict[str, object]:
 
 class TestFieldIndexEntry(unittest.TestCase):
     def test_dataclass_shape_round_trips_through_json(self) -> None:
-        from ohbm2026.schema_diff import FieldIndexEntry
+        from ohbm2026.fetch.schema_diff import FieldIndexEntry
 
         entry = FieldIndexEntry(
             type_name="Submission",
@@ -84,7 +84,7 @@ class TestFieldIndexEntry(unittest.TestCase):
         self.assertEqual(restored, entry)
 
     def test_entries_are_orderable_by_type_then_field(self) -> None:
-        from ohbm2026.schema_diff import FieldIndexEntry
+        from ohbm2026.fetch.schema_diff import FieldIndexEntry
 
         unsorted = [
             FieldIndexEntry("Z", "b", (), "Int", ""),
@@ -98,7 +98,7 @@ class TestFieldIndexEntry(unittest.TestCase):
 
 class TestFlattenIntrospection(unittest.TestCase):
     def test_unwraps_non_null_and_list_into_wrapping_kinds(self) -> None:
-        from ohbm2026.schema_diff import flatten_introspection
+        from ohbm2026.fetch.schema_diff import flatten_introspection
 
         # Submission.id : NON_NULL Int
         # Submission.authors : NON_NULL LIST NON_NULL Author
@@ -128,7 +128,7 @@ class TestFlattenIntrospection(unittest.TestCase):
         self.assertEqual(as_dict[("Submission", "authors")].named_type, "Author")
 
     def test_output_is_sorted_by_type_then_field(self) -> None:
-        from ohbm2026.schema_diff import flatten_introspection
+        from ohbm2026.fetch.schema_diff import flatten_introspection
 
         raw = _introspection_with(
             {
@@ -148,7 +148,7 @@ class TestFlattenIntrospection(unittest.TestCase):
     def test_skips_introspection_meta_types(self) -> None:
         # Real introspection responses include __Schema, __Type, etc.
         # Those are GraphQL machinery, not corpus shape.
-        from ohbm2026.schema_diff import flatten_introspection
+        from ohbm2026.fetch.schema_diff import flatten_introspection
 
         raw = {
             "types": [
@@ -172,7 +172,7 @@ class TestFlattenIntrospection(unittest.TestCase):
 
 class TestHashFieldIndex(unittest.TestCase):
     def test_is_deterministic_across_calls(self) -> None:
-        from ohbm2026.schema_diff import FieldIndexEntry, hash_field_index
+        from ohbm2026.fetch.schema_diff import FieldIndexEntry, hash_field_index
 
         entries = [
             FieldIndexEntry("Submission", "id", ("NON_NULL",), "Int", ""),
@@ -181,7 +181,7 @@ class TestHashFieldIndex(unittest.TestCase):
         self.assertEqual(hash_field_index(entries), hash_field_index(list(entries)))
 
     def test_is_invariant_to_input_order(self) -> None:
-        from ohbm2026.schema_diff import FieldIndexEntry, hash_field_index
+        from ohbm2026.fetch.schema_diff import FieldIndexEntry, hash_field_index
 
         forward = [
             FieldIndexEntry("Submission", "id", ("NON_NULL",), "Int", ""),
@@ -191,7 +191,7 @@ class TestHashFieldIndex(unittest.TestCase):
         self.assertEqual(hash_field_index(forward), hash_field_index(reverse))
 
     def test_changes_when_a_field_changes_named_type(self) -> None:
-        from ohbm2026.schema_diff import FieldIndexEntry, hash_field_index
+        from ohbm2026.fetch.schema_diff import FieldIndexEntry, hash_field_index
 
         original = [FieldIndexEntry("Submission", "id", ("NON_NULL",), "Int", "")]
         renamed = [FieldIndexEntry("Submission", "id", ("NON_NULL",), "String", "")]
@@ -200,7 +200,7 @@ class TestHashFieldIndex(unittest.TestCase):
 
 class TestParseHardSetFromQueries(unittest.TestCase):
     def test_picks_up_top_level_query_fields(self) -> None:
-        from ohbm2026.schema_diff import parse_hard_set_from_queries
+        from ohbm2026.fetch.schema_diff import parse_hard_set_from_queries
 
         query = textwrap.dedent(
             """
@@ -222,7 +222,7 @@ class TestParseHardSetFromQueries(unittest.TestCase):
         self.assertIn(("Query", "submissions"), hard)
 
     def test_picks_up_nested_selection_fields(self) -> None:
-        from ohbm2026.schema_diff import parse_hard_set_from_queries
+        from ohbm2026.fetch.schema_diff import parse_hard_set_from_queries
 
         query = textwrap.dedent(
             """
@@ -250,7 +250,7 @@ class TestParseHardSetFromQueries(unittest.TestCase):
         self.assertIn(("affiliations", "institution"), hard)
 
     def test_unions_across_multiple_query_texts(self) -> None:
-        from ohbm2026.schema_diff import parse_hard_set_from_queries
+        from ohbm2026.fetch.schema_diff import parse_hard_set_from_queries
 
         q1 = "query a { events { id } }"
         q2 = "query b { submissions { id } }"
@@ -259,7 +259,7 @@ class TestParseHardSetFromQueries(unittest.TestCase):
         self.assertIn(("Query", "submissions"), hard)
 
     def test_ignores_argument_blocks(self) -> None:
-        from ohbm2026.schema_diff import parse_hard_set_from_queries
+        from ohbm2026.fetch.schema_diff import parse_hard_set_from_queries
 
         # Arguments like `where: {complete: {_eq: true}}` MUST NOT be
         # parsed as selection set children.
@@ -282,7 +282,7 @@ class TestParseHardSetFromQueries(unittest.TestCase):
 
 class TestCollectSoftContractFields(unittest.TestCase):
     def test_unions_consumed_abstract_fields_across_provided_modules(self) -> None:
-        from ohbm2026.schema_diff import collect_soft_contract_fields
+        from ohbm2026.fetch.schema_diff import collect_soft_contract_fields
 
         mod_a = types.SimpleNamespace(
             __name__="ohbm2026.fake_a",
@@ -299,7 +299,7 @@ class TestCollectSoftContractFields(unittest.TestCase):
         self.assertEqual(soft[("Author", "id")], ["ohbm2026.fake_b"])
 
     def test_modules_without_consumed_abstract_fields_are_skipped(self) -> None:
-        from ohbm2026.schema_diff import collect_soft_contract_fields
+        from ohbm2026.fetch.schema_diff import collect_soft_contract_fields
 
         mod_a = types.SimpleNamespace(
             __name__="ohbm2026.fake_a",
@@ -314,12 +314,12 @@ class TestCollectSoftContractFields(unittest.TestCase):
 
 class TestCompare(unittest.TestCase):
     def _entry(self, type_name: str, field_name: str, named_type: str = "Int") -> object:
-        from ohbm2026.schema_diff import FieldIndexEntry
+        from ohbm2026.fetch.schema_diff import FieldIndexEntry
 
         return FieldIndexEntry(type_name, field_name, (), named_type, "")
 
     def test_removed_field_in_hard_set_classifies_as_hard(self) -> None:
-        from ohbm2026.schema_diff import compare
+        from ohbm2026.fetch.schema_diff import compare
 
         previous = [self._entry("Submission", "id"), self._entry("Submission", "title", "TitleResponse")]
         current = [self._entry("Submission", "id")]
@@ -333,7 +333,7 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(title_diff[0].change_kind, "removed")
 
     def test_removed_field_only_in_soft_set_classifies_as_soft(self) -> None:
-        from ohbm2026.schema_diff import compare
+        from ohbm2026.fetch.schema_diff import compare
 
         previous = [self._entry("Submission", "extras", "String")]
         current: list[object] = []
@@ -346,7 +346,7 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(diffs[0].downstream_consumers, ["ohbm2026.future_consumer"])
 
     def test_removed_field_in_neither_set_classifies_as_informational(self) -> None:
-        from ohbm2026.schema_diff import compare
+        from ohbm2026.fetch.schema_diff import compare
 
         previous = [self._entry("Submission", "unused", "String")]
         current: list[object] = []
@@ -359,7 +359,7 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(diffs[0].downstream_consumers, [])
 
     def test_hard_takes_precedence_when_field_is_also_in_soft_set(self) -> None:
-        from ohbm2026.schema_diff import compare
+        from ohbm2026.fetch.schema_diff import compare
 
         # Field is in BOTH sets. Expected: HARD tier; downstream_consumers
         # still populated so operators see both signals (edge case in
@@ -375,7 +375,7 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(diffs[0].downstream_consumers, ["ohbm2026.enrichment"])
 
     def test_type_change_on_hard_field_records_previous_and_current(self) -> None:
-        from ohbm2026.schema_diff import compare
+        from ohbm2026.fetch.schema_diff import compare
 
         previous = [self._entry("Submission", "id", "Int")]
         current = [self._entry("Submission", "id", "String")]
@@ -394,7 +394,7 @@ class TestCompare(unittest.TestCase):
         self.assertEqual(diffs[0].current["named_type"], "String")
 
     def test_added_field_classified_against_hard_then_soft(self) -> None:
-        from ohbm2026.schema_diff import compare
+        from ohbm2026.fetch.schema_diff import compare
 
         previous: list[object] = []
         current = [
