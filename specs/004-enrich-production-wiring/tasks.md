@@ -118,7 +118,7 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 ### Tests for User Story 2 (red phase first)
 
-- [ ] T024 [P] [US2] Add `FlexTierContractTests` class to `tests/test_enrich_stage.py` (4 tests):
+- [X] T024 [P] [US2] Add `FlexTierContractTests` class to `tests/test_enrich_stage.py` (4 tests):
   - `test_flex_timeout_falls_back_to_standard_tier` — patch the figure runner to raise a timeout on first attempt, succeed on second; assert success + provenance `tier_fallback_count==1`.
   - `test_no_flex_figures_flag_disables_flex` — pass `--no-flex-figures`; assert provenance `components[figures].flex_tier_enabled==false`.
   - `test_retry_exhaustion_raises_component_failure` — patch runner to always raise timeout; assert orchestrator exits with `ComponentFailureThresholdError` once threshold exceeded; assert SQLite NOT written.
@@ -126,11 +126,11 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 ### Implementation for User Story 2
 
-- [ ] T025 [US2] Augment `tests/test_flex_tier.py` (started in T016) with: timeout-on-first-call retries-on-standard tests, retry-budget-exhausted test, tier-counter-increment test, latency-measurement test. Verify `FlexTierResult` carries correct `tier_used` / `flex_timed_out` / `latency_ms`.
-- [ ] T026 [US2] Extend `enrich_stage._build_parser` to add `--no-flex-figures` and `--no-flex-claims` boolean flags (defaults to flex ON, flag negates) AND `--concurrency-figures INT` / `--concurrency-claims INT` (default 30 each, per FR-018). Thread the flex setting AND the concurrency cap through to the per-component runners (concurrency consumed by `_run_component_concurrent` from T020a). Verify CLI tests in `tests/test_cli.py` still pass.
-- [ ] T027 [US2] Extend `stage2_figures.run_figure_component` and `stage2_claims.run_claims_component` to accept the `flex_enabled` parameter and forward it to `flex_tier.call_with_flex_fallback`. Per-call tier-counter increments accumulate into the per-component `RunSummary`.
-- [ ] T028 [US2] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_flex_tier tests.test_enrich_stage.FlexTierContractTests -v` and confirm green.
-- [ ] T028a [US2] Resume-from-interruption check (Principle III): run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ResumabilityContractTests -v` (inherited from Stage 2) AND add one new test `test_production_wiring_preserves_caches_across_interruption` that (a) starts a run, (b) raises mid-loop after some cache entries have been written, (c) re-invokes `main()` and asserts the second run reuses the populated cache entries (zero LLM calls for already-cached abstracts). Confirms production wiring did not break Stage 2's resume guarantee.
+- [X] T025 [US2] Augment `tests/test_flex_tier.py` (started in T016) with: timeout-on-first-call retries-on-standard tests, retry-budget-exhausted test, tier-counter-increment test, latency-measurement test. Verify `FlexTierResult` carries correct `tier_used` / `flex_timed_out` / `latency_ms`.
+- [X] T026 [US2] Extend `enrich_stage._build_parser` to add `--no-flex-figures` and `--no-flex-claims` boolean flags (defaults to flex ON, flag negates) AND `--concurrency-figures INT` / `--concurrency-claims INT` (default 30 each, per FR-018). Thread the flex setting AND the concurrency cap through to the per-component runners (concurrency consumed by `_run_component_concurrent` from T020a). Verify CLI tests in `tests/test_cli.py` still pass.
+- [X] T027 [US2] Extend `stage2_figures.run_figure_component` and `stage2_claims.run_claims_component` to accept the `flex_enabled` parameter and forward it to `flex_tier.call_with_flex_fallback`. Per-call tier-counter increments accumulate into the per-component `RunSummary`.
+- [X] T028 [US2] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_flex_tier tests.test_enrich_stage.FlexTierContractTests -v` and confirm green.
+- [X] T028a [US2] Resume-from-interruption check (Principle III): run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ResumabilityContractTests -v` (inherited from Stage 2) AND add one new test `test_production_wiring_preserves_caches_across_interruption` that (a) starts a run, (b) raises mid-loop after some cache entries have been written, (c) re-invokes `main()` and asserts the second run reuses the populated cache entries (zero LLM calls for already-cached abstracts). Confirms production wiring did not break Stage 2's resume guarantee.
 
 **Checkpoint**: Flex-tier behavior + resumability both verified. SC-009, SC-010, and Stage 2 SC-009 (resume) all green.
 
@@ -144,16 +144,16 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 ### Tests for User Story 3 (red phase first)
 
-- [ ] T029 [P] [US3] Add `ModelOverrideTests` class to `tests/test_enrich_stage.py` (3 tests):
+- [X] T029 [P] [US3] Add `ModelOverrideTests` class to `tests/test_enrich_stage.py` (3 tests):
   - `test_default_model_is_gpt_5_4_mini` — clean run; assert provenance's figures + claims components both list `model_id == "gpt-5.4-mini"`.
   - `test_claims_model_override_invalidates_only_claims_cache` — baseline run, then re-run with `--claims-model-id gpt-5.4`; assert figures+references caches 100% hit, claims cache 100% miss.
   - `test_figures_model_override_invalidates_only_figures_cache` — baseline run, then re-run with `--figure-model-id gpt-4.1-mini`; assert claims+references caches 100% hit, figures cache 100% miss.
 
 ### Implementation for User Story 3
 
-- [ ] T030 [US3] Verify that `enrich_stage._build_parser` already exposes `--figure-model-id` / `--claims-model-id` / `--reference-strategy-id` (inherited from Stage 2). Update the defaults to `gpt-5.4-mini` for figures + claims; reference-strategy default stays `refs.v1+openai-gpt-5-nano` for v1 (operator-overridable). Verify the model id is part of every cache key computation in the per-component runners.
-- [ ] T031 [US3] Update `enrich_stage._compute_state_key` (or its existing equivalent) to include the per-component model ids in the input fingerprint, so a model change shifts the state-key (which gates whether a previous enriched corpus is interpreted as "delta-vs-previous" vs "fresh").
-- [ ] T032 [US3] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ModelOverrideTests -v` and confirm green.
+- [X] T030 [US3] Verify that `enrich_stage._build_parser` already exposes `--figure-model-id` / `--claims-model-id` / `--reference-strategy-id` (inherited from Stage 2). Update the defaults to `gpt-5.4-mini` for figures + claims; reference-strategy default stays `refs.v1+openai-gpt-5-nano` for v1 (operator-overridable). Verify the model id is part of every cache key computation in the per-component runners.
+- [X] T031 [US3] Update `enrich_stage._compute_state_key` (or its existing equivalent) to include the per-component model ids in the input fingerprint, so a model change shifts the state-key (which gates whether a previous enriched corpus is interpreted as "delta-vs-previous" vs "fresh").
+- [X] T032 [US3] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrich_stage.ModelOverrideTests -v` and confirm green.
 
 **Checkpoint**: Per-component model override works; cache invalidation matrix verified.
 
@@ -167,19 +167,19 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 ### Tests for User Story 4 (red phase first)
 
-- [ ] T033 [P] [US4] Create `tests/test_stage2_claims.py` with the following test classes:
+- [X] T033 [P] [US4] Create `tests/test_stage2_claims.py` with the following test classes:
   - `FunctionToolHandlerTests` (pure-function tests, no SDK): `test_verify_source_quote_finds_exact_match`, `test_verify_source_quote_returns_candidates_on_miss`, `test_lookup_eco_code_matches_label`, `test_lookup_eco_code_matches_definition`, `test_dedupe_check_jaccard_threshold`.
   - `AgenticClaimsExtractionTests`: `test_known_exact_substring_yields_verified_claim` (manuscript contains "we observed a 23% decrease in BOLD signal" verbatim; assert one claim with `source_quote_verified=true` and at least one ECO code), `test_off_vocabulary_eco_code_drops_claim` (synthetic response includes ECO:9999999; assert dropped + typed warning in stderr), `test_unverifiable_quote_with_no_candidate_drops_claim` (synthetic claim with quote not in manuscript; assert dropped), `test_empty_claims_list_is_legitimate` (abstract with no factual content; assert empty list, no failure), `test_idempotent_extraction` (run twice with same fixture; assert cache hit, zero second-call invocations).
   - `ClaimsResponseSchemaTests`: `test_response_validates_against_schema` (round-trip a synthetic response through Pydantic + the contract JSON schema), `test_missing_required_field_raises` (synthetic response missing `evidence_eco_codes`; assert `EnrichmentError`).
-- [ ] T034 [P] [US4] Patch `client.responses.parse` at the `stage2_claims` import seam. Test fixtures use a `_fake_parsed_response(claims, tool_call_log, usage)` helper that constructs an SDK-shape object with `.output_parsed`, `.usage`, etc.
+- [X] T034 [P] [US4] Patch `client.responses.parse` at the `stage2_claims` import seam. Test fixtures use a `_fake_parsed_response(claims, tool_call_log, usage)` helper that constructs an SDK-shape object with `.output_parsed`, `.usage`, etc.
 
 ### Implementation for User Story 4
 
-- [ ] T035 [US4] Implement the function-tool handlers in `stage2_claims.py` (signatures from T021, full bodies here). `_verify_source_quote_handler` splits manuscript on `[.!?]` for sentence-list candidates. `_lookup_eco_code_handler` reads the embedded vocabulary once at module load. `_dedupe_check_handler` uses `set(word.lower() for word in re.findall(r'\w+', text))` for tokens.
-- [ ] T036 [US4] Implement the Responses API call wiring in `stage2_claims.run_claims_component`: system prompt instructs the model on the four-step extract → verify → annotate → dedupe loop; user message provides manuscript + figure interpretations + ECO vocabulary primer (the 9 codes' labels + definitions, ~600 tokens; eligible for prefix caching after abstract #1); `tools=[verify_source_quote, lookup_eco_code, dedupe_check]`; `text_format=ClaimsResponse` Pydantic model.
-- [ ] T037 [US4] Post-response validation in `stage2_claims.run_claims_component`: for each returned claim, (a) re-verify `source_quote in manuscript` (don't trust the model's `source_quote_verified` field alone — verify independently), (b) confirm every `evidence_eco_codes` entry is in the embedded vocabulary's `codes[].eco_id` set, (c) drop claims that fail either check; log typed warnings naming the offending claim's first 80 chars.
-- [ ] T038 [US4] Cache-key derivation for claims includes the ECO vocabulary version: `cache_key = sha256(manuscript_md || model_id || vocabulary_version)`. Changing the vocabulary version (v1 → v2 later) naturally invalidates claims caches.
-- [ ] T039 [US4] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_stage2_claims -v` and confirm green.
+- [X] T035 [US4] Implement the function-tool handlers in `stage2_claims.py` (signatures from T021, full bodies here). `_verify_source_quote_handler` splits manuscript on `[.!?]` for sentence-list candidates. `_lookup_eco_code_handler` reads the embedded vocabulary once at module load. `_dedupe_check_handler` uses `set(word.lower() for word in re.findall(r'\w+', text))` for tokens.
+- [X] T036 [US4] Implement the Responses API call wiring in `stage2_claims.run_claims_component`: system prompt instructs the model on the four-step extract → verify → annotate → dedupe loop; user message provides manuscript + figure interpretations + ECO vocabulary primer (the 9 codes' labels + definitions, ~600 tokens; eligible for prefix caching after abstract #1); `tools=[verify_source_quote, lookup_eco_code, dedupe_check]`; `text_format=ClaimsResponse` Pydantic model.
+- [X] T037 [US4] Post-response validation in `stage2_claims.run_claims_component`: for each returned claim, (a) re-verify `source_quote in manuscript` (don't trust the model's `source_quote_verified` field alone — verify independently), (b) confirm every `evidence_eco_codes` entry is in the embedded vocabulary's `codes[].eco_id` set, (c) drop claims that fail either check; log typed warnings naming the offending claim's first 80 chars.
+- [X] T038 [US4] Cache-key derivation for claims includes the ECO vocabulary version: `cache_key = sha256(manuscript_md || model_id || vocabulary_version)`. Changing the vocabulary version (v1 → v2 later) naturally invalidates claims caches.
+- [X] T039 [US4] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_stage2_claims -v` and confirm green.
 
 **Checkpoint**: Agentic claims component is functional. SC-007 (95% verified) and SC-008 (100% ECO-annotated) verified against synthetic fixtures.
 
@@ -193,7 +193,7 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 ### Tests for User Story 5 (red phase first)
 
-- [ ] T040 [P] [US5] Create `tests/test_stage2_figures.py` with the following test classes:
+- [X] T040 [P] [US5] Create `tests/test_stage2_figures.py` with the following test classes:
   - `LocalCompressionTests`: `test_compresses_3mb_png_to_under_300kb` (use Pillow to synthesize a 3 MB random-pattern PNG; assert post-compression bytes < 300 KB), `test_canonical_png_unchanged_after_run` (snapshot PNG bytes pre- and post-run; assert byte-identical), `test_long_side_capped_at_1024_px` (synthesize a 4000×3000 PNG; assert compressed image dimensions ≤ 1024 long side).
   - `LocalQualityProbeTests`: `test_local_quality_estimate_present_on_every_figure`, `test_laplacian_variance_low_on_blurred_input`, `test_brightness_in_documented_range`, `test_compression_ratio_in_0_to_1`.
   - `PerAbstractGroupingTests`: `test_single_call_per_abstract` (synthetic abstract with 2 figures; assert exactly 1 call to `client.responses.parse`), `test_manuscript_context_attached` (assert the request payload includes the manuscript text), `test_figure_index_round_trips` (synthetic 3-figure abstract; assert response items in 1-based index order match request order).
@@ -201,10 +201,10 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 ### Implementation for User Story 5
 
-- [ ] T041 [US5] Implement `stage2_figures.run_figure_component`'s compression path: read canonical PNG bytes (no write-back), open via Pillow, resize via `Image.LANCZOS` with long side capped (default 1024), encode JPEG q85 to `io.BytesIO`, base64-encode for OpenAI vision input. The original PIL Image and the original PNG bytes flow into the local quality probe BEFORE encoding so the probe sees pre-compression brightness/sharpness.
-- [ ] T042 [US5] Implement local-quality assembly in `stage2_figures.run_figure_component`: populate the four-field `local_quality_estimate` dict per FR-007 / data-model.md §2. Add the dict to every `FigureInterpretation` record before persisting to cache.
-- [ ] T043 [US5] Validate model's `model_quality_estimate` enum: the Pydantic `FigureInterpretationItem.model_quality_estimate` is `Literal[...]`, so off-enum values raise a Pydantic validation error which the runner re-raises as `EnrichmentError`. Add an integration assertion: a synthetic response with an off-enum value causes the run to count a per-figure failure (consistent with threshold logic).
-- [ ] T044 [US5] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_stage2_figures -v` and confirm green.
+- [X] T041 [US5] Implement `stage2_figures.run_figure_component`'s compression path: read canonical PNG bytes (no write-back), open via Pillow, resize via `Image.LANCZOS` with long side capped (default 1024), encode JPEG q85 to `io.BytesIO`, base64-encode for OpenAI vision input. The original PIL Image and the original PNG bytes flow into the local quality probe BEFORE encoding so the probe sees pre-compression brightness/sharpness.
+- [X] T042 [US5] Implement local-quality assembly in `stage2_figures.run_figure_component`: populate the four-field `local_quality_estimate` dict per FR-007 / data-model.md §2. Add the dict to every `FigureInterpretation` record before persisting to cache.
+- [X] T043 [US5] Validate model's `model_quality_estimate` enum: the Pydantic `FigureInterpretationItem.model_quality_estimate` is `Literal[...]`, so off-enum values raise a Pydantic validation error which the runner re-raises as `EnrichmentError`. Add an integration assertion: a synthetic response with an off-enum value causes the run to count a per-figure failure (consistent with threshold logic).
+- [X] T044 [US5] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_stage2_figures -v` and confirm green.
 
 **Checkpoint**: Image compression + quality probe verified. SC-006 (95% records carry both estimates), SC-011 (PNGs byte-identical before/after) verified.
 
@@ -218,14 +218,14 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 ### Tests for User Story 6 (red phase first)
 
-- [ ] T045 [P] [US6] Create `tests/test_stage2_references.py` with:
+- [X] T045 [P] [US6] Create `tests/test_stage2_references.py` with:
   - `ReferencesWireUpTests`: `test_run_references_component_calls_openalex_collect` (patch `openalex.collect_reference_metadata`; assert called once per abstract with the abstract's reference block + strategy_id), `test_returns_resolution_records_matching_stage2_schema`, `test_strategy_id_in_cache_key` (assert cache key derivation includes the strategy_id), `test_per_reference_failures_recorded` (synthetic resolution result with some `resolution_status="unresolved"`; assert recorded but does not abort the abstract).
 
 ### Implementation for User Story 6
 
-- [ ] T046 [US6] Verify `openalex.collect_reference_metadata` (or its async equivalent) exists and exposes a stable signature taking `(reference_text, strategy_id, **opts)`. If the existing entry is async-only, wrap it with `asyncio.run(...)` in `stage2_references.run_references_component` so the orchestrator's synchronous loop can call it; the orchestrator-level concurrency-30 wraps multiple of these calls in parallel — the inner async pool handles per-reference parallelism for the SAME abstract.
-- [ ] T047 [US6] Map the openalex resolution-result records to the Stage 2 `ReferenceResolution` schema (raw_reference, doi, pmid, openalex_id, title, authors, year, resolution_status, resolution_source, strategy_id, cache_key). Fields the openalex result already provides flow straight through; the `cache_key` is computed by the runner from `sha256(raw_reference || strategy_id)`.
-- [ ] T048 [US6] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_stage2_references -v` and confirm green.
+- [X] T046 [US6] Verify `openalex.collect_reference_metadata` (or its async equivalent) exists and exposes a stable signature taking `(reference_text, strategy_id, **opts)`. If the existing entry is async-only, wrap it with `asyncio.run(...)` in `stage2_references.run_references_component` so the orchestrator's synchronous loop can call it; the orchestrator-level concurrency-30 wraps multiple of these calls in parallel — the inner async pool handles per-reference parallelism for the SAME abstract.
+- [X] T047 [US6] Map the openalex resolution-result records to the Stage 2 `ReferenceResolution` schema (raw_reference, doi, pmid, openalex_id, title, authors, year, resolution_status, resolution_source, strategy_id, cache_key). Fields the openalex result already provides flow straight through; the `cache_key` is computed by the runner from `sha256(raw_reference || strategy_id)`.
+- [X] T048 [US6] Run `PYTHONPATH=src .venv/bin/python -m unittest tests.test_stage2_references -v` and confirm green.
 
 **Checkpoint**: References component is wired. P2 stories complete.
 
