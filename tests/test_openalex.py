@@ -221,6 +221,96 @@ class OpenAlexHelpersTest(unittest.TestCase):
         )
         self.assertGreater(score, 0.9)
 
+    def test_promote_openalex_doi_lifts_doi_to_top_level(self) -> None:
+        # Title-matched references previously kept doi=None at the top
+        # level even when the OpenAlex work record carried a valid DOI
+        # (the DOI lived only in `reference["openalex"]["doi"]`).
+        # Downstream consumers (SQLite, UI) read the top-level field,
+        # so this is a real coverage hole — fix is to promote.
+        from ohbm2026.openalex import _promote_openalex_doi
+        reference = {
+            "doi": None,
+            "match_method": "title",
+            "openalex": {
+                "openalex_id": "https://openalex.org/W123",
+                "doi": "10.1000/promoted",
+            },
+        }
+        _promote_openalex_doi(reference)
+        self.assertEqual(reference["doi"], "10.1000/promoted")
+
+    def test_promote_openalex_doi_preserves_existing_top_level_doi(self) -> None:
+        # Idempotent: never overwrite a DOI the resolver already set
+        # (e.g., from a DOI-match path or LLM splitter).
+        from ohbm2026.openalex import _promote_openalex_doi
+        reference = {
+            "doi": "10.1000/existing",
+            "openalex": {"doi": "10.1000/openalex-says-otherwise"},
+        }
+        _promote_openalex_doi(reference)
+        self.assertEqual(reference["doi"], "10.1000/existing")
+
+    def test_promote_openalex_doi_no_op_when_openalex_has_no_doi(self) -> None:
+        from ohbm2026.openalex import _promote_openalex_doi
+        reference = {"doi": None, "openalex": {"openalex_id": "https://openalex.org/W1"}}
+        _promote_openalex_doi(reference)
+        self.assertIsNone(reference["doi"])
+
+    def test_promote_openalex_doi_marks_doi_lookup_completed(self) -> None:
+        # When the title-match supplied the canonical OpenAlex record
+        # AND it has a DOI, the resolver has the authoritative
+        # answer — a follow-up DOI batch-lookup would be redundant.
+        # Mark the flag so subsequent phases skip the redundant call.
+        from ohbm2026.openalex import _promote_openalex_doi
+        reference = {
+            "doi": None,
+            "doi_lookup_completed": False,
+            "pmid_lookup_completed": False,
+            "match_method": "title",
+            "openalex": {
+                "openalex_id": "https://openalex.org/W1",
+                "doi": "10.1000/x",
+                "pmid": None,
+            },
+        }
+        _promote_openalex_doi(reference)
+        self.assertEqual(reference["doi"], "10.1000/x")
+        self.assertTrue(reference["doi_lookup_completed"])
+        # No PMID in the work record → PMID flag stays False.
+        self.assertFalse(reference["pmid_lookup_completed"])
+
+    def test_promote_openalex_doi_lifts_pmid_and_marks_pmid_completed(self) -> None:
+        from ohbm2026.openalex import _promote_openalex_doi
+        reference = {
+            "doi": None,
+            "pmid": None,
+            "doi_lookup_completed": False,
+            "pmid_lookup_completed": False,
+            "match_method": "title",
+            "openalex": {"doi": "10.1000/x", "pmid": "12345678"},
+        }
+        _promote_openalex_doi(reference)
+        self.assertEqual(reference["doi"], "10.1000/x")
+        self.assertEqual(reference["pmid"], "12345678")
+        self.assertTrue(reference["doi_lookup_completed"])
+        self.assertTrue(reference["pmid_lookup_completed"])
+
+    def test_promote_openalex_doi_leaves_flags_untouched_when_no_canonical_ids(self) -> None:
+        # If OpenAlex returned neither a DOI nor a PMID, we DID NOT
+        # get a canonical answer — the lookup flags stay False so
+        # later phases can still attempt their own resolution.
+        from ohbm2026.openalex import _promote_openalex_doi
+        reference = {
+            "doi": None,
+            "pmid": None,
+            "doi_lookup_completed": False,
+            "pmid_lookup_completed": False,
+            "openalex": {"openalex_id": "https://openalex.org/W1"},
+        }
+        _promote_openalex_doi(reference)
+        self.assertFalse(reference["doi_lookup_completed"])
+        self.assertFalse(reference["pmid_lookup_completed"])
+
     def test_normalize_openalex_work_extracts_needed_fields(self) -> None:
         work = {
             "id": "https://openalex.org/W123",
