@@ -460,7 +460,7 @@ Canonical components (FR-006):
 The opt-in `inference_claims` component covers ~12% of abstracts and
 requires `--allow-partial inference_claims`.
 
-Bundles land at `data/outputs/experiments/embeddings/<model_key>_<component>/`
+Bundles land at `data/outputs/embeddings/<model_key>/<component>/`
 with `vectors.npy`, `ids.npy`, `metadata.json`, and `provenance.json`.
 
 Behavior:
@@ -471,7 +471,7 @@ Behavior:
 - Long-input defaults: `chunk_mean_pool` for MiniLM / PubMedBERT,
   `truncate_end` for Voyage / OpenAI (FR-010).
 - Per-bundle JSON-on-stdout + a run-level rollup at the end.
-- Provenance at `data/inputs/embeddings_matrix_provenance__<state-key>.json`.
+- Provenance at `data/provenance/embeddings_matrix_provenance__<state-key>.json`.
 
 Single-model subcommands (`embed-voyage`, `embed-minilm`, `embed-openai`,
 `embed-hf`) remain available for debugging individual bundles.
