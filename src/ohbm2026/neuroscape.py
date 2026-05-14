@@ -3073,4 +3073,185 @@ def manifest_main(argv: list[str] | None = None) -> int:
     write_neuroscape_manifest(Path(args.output))
     print(json.dumps({"output": args.output}, indent=2))
     return 0
+
+
+# ---------- Stage 3 composition helper ----------
+#
+# Downstream tools (cluster-benchmark, UMAP plotter, projection
+# comparator, UI export) previously consumed multi-component bundles
+# like `voyage_stage1` or `minilm_claims`. Stage 3 produces per-
+# component bundles only; `compose_recipe` re-creates the multi-
+# component view at read time by mean-pooling the relevant
+# per-component vectors per abstract.
+#
+# Contract (Stage 3 data-model.md §5):
+#   - components: list of component names (e.g. ["title", "results"]).
+#   - For each abstract present in AT LEAST ONE of the listed bundles,
+#     compute the mean of its component vectors over the components
+#     it has — abstracts missing a given component do not contribute
+#     to their own mean for that component.
+#   - An abstract present in zero of the requested bundles is excluded.
+
+def compose_recipe(
+    components: list[str],
+    *,
+    model_key: str,
+    bundles_root: Path | None = None,
+    partial: bool = False,
+) -> dict[str, Any]:
+    """Compose a multi-component recipe by averaging per-component bundles.
+
+    Returns a dict matching the legacy stage-1 bundle shape so that
+    existing consumers can switch from `load_stage1_bundle(path)` to
+    `compose_recipe([...], model_key=...)` with minimal code change:
+
+        {
+            "ids": numpy.ndarray[int64, shape=(n_union,)],
+            "matrix": numpy.ndarray[float32, shape=(n_union, dim)],
+            "metadata": {
+                "model_key": str,
+                "components": list[str],
+                "dim": int,
+                "n_union": int,
+                "present_count_per_id": numpy.ndarray[int8, shape=(n_union,)],
+                "missing_per_id": dict[int, list[str]],
+                "source_bundles": list[str],   # bundle paths
+            },
+        }
+
+    Raises FileNotFoundError if any of the requested per-component
+    bundles is missing on disk. Raises NeuroScapeError if the bundles
+    have inconsistent dimensions.
+    """
+    import numpy as np
+
+    if bundles_root is None:
+        bundles_root = artifacts.EMBEDDINGS_ROOT
+    suffix = "_partial" if partial else ""
+    source_bundles: list[Path] = []
+    # First pass: load each per-component bundle's ids + vectors.
+    loaded: list[tuple[str, list[int], "np.ndarray"]] = []
+    for component in components:
+        bundle_dir = Path(bundles_root) / f"{model_key}_{component}{suffix}"
+        if not bundle_dir.exists():
+            raise FileNotFoundError(
+                f"compose_recipe: component bundle missing — {bundle_dir}"
+            )
+        ids_path = bundle_dir / "ids.npy"
+        vectors_path = bundle_dir / "vectors.npy"
+        if ids_path.exists() and vectors_path.exists():
+            ids = np.load(ids_path, allow_pickle=False).tolist()
+            vectors = np.load(vectors_path, allow_pickle=False).astype(np.float32, copy=False)
+        else:
+            # Legacy bundle (no ids.npy alongside).
+            meta_path = bundle_dir / "metadata.json"
+            if not meta_path.exists() or not vectors_path.exists():
+                raise FileNotFoundError(
+                    f"compose_recipe: bundle missing required files at {bundle_dir}"
+                )
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            ids = list(meta.get("ids") or [])
+            vectors = np.load(vectors_path, allow_pickle=False).astype(np.float32, copy=False)
+        if vectors.ndim != 2 or vectors.shape[0] != len(ids):
+            raise NeuroScapeError(
+                f"compose_recipe: bundle shape mismatch at {bundle_dir} — "
+                f"ids={len(ids)} vectors={vectors.shape}"
+            )
+        loaded.append((component, ids, vectors))
+        source_bundles.append(bundle_dir)
+
+    # Determine the union of ids + the canonical dim.
+    union_ids: list[int] = sorted({aid for _, ids, _ in loaded for aid in ids})
+    dims = {v.shape[1] for _, _, v in loaded}
+    if len(dims) != 1:
+        raise NeuroScapeError(
+            f"compose_recipe: component bundles have inconsistent dim: {sorted(dims)}"
+        )
+    dim = dims.pop()
+    n = len(union_ids)
+    id_to_row = {aid: row for row, aid in enumerate(union_ids)}
+
+    accum = np.zeros((n, dim), dtype=np.float64)
+    counts = np.zeros((n,), dtype=np.int32)
+    missing_per_id: dict[int, list[str]] = {aid: [] for aid in union_ids}
+
+    for component, ids, vectors in loaded:
+        present_ids = set(ids)
+        # Add contributions from present rows.
+        for aid, vec in zip(ids, vectors):
+            row = id_to_row[aid]
+            accum[row] += vec
+            counts[row] += 1
+        # Record absence for the rest.
+        for aid in union_ids:
+            if aid not in present_ids:
+                missing_per_id[aid].append(component)
+
+    if (counts == 0).any():
+        zero_rows = np.where(counts == 0)[0]
+        raise NeuroScapeError(
+            f"compose_recipe: {len(zero_rows)} abstract(s) had zero component "
+            f"contributions — this should be impossible given union semantics"
+        )
+
+    matrix = (accum / counts[:, None]).astype(np.float32, copy=False)
+    return {
+        "ids": np.asarray(union_ids, dtype=np.int64),
+        "matrix": matrix,
+        "metadata": {
+            "model_key": model_key,
+            "components": list(components),
+            "dim": int(dim),
+            "n_union": int(n),
+            "present_count_per_id": counts.astype(np.int8, copy=False),
+            "missing_per_id": missing_per_id,
+            "source_bundles": [str(b) for b in source_bundles],
+        },
+    }
+
+
+def apply_published_stage2_to_matrix(
+    voyage_matrix: Any,
+    *,
+    model_path: Path,
+    device: str | None = None,
+    batch_size: int = 256,
+    dropout: float = 0.05,
+) -> tuple[Any, str]:
+    """Apply the published NeuroScape Stage 2 model to a raw Voyage
+    matrix and return `(projected_matrix, model_version)`.
+
+    The model is loaded fresh per call — fine for occasional use; the
+    matrix-orchestrator path caches the loaded model in-process for
+    repeated calls across components.
+    """
+    import numpy as np
+    if voyage_matrix.shape[1] != 1024:
+        raise NeuroScapeError(
+            f"published NeuroScape stage-2 expects 1024-dim input; got {voyage_matrix.shape[1]}"
+        )
+    if not Path(model_path).exists():
+        raise NeuroScapeError(
+            f"published NeuroScape stage-2 model not found at {model_path}"
+        )
+    model, torch_device = load_pretrained_stage2_model(
+        Path(model_path),
+        input_dimension=int(voyage_matrix.shape[1]),
+        hidden_dimensions=PUBLISHED_STAGE2_HIDDEN_DIMENSIONS,
+        output_dimension=PUBLISHED_STAGE2_OUTPUT_DIMENSION,
+        dropout=dropout,
+        device=device,
+    )
+    projected = apply_stage2_model(
+        model,
+        np.asarray(voyage_matrix, dtype=np.float32),
+        batch_size=batch_size,
+        device=torch_device,
+    )
+    # Use the model file's hash as a stable version identifier.
+    import hashlib as _hashlib
+    h = _hashlib.sha256(Path(model_path).read_bytes()).hexdigest()[:12]
+    return projected, f"neuroscape-stage2-published@{h}"
+
+
 from ohbm2026 import artifacts

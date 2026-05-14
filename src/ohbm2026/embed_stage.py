@@ -79,7 +79,9 @@ EXIT_CACHE_VERSION = 6
 EXIT_STATE_MISMATCH = 7
 
 # ---- defaults ----
-DEFAULT_MODELS: tuple[str, ...] = ("voyage", "minilm", "openai", "pubmedbert", "neuroscape")
+# neuroscape is opt-in (requires a Stage 2 checkpoint path); operator
+# passes --models voyage,neuroscape to include it explicitly.
+DEFAULT_MODELS: tuple[str, ...] = ("voyage", "minilm", "openai", "pubmedbert")
 DEFAULT_COMPONENTS: tuple[str, ...] = embed_components.DEFAULT_COMPONENTS
 DEFAULT_BATCH_SIZE: int = 64
 DEFAULT_CONCURRENCY_START: int = 8
