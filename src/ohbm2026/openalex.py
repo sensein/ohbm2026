@@ -85,11 +85,30 @@ def reference_split_response_schema() -> dict[str, Any]:
     }
 
 
-def openai_reference_split_payload(reference_text: str, *, model: str) -> dict[str, Any]:
+def openai_reference_split_payload(
+    reference_text: str,
+    *,
+    model: str,
+    service_tier: str = "flex",
+) -> dict[str, Any]:
+    """Build the OpenAI Responses API payload for the reference splitter.
+
+    Stage 2.1 FR-003: defaults to flex tier for the LLM-backed
+    reference-splitting step. The existing async retry/requeue logic
+    in `collect_reference_cache_openai_async` treats flex timeouts /
+    capacity errors the same as any other transient error, so a flex
+    timeout naturally requeues and eventually falls back to the
+    single-block split if every retry exhausts.
+
+    Operators can override via `service_tier="default"` if their
+    OpenAI account doesn't support flex for the reference-splitting
+    model.
+    """
     return {
         "model": model,
         "store": False,
         "reasoning": {"effort": "minimal"},
+        "service_tier": service_tier,
         "input": [
             {
                 "role": "system",
