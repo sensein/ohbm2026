@@ -1014,6 +1014,43 @@ def search_crossref_doi_by_title(
     return None, best_score
 
 
+def _promote_openalex_doi(reference: dict[str, Any]) -> None:
+    """Lift `reference['openalex']['doi']` (and PMID) up to the
+    top-level fields when the title-match path retrieved the
+    canonical OpenAlex work record.
+
+    OpenAlex's title-search and DOI-search both populate
+    `work['doi']` and (when available) `work['ids']['pmid']`, but
+    the reference-resolver only carries the top-level `doi`/`pmid`
+    fields forward to downstream consumers (export bundle,
+    SQLite, UI). For title-matched references, those fields would
+    otherwise stay None even when the matched work has valid IDs.
+
+    Once the title-match retrieved the canonical work record, it
+    IS the authoritative resolution — there is nothing more to
+    learn from a fresh DOI/PMID lookup. So the function also marks
+    `doi_lookup_completed=True` (and `pmid_lookup_completed=True`
+    when the work has a PMID) so the subsequent resolver phases
+    skip these refs rather than wasting OpenAlex credits on
+    redundant batch lookups.
+
+    Idempotent: skips fields the resolver already set.
+    """
+    openalex = reference.get("openalex") or {}
+    promoted_doi = openalex.get("doi")
+    if promoted_doi and not reference.get("doi"):
+        reference["doi"] = promoted_doi
+    promoted_pmid = openalex.get("pmid")
+    if promoted_pmid and not reference.get("pmid"):
+        reference["pmid"] = promoted_pmid
+    # The canonical OpenAlex record is in hand — DOI/PMID lookups
+    # against it would just confirm the same answer.
+    if promoted_doi:
+        reference["doi_lookup_completed"] = True
+    if promoted_pmid:
+        reference["pmid_lookup_completed"] = True
+
+
 def normalize_openalex_work(work: dict[str, Any]) -> dict[str, Any]:
     pmid_value = ((work.get("ids") or {}).get("pmid") or "").strip()
     pmid_match = re.search(r"(\d+)", pmid_value)
@@ -2197,6 +2234,7 @@ def resolve_reference_cache_title_matches(
             reference["matched"] = True
             reference["match_method"] = "title"
             reference["openalex"] = normalize_openalex_work(work)
+            _promote_openalex_doi(reference)
             reference.pop("last_error", None)
         elif reference.get("match_method") == "pending":
             reference["match_method"] = "unmatched"
@@ -2326,6 +2364,7 @@ async def resolve_reference_cache_title_matches_async(
                     reference["matched"] = True
                     reference["match_method"] = "title"
                     reference["openalex"] = normalize_openalex_work(work)
+                    _promote_openalex_doi(reference)
                     reference.pop("last_error", None)
                 elif reference.get("match_method") == "pending":
                     reference["match_method"] = "unmatched"
