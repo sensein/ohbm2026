@@ -66,6 +66,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _copy_actions(analyze_matrix_parser, analyze_stage.build_parser())
 
+    analyze_umap_project_parser = subparsers.add_parser(
+        "analyze-umap-project",
+        help="Stage 4: project new vectors into an existing fitted UMAP bundle (US2)",
+    )
+    analyze_umap_project_parser.add_argument(
+        "--fitted-bundle", type=str, required=True,
+        help="Path to a Stage 4 projections bundle directory.",
+    )
+    analyze_umap_project_parser.add_argument(
+        "--input-vectors", type=str, required=True,
+        help="Path to a .npy file of shape (m, d) — new vectors to project.",
+    )
+    analyze_umap_project_parser.add_argument(
+        "--algorithm",
+        choices=["native", "knn_weighted", "parametric"],
+        required=True,
+    )
+    analyze_umap_project_parser.add_argument(
+        "--dim", type=int, default=2, choices=[2, 3],
+    )
+    analyze_umap_project_parser.add_argument(
+        "--knn-k", type=int, default=15,
+    )
+    analyze_umap_project_parser.add_argument(
+        "--knn-temperature", type=float, default=1.0,
+    )
+    analyze_umap_project_parser.add_argument(
+        "--output", type=str, required=True,
+        help="Path to write the projected coordinates as a .npy file.",
+    )
+
     stage2_parser = subparsers.add_parser("embed-stage2", help="Train and apply a local NeuroScape stage-2 model")
     _copy_actions(stage2_parser, neuroscape.build_stage2_parser())
 
@@ -135,6 +166,63 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_analyze_umap_project(argv: list[str]) -> int:
+    """Project new vectors into an existing fitted UMAP bundle (US2)."""
+    import argparse as _argparse
+    import json as _json
+
+    import numpy as _np
+
+    from ohbm2026.analyze.umap import project_into_umap
+    from ohbm2026.exceptions import (
+        AnalysisError,
+        ProjectionDimensionMismatch,
+        UnsupportedProjectionAlgorithm,
+    )
+
+    parser = _argparse.ArgumentParser(prog="ohbmcli analyze-umap-project")
+    parser.add_argument("--fitted-bundle", type=str, required=True)
+    parser.add_argument("--input-vectors", type=str, required=True)
+    parser.add_argument(
+        "--algorithm", choices=["native", "knn_weighted", "parametric"], required=True
+    )
+    parser.add_argument("--dim", type=int, default=2, choices=[2, 3])
+    parser.add_argument("--knn-k", type=int, default=15)
+    parser.add_argument("--knn-temperature", type=float, default=1.0)
+    parser.add_argument("--output", type=str, required=True)
+    args = parser.parse_args(argv)
+
+    from pathlib import Path as _Path
+
+    new_vectors = _np.load(args.input_vectors)
+    try:
+        coords = project_into_umap(
+            new_vectors,
+            _Path(args.fitted_bundle),
+            algorithm=args.algorithm,
+            dim=args.dim,
+            knn_k=args.knn_k,
+            knn_temperature=args.knn_temperature,
+        )
+    except (UnsupportedProjectionAlgorithm, ProjectionDimensionMismatch) as e:
+        print(_json.dumps({"event": "project_into_umap_error", "error": str(e), "type": e.__class__.__name__}))
+        return 2
+    except AnalysisError as e:
+        print(_json.dumps({"event": "project_into_umap_error", "error": str(e), "type": "AnalysisError"}))
+        return 2
+
+    out_path = _Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    _np.save(out_path, coords)
+    print(_json.dumps({
+        "event": "project_into_umap_complete",
+        "n_rows": int(coords.shape[0]),
+        "dim": int(coords.shape[1]),
+        "output_path": str(out_path),
+    }))
+    return 0
+
+
 def _run_refresh_assets(argv: list[str]) -> int:
     if "--refresh-assets-from-existing-db" not in argv:
         argv = list(argv) + ["--refresh-assets-from-existing-db"]
@@ -165,6 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         return embed_stage.main(subcommand_argv)
     if command == "analyze-matrix":
         return analyze_stage.main(subcommand_argv)
+    if command == "analyze-umap-project":
+        return _run_analyze_umap_project(subcommand_argv)
     if command == "embed-stage2":
         return neuroscape.stage2_main(subcommand_argv)
     if command == "apply-published-stage2":

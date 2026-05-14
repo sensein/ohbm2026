@@ -156,3 +156,8 @@ from ohbm2026.embed.compose import (
     apply_published_stage2_to_matrix,
     compose_recipe,
 )
+
+# ---- Stage 4 per-kind runner registrations (side-effect import) -----------
+# Importing this module populates `analyze.stage.KIND_RUNNERS` so the
+# orchestrator dispatch can resolve each analysis kind to its runner.
+from ohbm2026.analyze import runners  # noqa: F401, E402

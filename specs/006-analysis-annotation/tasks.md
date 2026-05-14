@@ -113,7 +113,7 @@ description: "Task list for Stage 4 — Analysis & Annotation"
 - [X] T037 [P] [US1] Implement `src/ohbm2026/analyze/rollup.py::write_rollup(bundle_paths, out_parquet, out_sqlite)` — read every bundle's `ids.npy` + payload + topics → build the wide `annotations` table + the `cluster_topics` join table per `contracts/rollup.md` → atomic parquet write (pyarrow) + atomic sqlite write (stdlib sqlite3) → both files content-equivalent
 - [X] T038 [US1] Wire the `analyze-matrix` subcommand in `src/ohbm2026/cli.py` (the dispatch entry that delegates to `analyze.stage.main`)
 - [X] T039 [US1] Add the venv-only wrapper `scripts/run_analyze_matrix.py` (mirrors `scripts/run_embed_matrix.py`): loads `.env`, sets `PYTHONPATH=src`, delegates to `ohbm2026.analyze.stage.main(sys.argv[1:])`
-- [ ] T040 [US1] Implement the per-`(model, input)` UMAP run inside `analyze/stage.py` (fits a 2D+3D UMAP, writes the `projections` bundle through `analyze.umap.write_projections_bundle` — the function ships in US2 below); for this MVP slice the dispatch only handles `kind == "projections"`. (Communities + neuroscape_clusters + topic_clusters dispatches are stubbed and raise `NotImplementedError` so US1 tests pass with `--kinds projections` only.)
+- [X] T040 [US1] Implement the per-`(model, input)` UMAP run inside `analyze/stage.py` (fits a 2D+3D UMAP, writes the `projections` bundle through `analyze.umap.write_projections_bundle` — the function ships in US2 below); for this MVP slice the dispatch only handles `kind == "projections"`. (Communities + neuroscape_clusters + topic_clusters dispatches are stubbed and raise `NotImplementedError` so US1 tests pass with `--kinds projections` only.)
 
 **Checkpoint**: `ohbmcli analyze-matrix --kinds projections` runs end-to-end against the current Stage 3 corpus and emits 10 (5 models × 2 inputs) `projections` bundles + a UMAP-only rollup. The orchestrator + CLI + provenance + cache scaffolding are validated.
 
@@ -127,21 +127,21 @@ description: "Task list for Stage 4 — Analysis & Annotation"
 
 ### Tests for User Story 2 (REQUIRED FOR BEHAVIOR CHANGES) ⚠️
 
-- [ ] T041 [P] [US2] Write `tests/test_analyze_umap.py::test_native_round_trip` — fit UMAP-2D on 100 synthetic vectors; holdout 10; `algorithm="native"` returns `(10, 2)`; each new point sits within the convex hull of its 10 nearest references' coords
-- [ ] T042 [P] [US2] Write `tests/test_analyze_umap.py::test_knn_weighted_works_without_model` — coords-only bundle (no `umap2d_model.pickle` persisted); `algorithm="knn_weighted"` succeeds
-- [ ] T043 [P] [US2] Write `tests/test_analyze_umap.py::test_parametric_round_trip` — parametric MLP fit; projection reproduces ≥0.85 cosine to native on holdout
-- [ ] T044 [P] [US2] Write `tests/test_analyze_umap.py::test_unsupported_algorithm` — algorithm not in `supported_algorithms` → `UnsupportedProjectionAlgorithm`
-- [ ] T045 [P] [US2] Write `tests/test_analyze_umap.py::test_dim_mismatch` — `new_vectors.shape[1] != bundle.vector_dim` → `ProjectionDimensionMismatch`
-- [ ] T046 [P] [US2] Write `tests/test_analyze_umap.py::test_determinism_byte_identical` — two consecutive `project_into_umap(...)` calls return byte-identical `np.ndarray`s for every algorithm (SC-003)
-- [ ] T047 [P] [US2] Write `tests/test_analyze_umap.py::test_dim_3d_path` — same coverage but with `dim=3`
+- [X] T041 [P] [US2] Write `tests/test_analyze_umap.py::test_native_round_trip` — fit UMAP-2D on 100 synthetic vectors; holdout 10; `algorithm="native"` returns `(10, 2)`; each new point sits within the convex hull of its 10 nearest references' coords
+- [X] T042 [P] [US2] Write `tests/test_analyze_umap.py::test_knn_weighted_works_without_model` — coords-only bundle (no `umap2d_model.pickle` persisted); `algorithm="knn_weighted"` succeeds
+- [X] T043 [P] [US2] Write `tests/test_analyze_umap.py::test_parametric_round_trip` — parametric MLP fit; projection reproduces ≥0.85 cosine to native on holdout
+- [X] T044 [P] [US2] Write `tests/test_analyze_umap.py::test_unsupported_algorithm` — algorithm not in `supported_algorithms` → `UnsupportedProjectionAlgorithm`
+- [X] T045 [P] [US2] Write `tests/test_analyze_umap.py::test_dim_mismatch` — `new_vectors.shape[1] != bundle.vector_dim` → `ProjectionDimensionMismatch`
+- [X] T046 [P] [US2] Write `tests/test_analyze_umap.py::test_determinism_byte_identical` — two consecutive `project_into_umap(...)` calls return byte-identical `np.ndarray`s for every algorithm (SC-003)
+- [X] T047 [P] [US2] Write `tests/test_analyze_umap.py::test_dim_3d_path` — same coverage but with `dim=3`
 
 ### Implementation for User Story 2
 
-- [ ] T048 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::fit_umap_2d(matrix, *, n_neighbors, min_dist, metric, random_state)` and `::fit_umap_3d(...)` returning `(coords, fitted_umap_model)`
-- [ ] T049 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::fit_parametric_mlp(reference_matrix, reference_coords, *, seed)` — small numpy MLP (no torch dep); persistable as a list of `(W, b, activation)` tuples
-- [ ] T050 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::write_projections_bundle(bundle_dir, ids, vectors, coords2d, coords3d, model2d, model3d, mlp2d, mlp3d, metadata, provenance)` — single-call writer that emits every file per `contracts/bundle.md` projections section; record `supported_algorithms` from the actual persisted artifacts
-- [ ] T051 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::project_into_umap(new_vectors, fitted_umap_bundle, *, algorithm, dim, knn_k, knn_temperature)` covering all three algorithms + every error case in `contracts/project_into_umap.md`
-- [ ] T052 [US2] Wire the `analyze-umap-project` subcommand into `src/ohbm2026/cli.py` (loads the bundle dir, reads `--input-vectors` from a `.npy` path, writes the projected coords to `--output`)
+- [X] T048 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::fit_umap_2d(matrix, *, n_neighbors, min_dist, metric, random_state)` and `::fit_umap_3d(...)` returning `(coords, fitted_umap_model)`
+- [X] T049 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::fit_parametric_mlp(reference_matrix, reference_coords, *, seed)` — small numpy MLP (no torch dep); persistable as a list of `(W, b, activation)` tuples
+- [X] T050 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::write_projections_bundle(bundle_dir, ids, vectors, coords2d, coords3d, model2d, model3d, mlp2d, mlp3d, metadata, provenance)` — single-call writer that emits every file per `contracts/bundle.md` projections section; record `supported_algorithms` from the actual persisted artifacts
+- [X] T051 [P] [US2] Implement `src/ohbm2026/analyze/umap.py::project_into_umap(new_vectors, fitted_umap_bundle, *, algorithm, dim, knn_k, knn_temperature)` covering all three algorithms + every error case in `contracts/project_into_umap.md`
+- [X] T052 [US2] Wire the `analyze-umap-project` subcommand into `src/ohbm2026/cli.py` (loads the bundle dir, reads `--input-vectors` from a `.npy` path, writes the projected coords to `--output`)
 
 **Checkpoint**: `project_into_umap(...)` is callable from Python + CLI against every projections bundle produced in US1; out-of-corpus vectors land in the same UMAP space as the corpus without re-fitting.
 
