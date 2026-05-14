@@ -40,10 +40,10 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 **Purpose**: Confirm a clean pre-change baseline and install the new optional dependencies that the production runners need.
 
-- [ ] T001 Refresh `.venv` and run baseline tests: `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests` — confirm only the pre-existing `test_plot_poster_layout_floorplan` failure (366 tests, 1 error).
-- [ ] T002 [P] Run baseline lint: `.specify/scripts/bash/constitution-check.sh --full` — confirm exit 0 before any changes land.
-- [ ] T003 Add the `[enrich]` optional extra to `pyproject.toml` with `openai>=2.0.0` and `Pillow>=10.0`. Keep `[parquet]` and `[review]` unchanged.
-- [ ] T004 Install the new extra into the venv: `UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python ".[enrich]"`. Verify `import openai; openai.__version__` is `>=2.0.0` and `import PIL; PIL.__version__` is `>=10.0`.
+- [X] T001 Refresh `.venv` and run baseline tests: `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests` — confirm only the pre-existing `test_plot_poster_layout_floorplan` failure (366 tests, 1 error).
+- [X] T002 [P] Run baseline lint: `.specify/scripts/bash/constitution-check.sh --full` — confirm exit 0 before any changes land.
+- [X] T003 Add the `[enrich]` optional extra to `pyproject.toml` with `openai>=2.0.0` and `Pillow>=10.0`. Keep `[parquet]` and `[review]` unchanged.
+- [X] T004 Install the new extra into the venv: `UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python ".[enrich]"`. Verify `import openai; openai.__version__` is `>=2.0.0` and `import PIL; PIL.__version__` is `>=10.0`.
 
 **Checkpoint**: Baseline is clean. Production-runner dependencies are installable.
 
@@ -55,14 +55,14 @@ description: "Task list for Stage 2.1 — Production Wiring for Enrichment Compo
 
 **⚠️ CRITICAL**: No user-story implementation may start until this phase is complete.
 
-- [ ] T005 [P] Create `src/ohbm2026/data/__init__.py` (empty file; makes the directory importable as `ohbm2026.data` for package-data loading).
-- [ ] T006 [P] Create `src/ohbm2026/data/eco_top_codes.json` with the 9 ECO top-level codes (ECO:0000006, 0000041, 0000212, 0000352, 0000361, 0000501, 0006055, 0006151, 0007672). Each entry has `eco_id`, `label`, `definition`. File MUST validate against `specs/004-enrich-production-wiring/contracts/eco_top_codes.schema.json`. Use the labels listed in research.md §8 / spec FR-013.
-- [ ] T007 [P] Create `tests/test_eco_vocabulary.py` with three tests: `test_vocabulary_file_validates_against_schema` (loads the contract schema, validates the JSON via stdlib `re` checks on every field that has a pattern — no `jsonschema` dep), `test_vocabulary_has_nine_codes`, `test_every_eco_id_matches_expected_pattern`. Tests fail before T006 lands.
-- [ ] T008 [P] Create `src/ohbm2026/image_quality.py` stub with module docstring and four function signatures only (`laplacian_variance(image)`, `mean_brightness(image)`, `native_max_dim(image)`, `compression_ratio(original_bytes, compressed_bytes)`); each raises `NotImplementedError`. Test stub is T015.
-- [ ] T009 [P] Create `src/ohbm2026/flex_tier.py` stub: module docstring, `class FlexTierResult` dataclass (`response`, `tier_used: Literal["flex","standard"]`, `flex_timed_out: bool`, `latency_ms: float`), `def call_with_flex_fallback(...) -> FlexTierResult` raising `NotImplementedError`. Test stub is T020.
-- [ ] T010 [P] Create `src/ohbm2026/stage2_figures.py` stub: module docstring + `def run_figure_component(abstract, model_id, flex_enabled, ...) -> list[dict]` raising `NotImplementedError`. Test stub is T026.
-- [ ] T011 [P] Create `src/ohbm2026/stage2_claims.py` stub: module docstring + `def run_claims_component(abstract, figure_interpretations, model_id, flex_enabled, ...) -> list[dict]` raising `NotImplementedError`. Test stub is T035.
-- [ ] T012 [P] Create `src/ohbm2026/stage2_references.py` stub: module docstring + `def run_references_component(abstract, strategy_id, ...) -> list[dict]` raising `NotImplementedError`. Test stub is T044.
+- [X] T005 [P] Create `src/ohbm2026/data/__init__.py` (empty file; makes the directory importable as `ohbm2026.data` for package-data loading).
+- [X] T006 [P] Create `src/ohbm2026/data/eco_top_codes.json` with the 9 ECO top-level codes (ECO:0000006, 0000041, 0000212, 0000352, 0000361, 0000501, 0006055, 0006151, 0007672). Each entry has `eco_id`, `label`, `definition`. File MUST validate against `specs/004-enrich-production-wiring/contracts/eco_top_codes.schema.json`. Use the labels listed in research.md §8 / spec FR-013.
+- [X] T007 [P] Create `tests/test_eco_vocabulary.py` with three tests: `test_vocabulary_file_validates_against_schema` (loads the contract schema, validates the JSON via stdlib `re` checks on every field that has a pattern — no `jsonschema` dep), `test_vocabulary_has_nine_codes`, `test_every_eco_id_matches_expected_pattern`. Tests fail before T006 lands.
+- [X] T008 [P] Create `src/ohbm2026/image_quality.py` stub with module docstring and four function signatures only (`laplacian_variance(image)`, `mean_brightness(image)`, `native_max_dim(image)`, `compression_ratio(original_bytes, compressed_bytes)`); each raises `NotImplementedError`. Test stub is T015.
+- [X] T009 [P] Create `src/ohbm2026/flex_tier.py` stub: module docstring, `class FlexTierResult` dataclass (`response`, `tier_used: Literal["flex","standard"]`, `flex_timed_out: bool`, `latency_ms: float`), `def call_with_flex_fallback(...) -> FlexTierResult` raising `NotImplementedError`. Test stub is T020.
+- [X] T010 [P] Create `src/ohbm2026/stage2_figures.py` stub: module docstring + `def run_figure_component(abstract, model_id, flex_enabled, ...) -> list[dict]` raising `NotImplementedError`. Test stub is T026.
+- [X] T011 [P] Create `src/ohbm2026/stage2_claims.py` stub: module docstring + `def run_claims_component(abstract, figure_interpretations, model_id, flex_enabled, ...) -> list[dict]` raising `NotImplementedError`. Test stub is T035.
+- [X] T012 [P] Create `src/ohbm2026/stage2_references.py` stub: module docstring + `def run_references_component(abstract, strategy_id, ...) -> list[dict]` raising `NotImplementedError`. Test stub is T044.
 
 **Checkpoint**: All NEW module stubs exist; ECO vocabulary file lands; vocabulary tests fail intentionally (they reference functions in T006 that exist) — verify only T007 passes after T006, while T015/T020/T026/T035/T044 stubs raise on import-by-call.
 

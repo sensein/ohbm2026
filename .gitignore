@@ -8,6 +8,11 @@ data/
 data/inputs/
 data/cache/
 data/outputs/
+# `src/ohbm2026/data/` is committed package data (e.g. ECO vocabulary file);
+# the `data/` patterns above were intended for the top-level gitignored
+# artifact root, not for source-tree package data.
+!src/ohbm2026/data/
+!src/ohbm2026/data/**
 .cache/
 .matplotlib/
 export/

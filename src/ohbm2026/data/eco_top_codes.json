@@ -1,0 +1,53 @@
+{
+  "vocabulary_version": "eco.v1",
+  "source": "https://www.ebi.ac.uk/ols4/ontologies/eco",
+  "parent_term": "ECO:0000000",
+  "fetched_at": "2026-05-13T00:00:00+00:00",
+  "codes": [
+    {
+      "eco_id": "ECO:0000006",
+      "label": "experimental evidence",
+      "definition": "Evidence type that is the inference derived from observation of the results of an experiment in a wet laboratory or computational system. Used for claims directly grounded in measurement, intervention, or experimental data."
+    },
+    {
+      "eco_id": "ECO:0000041",
+      "label": "similarity evidence",
+      "definition": "Evidence type that uses an observed similarity (e.g. sequence, structural, or stimulus similarity) to support an assertion about a feature, often by transferring annotation from one entity to a similar one."
+    },
+    {
+      "eco_id": "ECO:0000212",
+      "label": "combinatorial evidence",
+      "definition": "Evidence type derived from combining multiple lines of evidence (e.g. multiple modalities, multiple subjects) into a single supported assertion."
+    },
+    {
+      "eco_id": "ECO:0000352",
+      "label": "evidence used in manual assertion",
+      "definition": "Evidence type used in an assertion that was reviewed or asserted by a human curator. Applies to claims whose support is established through manual human judgment rather than purely automated inference."
+    },
+    {
+      "eco_id": "ECO:0000361",
+      "label": "inferential evidence",
+      "definition": "Evidence type that infers a feature or property from other evidence, including logical inference from premises in the discussion or interpretation section. Distinct from direct experimental evidence."
+    },
+    {
+      "eco_id": "ECO:0000501",
+      "label": "evidence used in automatic assertion",
+      "definition": "Evidence type used in an assertion that was made by an automated procedure without human curation. Applies to claims whose support is established through automated annotation pipelines."
+    },
+    {
+      "eco_id": "ECO:0006055",
+      "label": "high throughput evidence",
+      "definition": "Evidence type derived from a high-throughput experiment (e.g. genome-wide assay, large-scale imaging study). Often paired with combinatorial or similarity evidence."
+    },
+    {
+      "eco_id": "ECO:0006151",
+      "label": "documented statement evidence",
+      "definition": "Evidence type based on a statement documented in the literature without direct experimental verification within the current work. Applies to claims that cite prior work as their primary support."
+    },
+    {
+      "eco_id": "ECO:0007672",
+      "label": "computational evidence",
+      "definition": "Evidence type derived from a computational analysis, simulation, model, or algorithmic procedure. Includes results from neuroimaging analyses, statistical modeling, and machine-learning classifiers."
+    }
+  ]
+}

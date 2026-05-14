@@ -43,6 +43,9 @@ from typing import Any, Iterable, Iterator, Optional
 from ohbm2026 import artifacts as artifacts_module
 from ohbm2026 import enrich_storage
 from ohbm2026 import enrichment as enrichment_module
+from ohbm2026 import stage2_figures
+from ohbm2026 import stage2_claims
+from ohbm2026 import stage2_references
 from ohbm2026.exceptions import (
     CacheVersionError,
     ComponentFailureThresholdError,
@@ -62,12 +65,14 @@ __all__ = [
 
 _COMPONENTS = ("figures", "claims", "references")
 
-_DEFAULT_FIGURE_MODEL_ID = "gpt-4.1-mini"
-_DEFAULT_CLAIMS_MODEL_ID = "gpt-4o-2024-08-06"
+_DEFAULT_FIGURE_MODEL_ID = "gpt-5.4-mini"
+_DEFAULT_CLAIMS_MODEL_ID = "gpt-5.4-mini"
 _DEFAULT_REFERENCE_STRATEGY_ID = "refs.v1+openai-gpt-5-nano"
 _DEFAULT_FIGURE_FAILURE_THRESHOLD = 0.05
 _DEFAULT_CLAIM_FAILURE_THRESHOLD = 0.05
 _DEFAULT_REFERENCE_FAILURE_THRESHOLD = 1.0
+_DEFAULT_CONCURRENCY = 30
+_RATE_LIMIT_BACK_OFF_FRACTION = 0.10  # back off when remaining < 10% of limit
 
 # Exit code mapping (mirrors `contracts/cli.md`).
 _EXIT_OK = 0
@@ -118,7 +123,8 @@ def _classify_backend_availability(
     has_openalex = bool(combined.get("OPENALEX_API"))
 
     figures = "openai" if has_openai else None
-    claims = "openai_cllm" if has_openai else None
+    # Stage 2.1: claims now use OpenAI Responses API directly (no cllm).
+    claims = "openai" if has_openai else None
     if has_openai and has_openalex:
         references: str | None = "openai+openalex"
     elif has_openai:
@@ -242,53 +248,73 @@ def _write_cache_entry(
 
 # ----- Component runners (the test seam) ------------------------------
 #
-# Tests patch these via `mock.patch.object(enrich_stage, "_call_*",
-# side_effect=...)`. Production implementations call into the
-# heavyweight building blocks in `enrichment.py` / `openalex.py`.
+# Stage 2.1 production wiring: each `_call_*_for_abstract` invokes
+# the per-abstract production runner from `stage2_*.py`. Tests can
+# patch any of the three (e.g.
+# `mock.patch.object(enrich_stage, "_call_figures_for_abstract", ...)`)
+# or patch one level deeper (the `client.responses.parse` / `create`
+# seam inside the runners).
 
 
-def _call_figure_model(
-    figure_url: str,
-    image_bytes: bytes,
-    model_id: str,
+def _make_openai_client() -> Any:
+    """Construct the OpenAI client lazily so module-import remains
+    cheap and so tests can patch this seam."""
+    from openai import OpenAI  # noqa: PLC0415
+    return OpenAI()
+
+
+def _call_figures_for_abstract(
+    abstract: dict,
     *,
-    question_name: str,
-    local_path: str | None,
-) -> dict:
-    """Invoke a vision LLM on one figure. Returns a dict matching the
-    FigureInterpretation contract (minus `cache_key` — caller adds)."""
-    # Production path — only used when tests do NOT patch this.
-    raise NotImplementedError(
-        "production figure-model invocation is wired through enrichment.py; "
-        "in v1 the orchestrator's heavyweight figure path is exercised only "
-        "via the live smoke run (T030). Tests patch this function directly."
+    model_id: str,
+    flex_enabled: bool,
+    cwd: Path,
+    client: Any,
+) -> tuple[list[dict], "stage2_figures.FigureRunSummary"]:
+    """Stage 2.1 figures runner — one OpenAI Responses API call per
+    abstract carrying all of that abstract's figures + the manuscript
+    context."""
+    return stage2_figures.run_figure_component(
+        abstract,
+        model_id=model_id,
+        flex_enabled=flex_enabled,
+        client=client,
+        cwd=cwd,
     )
 
 
-def _call_claims_model(
-    manuscript_markdown: str,
-    model_id: str,
+def _call_claims_for_abstract(
+    abstract: dict,
     *,
-    abstract_id: int,
-) -> list[dict]:
-    """Invoke the claims-extraction LLM. Returns a list of Claim
-    dicts."""
-    raise NotImplementedError(
-        "production claims-model invocation is wired through enrichment.py; "
-        "in v1 the orchestrator's heavyweight claims path is exercised only "
-        "via the live smoke run (T030). Tests patch this function directly."
+    model_id: str,
+    flex_enabled: bool,
+    figure_interpretations: list[dict] | None,
+    client: Any,
+) -> tuple[list[dict], "stage2_claims.ClaimsRunSummary"]:
+    """Stage 2.1 claims runner — one agentic OpenAI Responses API call
+    per abstract with three function tools (verify_source_quote,
+    lookup_eco_code, dedupe_check)."""
+    return stage2_claims.run_claims_component(
+        abstract,
+        model_id=model_id,
+        flex_enabled=flex_enabled,
+        figure_interpretations=figure_interpretations,
+        client=client,
     )
 
 
-def _call_reference_strategy(raw_reference: str, strategy_id: str) -> dict:
-    """Invoke the reference-resolution strategy on one raw reference.
-    Returns a dict matching the ReferenceResolution contract (minus
-    `cache_key`)."""
-    raise NotImplementedError(
-        "production reference-resolution is wired through openalex.py; "
-        "in v1 the orchestrator's heavyweight references path is exercised "
-        "only via the live smoke run (T030). Tests patch this function "
-        "directly."
+def _call_references_for_abstract(
+    abstract: dict,
+    *,
+    strategy_id: str,
+    resolver: Any | None = None,
+) -> tuple[list[dict], "stage2_references.ReferencesRunSummary"]:
+    """Stage 2.1 references runner — thin adapter to the existing
+    openalex resolution pipeline."""
+    return stage2_references.run_references_component(
+        abstract,
+        strategy_id=strategy_id,
+        resolver=resolver,
     )
 
 
@@ -336,12 +362,48 @@ def _read_image_bytes(local_path: str | None) -> bytes | None:
 
 @dataclasses.dataclass
 class _ComponentSummary:
+    """Per-component telemetry rolled up across all abstracts.
+
+    Stage 2.1 extends Stage 2's counters with flex-tier counters
+    (FR-004) and cost telemetry (FR-019); the orchestrator
+    serializes these into the provenance record's `components`
+    array.
+    """
     component: str
     model_id: str
     cache_hit_count: int = 0
     cache_miss_count: int = 0
     cache_invalidated: bool = False
     failure_count: int = 0
+    # Stage 2.1 extensions:
+    flex_tier_enabled: bool = False
+    flex_timeout_count: int = 0
+    tier_fallback_count: int = 0
+    retry_exhaustion_count: int = 0
+    prompt_tokens_cached: int = 0
+    prompt_tokens_uncached: int = 0
+    completion_tokens: int = 0
+    wall_clock_seconds: float = 0.0
+    latencies_ms: list[float] = dataclasses.field(default_factory=list)
+
+
+def _record_run_telemetry(
+    summary: _ComponentSummary, run_summary: Any
+) -> None:
+    """Accumulate one runner's telemetry into the component summary."""
+    if run_summary is None:
+        return
+    if getattr(run_summary, "flex_timed_out", False):
+        summary.flex_timeout_count += 1
+        if getattr(run_summary, "tier_used", "flex") == "standard":
+            summary.tier_fallback_count += 1
+    summary.prompt_tokens_cached += int(getattr(run_summary, "prompt_tokens_cached", 0) or 0)
+    summary.prompt_tokens_uncached += int(getattr(run_summary, "prompt_tokens_uncached", 0) or 0)
+    summary.completion_tokens += int(getattr(run_summary, "completion_tokens", 0) or 0)
+    latency = float(getattr(run_summary, "latency_ms", 0.0) or 0.0)
+    summary.wall_clock_seconds += latency / 1000.0
+    if latency > 0:
+        summary.latencies_ms.append(latency)
 
 
 def _run_figure_component(
@@ -351,49 +413,110 @@ def _run_figure_component(
     invalidated: bool,
     summary: _ComponentSummary,
     cache_root: Path,
+    cwd: Path,
+    flex_enabled: bool = True,
+    client: Any | None = None,
 ) -> list[dict]:
-    out: list[dict] = []
+    """Stage 2.1: one OpenAI call per abstract carrying all of that
+    abstract's figures. Per-figure cache entries are still written
+    so a single figure change invalidates only that figure (though
+    the runner re-calls for ALL figures in the abstract — they
+    share model context).
+    """
     figure_urls = abstract.get("figure_urls") or []
+    if not figure_urls:
+        return []
+
+    # Compute per-figure cache keys up front so we can decide
+    # whether to skip the per-abstract API call entirely.
     local_assets_by_url = {
         a.get("figure_url"): a.get("local_path")
         for a in (abstract.get("local_assets") or [])
     }
+    per_figure_keys: list[tuple[str, str, str | None, bytes | None]] = []  # (url, key, local_path, png_bytes)
     for entry in figure_urls:
-        url = entry.get("url") or entry.get("figure_url")
-        question_name = entry.get("question_name", "")
+        url = entry.get("url") or entry.get("figure_url") or ""
         local_path = local_assets_by_url.get(url)
-        abs_local = (cache_root.parent.parent / local_path) if local_path else None
-        image_bytes = (_read_image_bytes(str(abs_local)) if abs_local else None) or url.encode("utf-8")
-        cache_key = _sha256_hex(image_bytes + model_id.encode("utf-8"))
-        cache_path = cache_root / "figure_analysis" / f"{cache_key}.json"
-        cached = None if invalidated else _load_cache_entry(cache_path)
-        if cached is None:
-            payload = _call_figure_model(
-                url,
-                image_bytes,
-                model_id,
-                question_name=question_name,
-                local_path=local_path,
-            )
-            _write_cache_entry(
-                cache_path,
-                component="figures",
-                cache_key=cache_key,
-                model_id=model_id,
-                input_hash=_sha256_hex(image_bytes),
-                payload=payload,
-            )
-            summary.cache_miss_count += 1
-        else:
-            payload = cached["payload"]
+        png_bytes: bytes | None = None
+        if local_path:
+            abs_path = (cwd / local_path) if not Path(local_path).is_absolute() else Path(local_path)
+            if abs_path.exists():
+                png_bytes = abs_path.read_bytes()
+        if png_bytes is None:
+            # Missing asset — surface as a per-figure failure via the
+            # production runner (it will raise EnrichmentError).
+            cache_key = _sha256_hex(url.encode("utf-8") + model_id.encode("utf-8"))
+            per_figure_keys.append((url, cache_key, local_path, None))
+            continue
+        # Use the canonical PNG bytes for the cache key; the JPEG
+        # representation transmitted to the model is reproducible
+        # from the same PNG.
+        cache_key = _sha256_hex(png_bytes + model_id.encode("utf-8"))
+        per_figure_keys.append((url, cache_key, local_path, png_bytes))
+
+    # Try to satisfy every figure from cache.
+    cached_payloads: dict[str, dict] = {}
+    if not invalidated:
+        for url, cache_key, _lp, _pb in per_figure_keys:
+            cache_path = cache_root / "figure_analysis" / f"{cache_key}.json"
+            entry = _load_cache_entry(cache_path)
+            if entry is not None:
+                cached_payloads[url] = entry["payload"]
+
+    if len(cached_payloads) == len(per_figure_keys):
+        # All cached — assemble and return without a model call.
+        summary.cache_hit_count += len(per_figure_keys)
+        out = []
+        for url, cache_key, local_path, _pb in per_figure_keys:
+            record = dict(cached_payloads[url])
+            record.setdefault("figure_url", url)
+            record.setdefault("local_path", local_path)
+            record.setdefault("model_id", model_id)
+            record["cache_key"] = cache_key
+            out.append(record)
+        return out
+
+    # Need a model call. The per-abstract runner sees ALL figures
+    # together (siblings) so its output replaces every figure's
+    # cache entry for this abstract.
+    if client is None:
+        client = _make_openai_client()
+    records, run_summary = _call_figures_for_abstract(
+        abstract,
+        model_id=model_id,
+        flex_enabled=flex_enabled,
+        cwd=cwd,
+        client=client,
+    )
+    _record_run_telemetry(summary, run_summary)
+
+    # Map each returned record to the orchestrator's canonical
+    # cache_key (sha256(png_bytes || model_id)) — the runner may
+    # have computed its own key, but the orchestrator-level cache
+    # uses content-derived keys.
+    canonical_keys_by_url = {url: key for url, key, _lp, _pb in per_figure_keys}
+    cached_url_set = set(cached_payloads.keys())
+    out: list[dict] = []
+    for record in records:
+        url = record.get("figure_url")
+        canonical_key = canonical_keys_by_url.get(url, record.get("cache_key", ""))
+        record = dict(record)
+        record["cache_key"] = canonical_key
+        cache_path = cache_root / "figure_analysis" / f"{canonical_key}.json"
+        # Cache payload excludes the cache_key (redundant with filename).
+        payload = {k: v for k, v in record.items() if k != "cache_key"}
+        _write_cache_entry(
+            cache_path,
+            component="figures",
+            cache_key=canonical_key,
+            model_id=model_id,
+            input_hash=_sha256_hex((record.get("figure_url") or "").encode("utf-8")),
+            payload=payload,
+        )
+        if url in cached_url_set:
             summary.cache_hit_count += 1
-        record = dict(payload)
-        record.setdefault("figure_url", url)
-        record.setdefault("question_name", question_name)
-        record.setdefault("model_id", model_id)
-        record["cache_key"] = cache_key
-        if "local_path" not in record:
-            record["local_path"] = local_path
+        else:
+            summary.cache_miss_count += 1
         out.append(record)
     return out
 
@@ -405,33 +528,66 @@ def _run_claims_component(
     invalidated: bool,
     summary: _ComponentSummary,
     cache_root: Path,
+    flex_enabled: bool = True,
+    client: Any | None = None,
+    figure_interpretations: list[dict] | None = None,
 ) -> list[dict]:
+    """Stage 2.1: one agentic OpenAI call per abstract. Cache key
+    includes the ECO vocabulary version so a vocabulary bump
+    invalidates all claims caches loudly (FR-013)."""
     manuscript = _build_claim_manuscript(abstract)
     if not manuscript.strip():
         return []
-    cache_key = _sha256_hex(manuscript.encode("utf-8") + model_id.encode("utf-8"))
+    vocabulary = stage2_claims.load_eco_vocabulary()
+    vocab_version = vocabulary["vocabulary_version"]
+    cache_key = _sha256_hex(
+        manuscript.encode("utf-8")
+        + b"||" + model_id.encode("utf-8")
+        + b"||" + vocab_version.encode("utf-8")
+    )
     cache_path = cache_root / "claim_analysis" / f"{cache_key}.json"
     cached = None if invalidated else _load_cache_entry(cache_path)
-    if cached is None:
-        claims = _call_claims_model(manuscript, model_id, abstract_id=int(abstract["id"]))
-        _write_cache_entry(
-            cache_path,
-            component="claims",
-            cache_key=cache_key,
-            model_id=model_id,
-            input_hash=_hash_text(manuscript),
-            payload={"claims": claims},
-        )
-        summary.cache_miss_count += 1
-    else:
-        claims = cached["payload"]["claims"]
+    if cached is not None:
         summary.cache_hit_count += 1
-    out: list[dict] = []
-    for claim in claims:
-        record = dict(claim)
-        record.setdefault("model_id", model_id)
-        record["cache_key"] = cache_key
-        out.append(record)
+        claims = cached["payload"]["claims"]
+        out: list[dict] = []
+        for claim in claims:
+            record = dict(claim)
+            record.setdefault("model_id", model_id)
+            record["cache_key"] = cache_key
+            out.append(record)
+        return out
+
+    if client is None:
+        client = _make_openai_client()
+    records, run_summary = _call_claims_for_abstract(
+        abstract,
+        model_id=model_id,
+        flex_enabled=flex_enabled,
+        figure_interpretations=figure_interpretations,
+        client=client,
+    )
+    _record_run_telemetry(summary, run_summary)
+    summary.cache_miss_count += 1
+
+    # Override every claim's cache_key to the per-abstract key for
+    # this layer (production runner generated its own per-claim
+    # key from manuscript + model + vocab — same input, so equal,
+    # but be defensive).
+    out = []
+    for record in records:
+        rec = dict(record)
+        rec["cache_key"] = cache_key
+        out.append(rec)
+
+    _write_cache_entry(
+        cache_path,
+        component="claims",
+        cache_key=cache_key,
+        model_id=model_id,
+        input_hash=_hash_text(manuscript),
+        payload={"claims": out, "vocabulary_version": vocab_version},
+    )
     return out
 
 
@@ -442,16 +598,61 @@ def _run_references_component(
     invalidated: bool,
     summary: _ComponentSummary,
     cache_root: Path,
+    resolver: Any | None = None,
 ) -> list[dict]:
+    """Stage 2.1: per-reference cache reuse + per-abstract resolver
+    call when any reference is uncached. The resolver itself
+    handles async concurrency internally via openalex.py's
+    existing pool.
+    """
     block = _extract_reference_block(abstract)
     refs = _split_references(block)
+    if not refs:
+        return []
+
+    # Per-reference cache lookup.
+    cached_records: dict[str, dict] = {}
+    if not invalidated:
+        for raw in refs:
+            cache_key = _sha256_hex(raw.encode("utf-8") + strategy_id.encode("utf-8"))
+            cache_path = cache_root / "reference_metadata" / f"{cache_key}.json"
+            entry = _load_cache_entry(cache_path)
+            if entry is not None:
+                cached_records[raw] = entry["payload"]
+
     out: list[dict] = []
+    if len(cached_records) == len(refs):
+        # Every reference cached — assemble and return.
+        for raw in refs:
+            cache_key = _sha256_hex(raw.encode("utf-8") + strategy_id.encode("utf-8"))
+            record = dict(cached_records[raw])
+            record.setdefault("raw_reference", raw)
+            record.setdefault("strategy_id", strategy_id)
+            record["cache_key"] = cache_key
+            out.append(record)
+            summary.cache_hit_count += 1
+        return out
+
+    # Need a resolver call. The resolver returns one record per
+    # reference; we merge with cache hits.
+    records, _run_summary = _call_references_for_abstract(
+        abstract,
+        strategy_id=strategy_id,
+        resolver=resolver,
+    )
+    # Index returned records by raw_reference for merge.
+    returned_by_raw = {rec["raw_reference"]: rec for rec in records if "raw_reference" in rec}
+    cached_set = set(cached_records.keys())
     for raw in refs:
         cache_key = _sha256_hex(raw.encode("utf-8") + strategy_id.encode("utf-8"))
         cache_path = cache_root / "reference_metadata" / f"{cache_key}.json"
-        cached = None if invalidated else _load_cache_entry(cache_path)
-        if cached is None:
-            payload = _call_reference_strategy(raw, strategy_id)
+        if raw in cached_records:
+            record = dict(cached_records[raw])
+            summary.cache_hit_count += 1
+        else:
+            record = dict(returned_by_raw.get(raw, {"raw_reference": raw, "resolution_status": "unresolved"}))
+            summary.cache_miss_count += 1
+            payload = {k: v for k, v in record.items() if k != "cache_key"}
             _write_cache_entry(
                 cache_path,
                 component="references",
@@ -460,11 +661,6 @@ def _run_references_component(
                 input_hash=_hash_text(raw),
                 payload=payload,
             )
-            summary.cache_miss_count += 1
-        else:
-            payload = cached["payload"]
-            summary.cache_hit_count += 1
-        record = dict(payload)
         record.setdefault("raw_reference", raw)
         record.setdefault("strategy_id", strategy_id)
         record["cache_key"] = cache_key
@@ -517,6 +713,30 @@ def _build_parser() -> argparse.ArgumentParser:
         default=_DEFAULT_REFERENCE_FAILURE_THRESHOLD,
     )
     parser.add_argument("--export-parquet", default=None)
+    # Stage 2.1 — flex-tier flags (default ON; per-component disable).
+    parser.add_argument(
+        "--no-flex-figures",
+        action="store_true",
+        help="Disable OpenAI flex-tier processing for the figures component.",
+    )
+    parser.add_argument(
+        "--no-flex-claims",
+        action="store_true",
+        help="Disable OpenAI flex-tier processing for the claims component.",
+    )
+    # Stage 2.1 — concurrency caps (per-component).
+    parser.add_argument(
+        "--concurrency-figures",
+        type=int,
+        default=_DEFAULT_CONCURRENCY,
+        help="Max in-flight figure-component requests (default 30).",
+    )
+    parser.add_argument(
+        "--concurrency-claims",
+        type=int,
+        default=_DEFAULT_CONCURRENCY,
+        help="Max in-flight claims-component requests (default 30).",
+    )
     return parser
 
 
@@ -579,7 +799,7 @@ def _filter_accepted(abstracts: Iterable[dict]) -> list[dict]:
 
 def _scan_env_vars_consulted(backends: BackendAvailability) -> list[str]:
     names: list[str] = []
-    if backends.figures_backend == "openai" or backends.claims_backend == "openai_cllm":
+    if backends.figures_backend == "openai" or backends.claims_backend == "openai":
         names.append("OPENAI_API_KEY")
     if backends.references_backend in {"openai+openalex"}:
         if "OPENALEX_API" not in names:
@@ -653,21 +873,26 @@ def main(argv: list[str] | None = None) -> int:
 
     cache_root = cwd / artifacts_module.CACHE_ROOT
     invalidated_components = set(args.invalidate)
+    flex_figures = not args.no_flex_figures
+    flex_claims = not args.no_flex_claims
     summaries = {
         "figures": _ComponentSummary(
             component="figures",
             model_id=args.figure_model_id,
             cache_invalidated="figures" in invalidated_components,
+            flex_tier_enabled=flex_figures,
         ),
         "claims": _ComponentSummary(
             component="claims",
             model_id=args.claims_model_id,
             cache_invalidated="claims" in invalidated_components,
+            flex_tier_enabled=flex_claims,
         ),
         "references": _ComponentSummary(
             component="references",
             model_id=args.reference_strategy_id,
             cache_invalidated="references" in invalidated_components,
+            flex_tier_enabled=False,  # references don't go through OpenAI directly.
         ),
     }
 
@@ -695,6 +920,8 @@ def main(argv: list[str] | None = None) -> int:
                 invalidated=summaries["figures"].cache_invalidated,
                 summary=summaries["figures"],
                 cache_root=cache_root,
+                cwd=cwd,
+                flex_enabled=flex_figures,
             )
         except CacheVersionError as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -716,6 +943,8 @@ def main(argv: list[str] | None = None) -> int:
                 invalidated=summaries["claims"].cache_invalidated,
                 summary=summaries["claims"],
                 cache_root=cache_root,
+                flex_enabled=flex_claims,
+                figure_interpretations=figures_out,
             )
             claim_input_total += 1
         except CacheVersionError as exc:
@@ -828,6 +1057,26 @@ def main(argv: list[str] | None = None) -> int:
     # Write provenance.
     prov_rel = artifacts_module.build_enrich_provenance_path(state_key)
     abs_prov = cwd / prov_rel
+    # Load the embedded ECO vocabulary to record its version in
+    # provenance (Stage 2.1 extension; FR-013).
+    try:
+        eco_vocabulary_version = stage2_claims.load_eco_vocabulary()["vocabulary_version"]
+    except Exception:
+        eco_vocabulary_version = "unknown"
+
+    def _percentile(values: list[float], pct: float) -> float:
+        if not values:
+            return 0.0
+        sorted_values = sorted(values)
+        # Linear interpolation between adjacent points.
+        rank = (pct / 100.0) * (len(sorted_values) - 1)
+        low = int(rank)
+        high = min(low + 1, len(sorted_values) - 1)
+        if low == high:
+            return sorted_values[low]
+        frac = rank - low
+        return sorted_values[low] + frac * (sorted_values[high] - sorted_values[low])
+
     record = {
         "provenance_version": enrich_storage.PROVENANCE_VERSION,
         "run_id": str(uuid.uuid4()),
@@ -841,6 +1090,7 @@ def main(argv: list[str] | None = None) -> int:
         "enriched_corpus_path": _project_relative(enriched_path),
         "corpus_kind": "accepted",
         "abstract_count": len(enriched_records),
+        "eco_vocabulary_version": eco_vocabulary_version,
         "components": [
             {
                 "component": s.component,
@@ -850,6 +1100,17 @@ def main(argv: list[str] | None = None) -> int:
                 "cache_miss_count": s.cache_miss_count,
                 "cache_invalidated": s.cache_invalidated,
                 "failure_count": s.failure_count,
+                # Stage 2.1 extensions (FR-003 / FR-004 / FR-019):
+                "flex_tier_enabled": s.flex_tier_enabled,
+                "flex_timeout_count": s.flex_timeout_count,
+                "tier_fallback_count": s.tier_fallback_count,
+                "retry_exhaustion_count": s.retry_exhaustion_count,
+                "prompt_tokens_cached": s.prompt_tokens_cached,
+                "prompt_tokens_uncached": s.prompt_tokens_uncached,
+                "completion_tokens": s.completion_tokens,
+                "wall_clock_seconds": round(s.wall_clock_seconds, 3),
+                "latency_p50_ms": round(_percentile(s.latencies_ms, 50.0), 3),
+                "latency_p95_ms": round(_percentile(s.latencies_ms, 95.0), 3),
             }
             for s in (summaries["figures"], summaries["claims"], summaries["references"])
         ],

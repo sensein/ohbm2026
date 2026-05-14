@@ -113,30 +113,44 @@ def _tmp_repo() -> "Path":
 # ----- Synthetic component-runner fakes -------------------------------
 
 
-def _fake_figure_payload(figure_url: str, model_id: str) -> dict:
+def _fake_figure_record(figure_url: str, model_id: str, *, local_path: str | None = None) -> dict:
     return {
         "figure_url": figure_url,
-        "local_path": f"data/primary/assets/{figure_url.rsplit('/', 1)[-1]}",
+        "local_path": local_path or f"data/primary/assets/{figure_url.rsplit('/', 1)[-1]}",
         "question_name": "Methods Figure (Optional)",
         "interpretation": f"interp[{model_id}]({figure_url})",
+        "keywords": ["fmri", "bold"],
+        "ocr_text": None,
+        "model_quality_estimate": "high",
+        "local_quality_estimate": {
+            "laplacian_variance": 500.0,
+            "mean_brightness": 200.0,
+            "native_max_dim": 1024,
+            "compression_ratio": 0.2,
+        },
         "model_id": model_id,
-        "cache_key": "f" * 64,
+        "cache_key": _sha256_of(f"{figure_url}||{model_id}"),
     }
 
 
-def _fake_claims_payload(_manuscript: str, model_id: str, abstract_id: int) -> list[dict]:
-    return [
-        {
-            "claim_text": f"claim[{model_id}][{abstract_id}].{i}",
-            "confidence": None,
-            "model_id": model_id,
-            "cache_key": "c" * 64,
-        }
-        for i in range(2)
-    ]
+def _fake_claim_record(model_id: str, abstract_id: int, index: int, manuscript: str) -> dict:
+    # Pick a source_quote that exists as a substring of the manuscript
+    # so the orchestrator's post-response verification accepts it.
+    sentinel = f"Methods text {abstract_id}"
+    source_quote = sentinel if sentinel in manuscript else manuscript[:20].strip() or "Synthetic abstract"
+    return {
+        "claim_text": f"claim[{model_id}][{abstract_id}].{index}",
+        "source_quote": source_quote,
+        "source_quote_verified": True,
+        "claim_type": "explicit",
+        "evidence_eco_codes": ["ECO:0000006"],
+        "confidence": 0.85,
+        "model_id": model_id,
+        "cache_key": _sha256_of(f"{abstract_id}||{model_id}||claim.{index}"),
+    }
 
 
-def _fake_reference_payload(raw_ref: str, strategy_id: str) -> dict:
+def _fake_reference_record(raw_ref: str, strategy_id: str) -> dict:
     return {
         "raw_reference": raw_ref,
         "doi": "10.1234/synth",
@@ -148,8 +162,25 @@ def _fake_reference_payload(raw_ref: str, strategy_id: str) -> dict:
         "resolution_status": "resolved",
         "resolution_source": "doi",
         "strategy_id": strategy_id,
-        "cache_key": "r" * 64,
+        "cache_key": _sha256_of(f"{raw_ref}||{strategy_id}"),
     }
+
+
+def _sha256_of(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _stage2_synthetic_manuscript(abstract: dict) -> str:
+    # Mirrors what stage2_claims._build_manuscript_markdown produces.
+    aid = abstract.get("id", 0)
+    parts = [f"# Synthetic abstract {aid}"]
+    for response in abstract.get("responses", []) or []:
+        name = (response.get("question_name") or "").strip()
+        value = (response.get("value") or "").strip()
+        if name and value:
+            parts.append(f"## {name}\n\n{value}")
+    return "\n\n".join(parts)
 
 
 def _patch_components(
@@ -159,19 +190,19 @@ def _patch_components(
     reference_runner=None,
     backend_availability=None,
 ):
-    """Patch the three component-runner seams + the backend-availability
-    classifier on `ohbm2026.enrich_stage`. Each runner takes the same
-    args as the production helper; tests supply a callable to record
-    invocations or simulate failure."""
+    """Patch the three Stage 2.1 per-abstract production seams + the
+    backend-availability classifier on `ohbm2026.enrich_stage`. Each
+    runner is a callable that takes a per-abstract signature and
+    returns a `(records_list, RunSummary)` tuple."""
     from ohbm2026 import enrich_stage
 
     patches = []
     if figure_runner is not None:
-        patches.append(mock.patch.object(enrich_stage, "_call_figure_model", side_effect=figure_runner))
+        patches.append(mock.patch.object(enrich_stage, "_call_figures_for_abstract", side_effect=figure_runner))
     if claims_runner is not None:
-        patches.append(mock.patch.object(enrich_stage, "_call_claims_model", side_effect=claims_runner))
+        patches.append(mock.patch.object(enrich_stage, "_call_claims_for_abstract", side_effect=claims_runner))
     if reference_runner is not None:
-        patches.append(mock.patch.object(enrich_stage, "_call_reference_strategy", side_effect=reference_runner))
+        patches.append(mock.patch.object(enrich_stage, "_call_references_for_abstract", side_effect=reference_runner))
     if backend_availability is not None:
         patches.append(
             mock.patch.object(
@@ -201,7 +232,7 @@ def _default_backend_availability():
 
     return enrich_stage.BackendAvailability(
         figures_backend="openai",
-        claims_backend="openai_cllm",
+        claims_backend="openai",
         references_backend="openai+openalex",
     )
 
@@ -218,22 +249,73 @@ def _ref_count(record: dict) -> int:
 
 
 def _default_runners():
-    """Standard runners that return deterministic synthetic payloads."""
+    """Standard per-abstract runners that return deterministic synthetic
+    `(records_list, RunSummary)` tuples for the new Stage 2.1 seams."""
+    from ohbm2026 import stage2_figures, stage2_claims, stage2_references
+
     figure_calls = []
     claims_calls = []
     reference_calls = []
 
-    def figure_runner(figure_url, image_bytes, model_id, **_kw):
-        figure_calls.append((figure_url, model_id))
-        return _fake_figure_payload(figure_url, model_id)
+    def figure_runner(abstract, *, model_id, flex_enabled, cwd, client, **_kw):
+        figure_calls.append((abstract.get("id"), model_id, flex_enabled))
+        local_assets_by_url = {
+            a.get("figure_url"): a.get("local_path")
+            for a in (abstract.get("local_assets") or [])
+        }
+        records = []
+        for entry in abstract.get("figure_urls", []) or []:
+            url = entry.get("url") or entry.get("figure_url") or ""
+            records.append(_fake_figure_record(url, model_id, local_path=local_assets_by_url.get(url)))
+        summary = stage2_figures.FigureRunSummary(
+            figure_count=len(records),
+            flex_timed_out=False,
+            tier_used="flex" if flex_enabled else "standard",
+            attempts=1,
+            latency_ms=5.0,
+            prompt_tokens_cached=0,
+            prompt_tokens_uncached=2000,
+            completion_tokens=400,
+        )
+        return records, summary
 
-    def claims_runner(manuscript, model_id, abstract_id=None, **_kw):
-        claims_calls.append((abstract_id, model_id))
-        return _fake_claims_payload(manuscript, model_id, abstract_id or 0)
+    def claims_runner(abstract, *, model_id, flex_enabled, figure_interpretations, client, **_kw):
+        claims_calls.append((abstract.get("id"), model_id, flex_enabled))
+        manuscript = _stage2_synthetic_manuscript(abstract)
+        records = [
+            _fake_claim_record(model_id, int(abstract.get("id", 0)), i, manuscript)
+            for i in range(2)
+        ]
+        summary = stage2_claims.ClaimsRunSummary(
+            claims_count=len(records),
+            flex_timed_out=False,
+            tier_used="flex" if flex_enabled else "standard",
+            attempts=1,
+            latency_ms=6.0,
+            prompt_tokens_cached=0,
+            prompt_tokens_uncached=3000,
+            completion_tokens=600,
+        )
+        return records, summary
 
-    def reference_runner(raw_ref, strategy_id, **_kw):
-        reference_calls.append((raw_ref, strategy_id))
-        return _fake_reference_payload(raw_ref, strategy_id)
+    def reference_runner(abstract, *, strategy_id, resolver=None, **_kw):
+        reference_calls.append((abstract.get("id"), strategy_id))
+        # Mirror the orchestrator's per-line split of the references block.
+        block = ""
+        for response in abstract.get("responses", []) or []:
+            name = (response.get("question_name") or "").lower()
+            if "reference" in name:
+                block = response.get("value") or ""
+                break
+        refs = [line.strip() for line in block.splitlines() if line.strip()]
+        records = [_fake_reference_record(raw, strategy_id) for raw in refs]
+        summary = stage2_references.ReferencesRunSummary(
+            reference_count=len(records),
+            resolved_count=len(records),
+            unresolved_count=0,
+            latency_ms=2.0,
+        )
+        return records, summary
 
     return figure_runner, claims_runner, reference_runner, figure_calls, claims_calls, reference_calls
 
@@ -544,14 +626,13 @@ class ErrorContractTests(_RepoFixture):
         _seed_assets(tmp, abstracts)
 
         calls = {"n": 0}
+        fr_default, cr, rr, *_ = _default_runners()
 
-        def maybe_fail_figure(figure_url, image_bytes, model_id, **kw):
+        def maybe_fail_figure(abstract, **kw):
             calls["n"] += 1
             if calls["n"] == 1:
                 raise exc_mod.EnrichmentError("one-shot")
-            return _fake_figure_payload(figure_url, model_id)
-
-        _, cr, rr, *_ = _default_runners()
+            return fr_default(abstract, **kw)
         with _StackedPatches(_patch_components(
             figure_runner=maybe_fail_figure, claims_runner=cr, reference_runner=rr,
             backend_availability=_default_backend_availability(),
@@ -626,20 +707,21 @@ class ResumabilityContractTests(_RepoFixture):
         _seed_assets(tmp, abstracts)
 
         calls = {"figures": 0, "claims": 0, "references": 0}
+        fr_default, cr_default, rr_default, *_ = _default_runners()
 
-        def figure_runner(figure_url, image_bytes, model_id, **_kw):
+        def figure_runner(abstract, **kw):
             calls["figures"] += 1
             if calls["figures"] == 5:
                 raise exc_mod.EnrichmentError("simulated mid-run failure")
-            return _fake_figure_payload(figure_url, model_id)
+            return fr_default(abstract, **kw)
 
-        def claims_runner(manuscript, model_id, abstract_id=None, **_kw):
+        def claims_runner(abstract, **kw):
             calls["claims"] += 1
-            return _fake_claims_payload(manuscript, model_id, abstract_id or 0)
+            return cr_default(abstract, **kw)
 
-        def reference_runner(raw_ref, strategy_id, **_kw):
+        def reference_runner(abstract, **kw):
             calls["references"] += 1
-            return _fake_reference_payload(raw_ref, strategy_id)
+            return rr_default(abstract, **kw)
 
         with _StackedPatches(_patch_components(
             figure_runner=figure_runner, claims_runner=claims_runner, reference_runner=reference_runner,
@@ -659,9 +741,9 @@ class ResumabilityContractTests(_RepoFixture):
         # the abstracts not yet cached.
         calls_before_second = dict(calls)
 
-        def figure_runner_clean(figure_url, image_bytes, model_id, **_kw):
+        def figure_runner_clean(abstract, **kw):
             calls["figures"] += 1
-            return _fake_figure_payload(figure_url, model_id)
+            return fr_default(abstract, **kw)
 
         with _StackedPatches(_patch_components(
             figure_runner=figure_runner_clean, claims_runner=claims_runner, reference_runner=reference_runner,
