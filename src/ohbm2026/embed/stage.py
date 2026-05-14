@@ -237,14 +237,11 @@ def build_clients(
                 "Voyage requested but neither VOYAGE_API_KEY nor VOYAGE_API is set "
                 "in .env or the environment"
             )
-        try:
-            import voyageai
-        except ImportError as exc:  # noqa: F841
-            raise EmbeddingError(
-                "voyageai SDK not installed — `uv pip install --python .venv/bin/python voyageai`"
-            ) from exc
+        # VoyageBatchClient talks to the REST API directly — no SDK
+        # dependency (the `voyageai` SDK is broken on Python 3.14 via
+        # Pydantic V1 in its multimodal module).
         clients["voyage"] = embed_voyage.VoyageBatchClient(
-            voyageai.Client(api_key=key),
+            api_key=key,
             model_id=args.voyage_model_id,
         )
     if "openai" in requested:
