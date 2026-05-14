@@ -60,7 +60,7 @@ The hook lives at `.githooks/pre-commit` and delegates to the lint script.
 ## Setup and validation
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv venv --python 3.11 .venv
+UV_CACHE_DIR=.uv-cache uv venv --python 3.14 .venv
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 

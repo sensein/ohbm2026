@@ -108,7 +108,7 @@ The latest end state of the project is:
 
 Required:
 
-- `python` 3.11+
+- `python` 3.14 (canonical local target; `pyproject.toml` still declares `requires-python = ">=3.11"` for downstream compat)
 - `uv`
 
 Optional, depending on which branch of the pipeline you run:
@@ -173,7 +173,7 @@ interpreter.
 Create the virtual environment and run tests:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv venv --python 3.11 .venv
+UV_CACHE_DIR=.uv-cache uv venv --python 3.14 .venv
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
