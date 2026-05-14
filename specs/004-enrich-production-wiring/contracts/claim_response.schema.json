@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "claim_response.schema.json",
+  "title": "Stage 2.1 Claims-Component Structured Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["claims"],
+  "properties": {
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim_text", "source_quote", "source_quote_verified",
+          "claim_type", "evidence_eco_codes", "confidence"
+        ],
+        "properties": {
+          "claim_text": { "type": "string", "minLength": 1 },
+          "source_quote": { "type": "string", "minLength": 1 },
+          "source_quote_verified": { "type": "boolean" },
+          "claim_type": { "type": "string", "enum": ["explicit", "implicit"] },
+          "evidence_eco_codes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^ECO:\\d{7}$" }
+          },
+          "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+        }
+      }
+    }
+  }
+}

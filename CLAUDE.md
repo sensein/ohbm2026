@@ -163,14 +163,18 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/003-enrich-abstracts/plan.md`. The companion design
+at `specs/004-enrich-production-wiring/plan.md`. The companion design
 artifacts under the same directory — `research.md`, `data-model.md`,
-`contracts/`, and `quickstart.md` — pin the Stage 2 enrichment
-pipeline (figures, claims, references with per-component caching,
-SQLite+zlib storage chosen via empirical benchmark, and
-movement-aware accepted-corpus handling).
+`contracts/`, and `quickstart.md` — pin Stage 2.1 production wiring:
+gpt-5.4-mini default for figures + claims with flex tier on by default,
+agentic Responses API for claims with function tools and ECO v1 annotation,
+per-abstract figure batching with manuscript context and local JPEG
+compression + quality probe, and references via the existing async pool.
 
-The previous-stage plan (Stage 1 fetch-abstracts rewire) lives at
-`specs/002-rewire-pipeline/plan.md` and remains the reference for
-the per-stage contract pattern.
+Previous-stage plans:
+- Stage 2 enrichment scaffolding: `specs/003-enrich-abstracts/plan.md`
+  (SQLite+zlib storage; the orchestrator surface this spec wires
+  production runners into).
+- Stage 1 fetch-abstracts rewire: `specs/002-rewire-pipeline/plan.md`
+  (canonical reference for the per-stage contract pattern).
 <!-- SPECKIT END -->

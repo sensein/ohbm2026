@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "figure_response.schema.json",
+  "title": "Stage 2.1 Figure-Component Structured Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["figures"],
+  "properties": {
+    "figures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["figure_index", "interpretation", "keywords", "ocr_text", "model_quality_estimate"],
+        "properties": {
+          "figure_index": { "type": "integer", "minimum": 1 },
+          "interpretation": { "type": "string", "minLength": 1 },
+          "keywords": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "minItems": 0,
+            "maxItems": 20
+          },
+          "ocr_text": { "type": ["string", "null"] },
+          "model_quality_estimate": {
+            "type": "string",
+            "enum": ["high", "medium", "low_resolution", "low_contrast", "diagram_only", "uninterpretable"]
+          }
+        }
+      }
+    }
+  }
+}

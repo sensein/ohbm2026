@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "provenance_extension.schema.json",
+  "title": "Stage 2.1 Provenance Record Extensions",
+  "description": "Extends the Stage 2 provenance record. Stage 2.1-aware consumers MUST accept records that satisfy BOTH the Stage 2 schema AND these extensions.",
+  "type": "object",
+  "required": ["eco_vocabulary_version", "components"],
+  "properties": {
+    "eco_vocabulary_version": { "type": "string", "pattern": "^eco\\.v\\d+$" },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "flex_tier_enabled",
+          "flex_timeout_count",
+          "tier_fallback_count",
+          "retry_exhaustion_count",
+          "prompt_tokens_cached",
+          "prompt_tokens_uncached",
+          "completion_tokens",
+          "wall_clock_seconds",
+          "latency_p50_ms",
+          "latency_p95_ms"
+        ],
+        "properties": {
+          "flex_tier_enabled": { "type": "boolean" },
+          "flex_timeout_count": { "type": "integer", "minimum": 0 },
+          "tier_fallback_count": { "type": "integer", "minimum": 0 },
+          "retry_exhaustion_count": { "type": "integer", "minimum": 0 },
+          "prompt_tokens_cached": { "type": "integer", "minimum": 0 },
+          "prompt_tokens_uncached": { "type": "integer", "minimum": 0 },
+          "completion_tokens": { "type": "integer", "minimum": 0 },
+          "wall_clock_seconds": { "type": "number", "minimum": 0 },
+          "latency_p50_ms": { "type": "number", "minimum": 0 },
+          "latency_p95_ms": { "type": "number", "minimum": 0 }
+        }
+      }
+    }
+  }
+}
