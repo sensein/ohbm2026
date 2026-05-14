@@ -130,13 +130,13 @@ description: "Task list for Stage 3 — Multi-Model Embeddings Matrix"
 
 ### Tests for User Story 4
 
-- [ ] T038 [P] [US4] In `tests/test_neuroscape_application.py`, add `test_neuroscape_application_is_deterministic`: invoke the per-component NeuroScape derivation twice on the same synthetic Voyage bundle; assert byte-equality of `vectors.npy`, `ids.npy`, `metadata.json` (modulo `embedded_at`).
-- [ ] T039 [P] [US4] Add `test_missing_neuroscape_checkpoint_fails_loudly`: run the derivation with the checkpoint path pointing at a missing file; assert a typed `EmbeddingError` is raised naming the missing artifact (Principle VI).
+- [x] T038 [P] [US4] In `tests/test_neuroscape_application.py`, add `test_neuroscape_application_is_deterministic`: invoke the per-component NeuroScape derivation twice on the same synthetic Voyage bundle; assert byte-equality of `vectors.npy`, `ids.npy`, `metadata.json` (modulo `embedded_at`).
+- [x] T039 [P] [US4] Add `test_missing_neuroscape_checkpoint_fails_loudly`: run the derivation with the checkpoint path pointing at a missing file; assert a typed `EmbeddingError` is raised naming the missing artifact (Principle VI).
 
 ### Implementation for User Story 4
 
-- [ ] T040 [US4] Add `embed_stage.run_neuroscape_derivation(voyage_bundle_dir, output_dir)` that wraps the existing `neuroscape.apply_published_stage2` with: a strict checkpoint-existence check (raise typed error if missing), a metadata pass-through that records `upstream_voyage_state_key` + NeuroScape `model_version`, and the bundle-writer call from `embed_storage`.
-- [ ] T041 [US4] Wire NeuroScape into the matrix orchestrator: when `neuroscape` is in `--models`, run `voyage` first (or use cached Voyage bundle), then derive `neuroscape_<component>` from each Voyage component bundle. Refuse the derivation if the required Voyage component bundle is not present and `voyage` was not also requested.
+- [x] T040 [US4] Add `embed_stage.run_neuroscape_derivation(voyage_bundle_dir, output_dir)` that wraps the existing `neuroscape.apply_published_stage2` with: a strict checkpoint-existence check (raise typed error if missing), a metadata pass-through that records `upstream_voyage_state_key` + NeuroScape `model_version`, and the bundle-writer call from `embed_storage`.
+- [x] T041 [US4] Wire NeuroScape into the matrix orchestrator: when `neuroscape` is in `--models`, run `voyage` first (or use cached Voyage bundle), then derive `neuroscape_<component>` from each Voyage component bundle. Refuse the derivation if the required Voyage component bundle is not present and `voyage` was not also requested.
 
 **Checkpoint**: `neuroscape_*` bundles are produced deterministically from their Voyage upstreams; the UI's `voyage_stage2_published` consumer can be re-pointed at `neuroscape_<recipe-composition>` in Polish.
 
