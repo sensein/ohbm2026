@@ -95,7 +95,7 @@ Subcommands group into stages (see README for full options):
 
 - ingest/refresh: `fetch-abstracts`, `fetch-withdrawn`, `refresh-assets` (note: `ingest` and `authors` removed; authors are fetched inline by `fetch-abstracts`)
 - enrichment: `enrich-abstracts`, `title-audit` (note: `enrich`, `analyze-figures`, `extract-claims`, `reference-metadata` REMOVED in Stage 2 rewire — FR-014. Operators run `enrich-abstracts` and use `--invalidate <component>` for targeted refresh.)
-- embeddings: `embed-minilm`, `embed-hf`, `embed-openai`, `embed-voyage`, `embed-stage2`, `apply-published-stage2`
+- embeddings: `embed-matrix` (Stage 3 canonical — per-component bundles for one or more `(model, component)` pairs; supports voyage / minilm / openai / pubmedbert; NeuroScape is a derivation step). Per-model debugging subcommands kept for backward compat: `embed-minilm`, `embed-hf`, `embed-openai`, `embed-voyage`, `embed-stage2`, `apply-published-stage2`. Multi-component recipes (full-manuscript, methods+results, title+results+conclusion) are composed downstream via `neuroscape.compose_recipe([...], model_key=...)`.
 - analysis: `semantic-analysis`, `cluster-benchmark`, `umap-plot`, `compare-projections`, `optimize-projections`
 - UI: `export-ui`, `build-ui`
 
@@ -152,8 +152,9 @@ Current canonical defaults (the UI consumes these):
 - figure-interpretation model: OpenAI `gpt-5.4-mini` (flex tier on by default), per-abstract grouped Responses API call with manuscript-text context + in-memory JPEG-q85@1024px compression + a four-field local quality probe. Cached under `data/cache/figure_analysis/<cache-key>.json`.
 - claims-extraction: agentic OpenAI Responses API call with `gpt-5.4-mini` (flex tier on by default) — three function tools (verify_source_quote, lookup_eco_code, dedupe_check); Pydantic-validated structured output annotated with ECO v1 codes. Cached under `data/cache/claim_analysis/<cache-key>.json` (key = `sha256(manuscript || model_id || vocabulary_version)`). The legacy `cllm` zero-shot path was removed in Stage 2.1.
 - reference-resolution strategy: `refs.v1+openai-gpt-5-nano` (multi-stage: LLM-assisted splitting → DOI/PMID → OpenAlex title search → Semantic Scholar fallback), cached under `data/cache/reference_metadata/<cache-key>.json`.
-- embedding bundles in use by the UI: `voyage_stage2_published` (semantic 25-cluster lens) and `minilm_claims` (claims 28-cluster lens via `clustering_benchmark_25_30`).
-- UI projection: `minilm_stage1/umap_title-introduction-methods-results-conclusion.json`.
+- Stage 3 single entry: `ohbmcli embed-matrix` (`scripts/run_embed_matrix.py`). Per-component bundles for voyage / minilm / openai / pubmedbert × {title, introduction, methods, results, conclusion, claims}. Output: `data/outputs/experiments/embeddings/<model_key>_<component>/{vectors.npy,ids.npy,metadata.json,provenance.json}`. Run-level provenance at `data/inputs/embeddings_matrix_provenance__<state-key>.json`. Per-abstract cache under `data/cache/embeddings/<model_key>/<cache-key>.json` (key = `sha256(text || model_id || model_version)`).
+- embedding bundles in use by the UI (recipes composed at read time via `neuroscape.compose_recipe`): `voyage_stage2_published` (mean of voyage `title+introduction+methods+results+conclusion`, then optional NeuroScape Stage-2 transform) and `minilm_claims` (the per-component `minilm_claims` bundle directly).
+- UI projection: composed at consumption time from the per-component minilm bundles using `compose_recipe(["title", "introduction", "methods", "results", "conclusion"], model_key="minilm")`.
 
 ## Reading order for unfamiliar context
 
@@ -167,17 +168,25 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/004-enrich-production-wiring/plan.md`. The companion design
-artifacts under the same directory — `research.md`, `data-model.md`,
-`contracts/`, and `quickstart.md` — pin Stage 2.1 production wiring:
-gpt-5.4-mini default for figures + claims with flex tier on by default,
-agentic Responses API for claims with function tools and ECO v1 annotation,
-per-abstract figure batching with manuscript context and local JPEG
-compression + quality probe, and references via the existing async pool.
+at `specs/005-embeddings-matrix/plan.md`. The companion design artifacts
+under the same directory — `research.md`, `data-model.md`, `contracts/`,
+and `quickstart.md` — pin Stage 3 embedding-matrix design: per-component
+embeddings (title, introduction, methods, results, conclusion, claims)
+across five models (Voyage, MiniLM, OpenAI, PubMedBERT, NeuroScape-from-
+Voyage); multi-component recipes are composed downstream by averaging.
+Batch size 64 per paid-API call with dynamic concurrency starting at 8;
+long-input strategy defaults to chunk_mean_pool for MiniLM/PubMedBERT
+and truncate_end for Voyage/OpenAI; per-abstract caching under
+`data/cache/embeddings/<model_key>/` keyed by sha256(text || model_id ||
+model_version) for resume-friendly runs.
 
 Previous-stage plans:
+- Stage 2.1 production wiring: `specs/004-enrich-production-wiring/plan.md`
+  (gpt-5.4-mini figures+claims, agentic Responses API, ECO v1
+  annotation, OpenAlex async references; T058 corpus state_key
+  `f0c51e80dc0e`).
 - Stage 2 enrichment scaffolding: `specs/003-enrich-abstracts/plan.md`
-  (SQLite+zlib storage; the orchestrator surface this spec wires
+  (SQLite+zlib storage; the orchestrator surface Stage 2.1 wires
   production runners into).
 - Stage 1 fetch-abstracts rewire: `specs/002-rewire-pipeline/plan.md`
   (canonical reference for the per-stage contract pattern).
