@@ -3126,16 +3126,20 @@ def compose_recipe(
     import numpy as np
 
     if bundles_root is None:
-        bundles_root = artifacts.EMBEDDINGS_ROOT
+        bundles_root = Path("data/outputs/embeddings")
     suffix = "_partial" if partial else ""
     source_bundles: list[Path] = []
     # First pass: load each per-component bundle's ids + vectors.
+    # New layout: <bundles_root>/<model_key>/<component>[_partial]/
+    # Falls back to the legacy flat layout <bundles_root>/<model_key>_<component>/.
     loaded: list[tuple[str, list[int], "np.ndarray"]] = []
     for component in components:
-        bundle_dir = Path(bundles_root) / f"{model_key}_{component}{suffix}"
+        primary = Path(bundles_root) / model_key / f"{component}{suffix}"
+        legacy = Path(bundles_root) / f"{model_key}_{component}{suffix}"
+        bundle_dir = primary if primary.exists() else legacy
         if not bundle_dir.exists():
             raise FileNotFoundError(
-                f"compose_recipe: component bundle missing — {bundle_dir}"
+                f"compose_recipe: component bundle missing — tried {primary} and {legacy}"
             )
         ids_path = bundle_dir / "ids.npy"
         vectors_path = bundle_dir / "vectors.npy"

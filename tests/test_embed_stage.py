@@ -195,7 +195,7 @@ class SingleBundleTests(unittest.TestCase):
         self.assertEqual(result.cache_miss_count, 3)
         self.assertEqual(result.cache_hit_count, 0)
 
-        bundle = embed_storage.load_bundle(self.fx.path / "embeddings" / "minilm_title")
+        bundle = embed_storage.load_bundle(self.fx.path / "embeddings" / "minilm" / "title")
         self.assertEqual(bundle["vectors"].shape, (3, 4))
         self.assertEqual(bundle["ids"].tolist(), sorted(r["id"] for r in self.records))
         self.assertEqual(bundle["metadata"]["model_key"], "minilm")
@@ -214,7 +214,7 @@ class SingleBundleTests(unittest.TestCase):
 
     def test_corpus_state_key_mismatch_refuses_overwrite(self) -> None:
         # Pre-write a bundle with a DIFFERENT corpus state key.
-        bundle_dir = self.fx.path / "embeddings" / "minilm_title"
+        bundle_dir = self.fx.path / "embeddings" / "minilm" / "title"
         embed_storage.write_bundle(
             bundle_dir,
             ids=[1],
@@ -274,7 +274,7 @@ class ResumeAndBudgetTests(unittest.TestCase):
         # Second run: fresh recording client; should be 100% cache hits.
         client2 = _FakeBatchClient()
         # Move bundle aside so the second call rebuilds it fresh from cache.
-        bundle_dir = self.fx.path / "embeddings" / "minilm_title"
+        bundle_dir = self.fx.path / "embeddings" / "minilm" / "title"
         if bundle_dir.exists():
             import shutil
             shutil.rmtree(bundle_dir)
@@ -318,7 +318,7 @@ class TruncationTelemetryTests(unittest.TestCase):
         # 2 of 4 abstracts have len(text) > 1000 (odd-id ones).
         self.assertEqual(result.truncated_count, 2)
         bundle = embed_storage.load_bundle(
-            self.fx.path / "embeddings" / "minilm_methods"
+            self.fx.path / "embeddings" / "minilm" / "methods"
         )
         self.assertEqual(bundle["metadata"]["truncated_count"], 2)
         self.assertEqual(len(bundle["metadata"]["truncated_ids"]), 2)
@@ -426,7 +426,7 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(result.status, "skipped")
         self.assertEqual(client.calls, [])
         # No bundle written.
-        self.assertFalse((self.fx.path / "embeddings" / "minilm_title").exists())
+        self.assertFalse((self.fx.path / "embeddings" / "minilm" / "title").exists())
 
 
 if __name__ == "__main__":

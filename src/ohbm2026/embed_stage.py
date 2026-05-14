@@ -287,8 +287,9 @@ def _resolve_long_input(model_key: str, args: argparse.Namespace) -> str:
 
 
 def _bundle_dir_for(model_key: str, component: str, embeddings_root: Path, *, partial: bool) -> Path:
+    """Per-model folder layout: `<embeddings_root>/<model_key>/<component>[_partial]/`."""
     suffix = "_partial" if partial else ""
-    return Path(embeddings_root) / f"{model_key}_{component}{suffix}"
+    return Path(embeddings_root) / model_key / f"{component}{suffix}"
 
 
 def _model_version_for(client: Any, fallback_model_id: str) -> str:
@@ -810,7 +811,7 @@ def run_matrix(args: argparse.Namespace) -> int:
         }),
         "bundles": [dataclasses.asdict(b) for b in bundles],
     }
-    prov_path = Path("data/inputs") / f"embeddings_matrix_provenance__{state_key}.json"
+    prov_path = Path("data/provenance") / f"embeddings_matrix_provenance__{state_key}.json"
     try:
         embed_provenance.write_run_provenance(prov_path, provenance_payload)
     except ProvenanceError as exc:
@@ -983,7 +984,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--embeddings-root",
-        default="data/outputs/experiments/embeddings",
+        default="data/outputs/embeddings",
     )
     parser.add_argument(
         "--cache-root",
