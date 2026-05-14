@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 review = ["playwright>=1.58.0"]
 parquet = ["pyarrow>=17.0.0"]
 enrich = ["openai>=2.0.0", "Pillow>=10.0", "pydantic>=2.0"]
+embeddings = ["voyageai>=0.2", "sentence-transformers>=2.7", "torch>=2.2"]
 
 [project.scripts]
 ohbm-ingest = "ohbm2026.assets:main"

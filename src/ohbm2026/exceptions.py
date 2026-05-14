@@ -30,6 +30,13 @@ __all__ = [
     "ContextLengthExceededError",
     "CacheVersionError",
     "ComponentFailureThresholdError",
+    "Stage3Error",
+    "EmbeddingError",
+    "EmbeddingProviderError",
+    "EmbeddingBudgetError",
+    "EmbeddingContractError",
+    "ComponentAssemblyError",
+    "EmbeddingThresholdError",
 ]
 
 
@@ -126,4 +133,69 @@ class ComponentFailureThresholdError(Stage2Error):
     when this is raised; the previous enriched corpus (if any)
     remains intact and the per-component cache entries written so
     far survive for the next run.
+    """
+
+
+class Stage3Error(OhbmStageError):
+    """Base for any failure originating inside Stage 3 (embeddings matrix)."""
+
+
+class EmbeddingError(Stage3Error):
+    """A per-bundle or per-abstract embedding call failed.
+
+    Catch this when you want to handle any Stage 3 embedding-time
+    failure regardless of provider, including SDK rejections, schema
+    drift in the response, and per-component coverage refusals.
+    """
+
+
+class EmbeddingProviderError(EmbeddingError):
+    """Provider returned a transient or terminal error past the retry budget.
+
+    Raised by the per-model runners when the SDK exhausts its
+    flex / standard retry attempts (network blip, 5xx, 429s past
+    backoff). The orchestrator counts these against the per-bundle
+    failure threshold.
+    """
+
+
+class EmbeddingBudgetError(EmbeddingError):
+    """Provider reported the daily / monthly budget is exhausted.
+
+    Distinct from EmbeddingProviderError so the runner can exit with
+    the resume-friendly exit code 3 (the partial cache is preserved;
+    the operator tops up the budget and re-invokes).
+    """
+
+
+class EmbeddingContractError(EmbeddingError):
+    """The provider's response did not match the request contract.
+
+    Surfaces when batch cardinality is wrong (fewer / more vectors
+    than inputs sent), when the SDK-reported `model` differs from
+    the requested model_id (Principle VII), or when the vector
+    dimension does not match the previously observed dimension for
+    this model. Treated as a hard per-bundle abort, not a per-
+    abstract failure, because the contract is broken at the
+    provider level.
+    """
+
+
+class ComponentAssemblyError(Stage3Error):
+    """The enriched corpus did not yield text for a requested component.
+
+    Raised when an abstract that should have a component (per the
+    coverage gate) cannot be assembled — usually a missing field
+    in the enriched payload or a malformed record. Distinct from
+    "absent" components, which are legitimate and recorded under
+    a bundle's `missing_ids`.
+    """
+
+
+class EmbeddingThresholdError(Stage3Error):
+    """The per-bundle failure rate exceeded the configured threshold.
+
+    Maps to exit code 5. The partial cache is preserved (matches
+    Stage 2.1's `ComponentFailureThresholdError` pattern); the bundle
+    directory is NOT written.
     """
