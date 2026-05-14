@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from urllib.request import Request
 
 from ohbm2026 import artifacts
-from ohbm2026.graphql_api import (
+from ohbm2026.fetch.graphql_api import (
     DEFAULT_TIMEOUT_LIMIT_SECONDS,
     DEFAULT_TIMEOUT_START_SECONDS,
     GraphQLAPIError,
@@ -135,7 +135,7 @@ def is_target_figure_question(question_name: str | None) -> bool:
 
 
 def extract_external_urls(values: list[str]) -> list[str]:
-    from ohbm2026.graphql_api import extract_external_urls as _extract
+    from ohbm2026.fetch.graphql_api import extract_external_urls as _extract
 
     return _extract(values, URL_PATTERN)
 

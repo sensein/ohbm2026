@@ -213,7 +213,8 @@ class TestLegacyEnrichmentSubcommandsRemoved(unittest.TestCase):
                 cli.main(["extract-claims"])
 
     def test_reference_metadata_subcommand_is_not_a_known_choice(self) -> None:
-        with mock.patch.object(cli.openalex, "main", return_value=0):
+        from ohbm2026.enrich import openalex as openalex_mod
+        with mock.patch.object(openalex_mod, "main", return_value=0):
             with self.assertRaises(SystemExit):
                 cli.main(["reference-metadata"])
 

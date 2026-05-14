@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 
 from ohbm2026 import artifacts
 from ohbm2026.assets import extract_target_figure_urls
-from ohbm2026.graphql_api import load_dotenv
+from ohbm2026.fetch.graphql_api import load_dotenv
 from ohbm2026.titles import cleaned_abstract_title
 
 SECTION_ORDER = [

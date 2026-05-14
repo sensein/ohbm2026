@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 
 from ohbm2026 import artifacts
-from ohbm2026.graphql_api import chunked, load_dotenv
+from ohbm2026.fetch.graphql_api import chunked, load_dotenv
 from ohbm2026.titles import cleaned_abstract_title
 
 DEFAULT_VOYAGE_MODEL = "voyage-large-2-instruct"

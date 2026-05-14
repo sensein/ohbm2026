@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from ohbm2026 import artifacts
-from ohbm2026.openalex import (
+from ohbm2026.enrich.openalex import (
     OPENAI_RESPONSES_API,
     OpenAlexError,
     add_query_parameter,
@@ -60,7 +60,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         raw = "Smith A. Interesting title. Journal. 2024. Jones B. Another title. Journal. 2023."
 
         with patch(
-            "ohbm2026.openalex.llm_reference_split_request",
+            "ohbm2026.enrich.openalex.llm_reference_split_request",
             return_value=[
                 {
                     "reference": "Smith A. Interesting title. Journal. 2024.",
@@ -88,7 +88,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         raw = "Smith A. Interesting title. Journal. 2024. Jones B. Another title. Journal. 2023."
 
         with patch(
-            "ohbm2026.openalex.llm_reference_split_request",
+            "ohbm2026.enrich.openalex.llm_reference_split_request",
             return_value=[
                 {"reference": "Invented reference one", "title": "Invented one", "doi": None},
                 {"reference": "Invented reference two", "title": "Invented two", "doi": None},
@@ -227,7 +227,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         # (the DOI lived only in `reference["openalex"]["doi"]`).
         # Downstream consumers (SQLite, UI) read the top-level field,
         # so this is a real coverage hole — fix is to promote.
-        from ohbm2026.openalex import _promote_openalex_doi
+        from ohbm2026.enrich.openalex import _promote_openalex_doi
         reference = {
             "doi": None,
             "match_method": "title",
@@ -242,7 +242,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
     def test_promote_openalex_doi_preserves_existing_top_level_doi(self) -> None:
         # Idempotent: never overwrite a DOI the resolver already set
         # (e.g., from a DOI-match path or LLM splitter).
-        from ohbm2026.openalex import _promote_openalex_doi
+        from ohbm2026.enrich.openalex import _promote_openalex_doi
         reference = {
             "doi": "10.1000/existing",
             "openalex": {"doi": "10.1000/openalex-says-otherwise"},
@@ -251,7 +251,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         self.assertEqual(reference["doi"], "10.1000/existing")
 
     def test_promote_openalex_doi_no_op_when_openalex_has_no_doi(self) -> None:
-        from ohbm2026.openalex import _promote_openalex_doi
+        from ohbm2026.enrich.openalex import _promote_openalex_doi
         reference = {"doi": None, "openalex": {"openalex_id": "https://openalex.org/W1"}}
         _promote_openalex_doi(reference)
         self.assertIsNone(reference["doi"])
@@ -261,7 +261,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         # AND it has a DOI, the resolver has the authoritative
         # answer — a follow-up DOI batch-lookup would be redundant.
         # Mark the flag so subsequent phases skip the redundant call.
-        from ohbm2026.openalex import _promote_openalex_doi
+        from ohbm2026.enrich.openalex import _promote_openalex_doi
         reference = {
             "doi": None,
             "doi_lookup_completed": False,
@@ -280,7 +280,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         self.assertFalse(reference["pmid_lookup_completed"])
 
     def test_promote_openalex_doi_lifts_pmid_and_marks_pmid_completed(self) -> None:
-        from ohbm2026.openalex import _promote_openalex_doi
+        from ohbm2026.enrich.openalex import _promote_openalex_doi
         reference = {
             "doi": None,
             "pmid": None,
@@ -299,7 +299,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         # If OpenAlex returned neither a DOI nor a PMID, we DID NOT
         # get a canonical answer — the lookup flags stay False so
         # later phases can still attempt their own resolution.
-        from ohbm2026.openalex import _promote_openalex_doi
+        from ohbm2026.enrich.openalex import _promote_openalex_doi
         reference = {
             "doi": None,
             "pmid": None,
@@ -358,7 +358,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
             captured["url"] = request.full_url
             return DummyResponse()
 
-        with patch("ohbm2026.openalex.urlopen_with_retries", side_effect=fake_urlopen):
+        with patch("ohbm2026.enrich.openalex.urlopen_with_retries", side_effect=fake_urlopen):
             parsed = openalex_request("https://api.openalex.org/works?per-page=1")
 
         self.assertEqual(parsed, {"results": []})
@@ -438,7 +438,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
             request_counts = {"reference_split_requests": 0}
 
             with patch(
-                "ohbm2026.openalex.llm_reference_split_request",
+                "ohbm2026.enrich.openalex.llm_reference_split_request",
                 return_value={
                     "estimated_reference_count": 2,
                     "references": [
@@ -502,7 +502,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
 
     def test_split_reference_markdown_retries_before_fallback(self) -> None:
         with patch(
-            "ohbm2026.openalex.llm_reference_split_request",
+            "ohbm2026.enrich.openalex.llm_reference_split_request",
             side_effect=[
                 OpenAlexError("temporary timeout"),
                 {
@@ -534,7 +534,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
 
     def test_split_reference_markdown_records_fallback_reason(self) -> None:
         with patch(
-            "ohbm2026.openalex.llm_reference_split_request",
+            "ohbm2026.enrich.openalex.llm_reference_split_request",
             side_effect=OpenAlexError("temporary timeout"),
         ):
             candidates, diagnostics = split_reference_markdown(
@@ -586,8 +586,8 @@ class OpenAlexHelpersTest(unittest.TestCase):
             return DummyResponse()
 
         with (
-            patch("ohbm2026.openalex.get_openai_api_key", return_value="test-key"),
-            patch("ohbm2026.openalex.urlopen_with_retries", side_effect=fake_urlopen),
+            patch("ohbm2026.enrich.openalex.get_openai_api_key", return_value="test-key"),
+            patch("ohbm2026.enrich.openalex.urlopen_with_retries", side_effect=fake_urlopen),
         ):
             references = openai_reference_split_request("1. Smith A. Interesting title. Journal. 2024.")
 
@@ -640,7 +640,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
             ]
         }
 
-        with patch("ohbm2026.openalex.semantic_scholar_request", return_value=payload):
+        with patch("ohbm2026.enrich.openalex.semantic_scholar_request", return_value=payload):
             doi, score = search_semantic_scholar_doi_by_title(
                 "Migraine disease characterisation biomarkers and precision medicine",
                 reference_year=2021,
@@ -665,7 +665,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
             ]
         }
 
-        with patch("ohbm2026.openalex.semantic_scholar_request", return_value=payload):
+        with patch("ohbm2026.enrich.openalex.semantic_scholar_request", return_value=payload):
             doi, score = search_semantic_scholar_doi_by_reference(
                 "Ashina M, Terwindt GM. Migraine: disease characterisation, biomarkers, and precision medicine. The Lancet. 2021;397(10283):1496-1504.",
                 reference_year=2021,
@@ -688,7 +688,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
             }
         }
 
-        with patch("ohbm2026.openalex.crossref_request", return_value=payload):
+        with patch("ohbm2026.enrich.openalex.crossref_request", return_value=payload):
             doi, score = search_crossref_doi_by_title(
                 "Migraine disease characterisation biomarkers and precision medicine",
                 reference_year=2021,
@@ -731,8 +731,8 @@ class OpenAlexHelpersTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "reference_metadata.json"
             with (
-                patch("ohbm2026.openalex.search_semantic_scholar_doi_by_reference", return_value=("10.1/example", 0.93)),
-                patch("ohbm2026.openalex.fetch_openalex_work_by_doi", return_value=openalex_work),
+                patch("ohbm2026.enrich.openalex.search_semantic_scholar_doi_by_reference", return_value=("10.1/example", 0.93)),
+                patch("ohbm2026.enrich.openalex.fetch_openalex_work_by_doi", return_value=openalex_work),
             ):
                 stats = resolve_reference_cache_doi_discovery(
                     abstract_reference_records,
@@ -777,8 +777,8 @@ class OpenAlexHelpersTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "reference_metadata.json"
             with (
-                patch("ohbm2026.openalex.search_semantic_scholar_doi_by_reference", return_value=(None, 0.42)),
-                patch("ohbm2026.openalex.search_crossref_doi_by_title", side_effect=AssertionError("Crossref should not be called")),
+                patch("ohbm2026.enrich.openalex.search_semantic_scholar_doi_by_reference", return_value=(None, 0.42)),
+                patch("ohbm2026.enrich.openalex.search_crossref_doi_by_title", side_effect=AssertionError("Crossref should not be called")),
             ):
                 stats = resolve_reference_cache_doi_discovery(
                     abstract_reference_records,
@@ -822,7 +822,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "reference_metadata.json"
             with patch(
-                "ohbm2026.openalex.search_semantic_scholar_doi_by_reference",
+                "ohbm2026.enrich.openalex.search_semantic_scholar_doi_by_reference",
                 side_effect=AssertionError("Semantic Scholar should not be called when title exists"),
             ):
                 stats = resolve_reference_cache_doi_discovery(
@@ -1124,7 +1124,7 @@ class OpenAlexHelpersTest(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "reference_metadata.json"
             with patch(
-                "ohbm2026.openalex.build_reference_metadata_database",
+                "ohbm2026.enrich.openalex.build_reference_metadata_database",
                 side_effect=fake_build_reference_metadata_database,
             ):
                 merged = repair_failed_reference_splits(

@@ -22,7 +22,7 @@ from openai import APIStatusError, AsyncOpenAI, RateLimitError
 
 from ohbm2026 import artifacts
 from ohbm2026.enrichment import html_to_markdown
-from ohbm2026.graphql_api import load_dotenv, urlopen_with_retries
+from ohbm2026.fetch.graphql_api import load_dotenv, urlopen_with_retries
 
 OPENALEX_API = "https://api.openalex.org/works"
 OPENALEX_RATE_LIMIT_API = "https://api.openalex.org/rate-limit"

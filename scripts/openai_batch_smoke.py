@@ -8,8 +8,8 @@ from tempfile import TemporaryDirectory
 
 from openai import OpenAI
 
-from ohbm2026.graphql_api import load_dotenv
-from ohbm2026.openalex import (
+from ohbm2026.fetch.graphql_api import load_dotenv
+from ohbm2026.enrich.openalex import (
     reference_split_response_schema,
     reference_split_system_prompt,
 )
