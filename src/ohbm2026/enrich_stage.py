@@ -45,6 +45,7 @@ from typing import Any, Callable, Iterable, Iterator, Optional
 from ohbm2026 import artifacts as artifacts_module
 from ohbm2026 import enrich_storage
 from ohbm2026 import enrichment as enrichment_module
+from ohbm2026 import openalex as openalex_module
 from ohbm2026 import stage2_figures
 from ohbm2026 import stage2_claims
 from ohbm2026 import stage2_references
@@ -258,10 +259,16 @@ def _write_cache_entry(
 # seam inside the runners).
 
 
-def _make_openai_client() -> Any:
+def _make_openai_client(api_key: str | None = None) -> Any:
     """Construct the OpenAI client lazily so module-import remains
-    cheap and so tests can patch this seam."""
+    cheap and so tests can patch this seam.
+
+    The api_key is passed explicitly rather than read from
+    `os.environ` to keep secrets in memory only (Principle V).
+    """
     from openai import OpenAI  # noqa: PLC0415
+    if api_key is not None:
+        return OpenAI(api_key=api_key)
     return OpenAI()
 
 
@@ -601,12 +608,44 @@ def _run_references_component(
     summary: _ComponentSummary,
     cache_root: Path,
     resolver: Any | None = None,
+    precomputed: list[dict] | None = None,
 ) -> list[dict]:
     """Stage 2.1: per-reference cache reuse + per-abstract resolver
     call when any reference is uncached. The resolver itself
     handles async concurrency internally via openalex.py's
     existing pool.
+
+    When `precomputed` is supplied (the typical Stage 2.1 path —
+    the orchestrator runs `openalex.collect_reference_cache` once
+    over the whole corpus before fanning out per-abstract), this
+    function uses the precomputed resolutions directly and skips
+    the per-reference cache layer.
     """
+    if precomputed is not None:
+        # The corpus-wide openalex pipeline ran already. Each
+        # record in `precomputed` has the openalex schema (
+        # `reference_text`, `doi`, `pmid`, `openalex_id`, etc.).
+        # Massage into Stage 2's ReferenceResolution shape.
+        out: list[dict] = []
+        for raw_record in precomputed:
+            raw_reference = raw_record.get("raw_text") or raw_record.get("reference_text") or ""
+            cache_key = _sha256_hex(raw_reference.encode("utf-8") + strategy_id.encode("utf-8"))
+            record = {
+                "raw_reference": raw_reference,
+                "doi": raw_record.get("doi"),
+                "pmid": raw_record.get("pmid"),
+                "openalex_id": raw_record.get("openalex_id"),
+                "title": raw_record.get("title"),
+                "authors": raw_record.get("authors"),
+                "year": raw_record.get("year"),
+                "resolution_status": raw_record.get("resolution_status", "unresolved"),
+                "resolution_source": raw_record.get("resolution_source"),
+                "strategy_id": strategy_id,
+                "cache_key": cache_key,
+            }
+            out.append(record)
+            summary.cache_hit_count += 1  # corpus-wide cache hit
+        return out
     block = _extract_reference_block(abstract)
     refs = _split_references(block)
     if not refs:
@@ -786,6 +825,88 @@ def _delta_vs_previous(
     }
 
 
+# ----- Corpus-wide reference resolution (FR-014) ----------------------
+
+
+def _resolve_corpus_references(
+    accepted: list[dict],
+    *,
+    strategy_id: str,
+    cache_root: Path,
+    env_file_path: Path,
+    openai_api_var: str = "OPENAI_API_KEY",
+) -> dict[int, list[dict]]:
+    """Run the existing openalex.py async resolution pipeline once
+    over the whole accepted corpus and return a per-abstract map of
+    `{abstract_id: [reference_resolution_dict, ...]}`.
+
+    This is the Stage 2.1 implementation of FR-014: the references
+    component "wires to the existing async resolution pipeline at
+    production throughput." The corpus-wide call goes through
+    `openalex.build_reference_metadata_database`, which runs the
+    canonical four-stage sequence (collect → exact DOI/PMID →
+    OpenAlex title → optional Semantic Scholar discovery) with
+    rate-limit-aware async pools.
+
+    The output is cached under `data/cache/reference_metadata/`;
+    subsequent runs short-circuit completed lookups. Stage 2.1
+    does NOT use the per-reference `<cache-key>.json` layout for
+    references (that was a Stage 2 design tension); the openalex
+    pipeline's own checkpoint file is the cache.
+    """
+    abstracts_database = {"abstracts": accepted, "abstract_count": len(accepted)}
+    snapshot_path = cache_root / "reference_metadata" / "openalex_resolved.json"
+    output_path = snapshot_path  # single canonical file; openalex
+    # treats output_path as both write target and read-existing-cache.
+
+    payload = openalex_module.build_reference_metadata_database(
+        abstracts_database,
+        output_path=output_path,
+        checkpoint_path=snapshot_path,
+        use_llm_reference_splitting=True,
+        reference_splitting_backend="openai",
+        reference_splitting_model="gpt-5-nano",
+        env_path=str(env_file_path),
+        openai_api_var=openai_api_var,
+        use_doi_discovery=True,
+        use_title_search=True,
+    )
+    # Persist the resolved payload so subsequent runs read it back.
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    # Build the per-abstract map. Stage 2.1's ReferenceResolution
+    # shape is documented in data-model.md §3.
+    result: dict[int, list[dict]] = {}
+    for ab in payload.get("abstracts", []):
+        abstract_id = int(ab["id"])
+        records: list[dict] = []
+        for ref in ab.get("references", []) or []:
+            matched = bool(ref.get("matched"))
+            doi = ref.get("doi")
+            pmid = ref.get("pmid")
+            openalex_id = ref.get("openalex_id")
+            if matched:
+                status = "resolved"
+            elif doi or pmid or openalex_id:
+                status = "partial"
+            else:
+                status = "unresolved"
+            records.append({
+                "raw_text": ref.get("raw_text") or "",
+                "doi": doi,
+                "pmid": pmid,
+                "openalex_id": openalex_id,
+                "title": ref.get("title_guess"),
+                "authors": None,
+                "year": None,
+                "resolution_status": status,
+                "resolution_source": ref.get("match_method"),
+            })
+        result[abstract_id] = records
+    return result
+
+
 # ----- Concurrency wrapper (FR-018, T020a) ----------------------------
 
 # Shared lock for summary-counter mutations across worker threads.
@@ -815,6 +936,8 @@ def _process_abstract(
     cwd: Path,
     flex_figures: bool,
     flex_claims: bool,
+    client: Any | None,
+    reference_resolutions: dict[int, list[dict]] | None,
 ) -> _PerAbstractResult:
     """Run all three components for one abstract. Returns failure
     counts so the orchestrator can aggregate them after the
@@ -843,6 +966,7 @@ def _process_abstract(
             cache_root=cache_root,
             cwd=cwd,
             flex_enabled=flex_figures,
+            client=client,
         )
     except CacheVersionError:
         cache_version_error = True
@@ -866,6 +990,7 @@ def _process_abstract(
                 cache_root=cache_root,
                 flex_enabled=flex_claims,
                 figure_interpretations=figures_out,
+                client=client,
             )
             claim_inputs = 1
         except CacheVersionError:
@@ -885,6 +1010,10 @@ def _process_abstract(
         ref_block = _extract_reference_block(abstract)
         ref_lines = _split_references(ref_block)
         reference_inputs = len(ref_lines)
+        # Precomputed reference resolutions (from the corpus-wide
+        # openalex pipeline). When present, _run_references_component
+        # uses them as the resolver source.
+        precomputed = (reference_resolutions or {}).get(int(abstract.get("id", -1)))
         try:
             references_out = _run_references_component(
                 abstract,
@@ -892,6 +1021,7 @@ def _process_abstract(
                 invalidated=summaries["references"].cache_invalidated,
                 summary=summaries["references"],
                 cache_root=cache_root,
+                precomputed=precomputed,
             )
         except CacheVersionError:
             cache_version_error = True
@@ -1001,13 +1131,33 @@ def main(argv: list[str] | None = None) -> int:
         else cwd / export_parquet_path
     )
 
-    # Discover backends.
+    # Discover backends. Keep .env-loaded secrets in a LOCAL dict
+    # — never promote them into os.environ where any third-party
+    # library could read or log them (Principle V).
     dotenv_path = (cwd / args.env_file) if not Path(args.env_file).is_absolute() else Path(args.env_file)
-    backends = _classify_backend_availability(env=dict(os.environ), dotenv_path=dotenv_path)
+    dotenv_values = _read_dotenv(dotenv_path)
+    combined_env: dict[str, str] = {}
+    combined_env.update(dotenv_values)
+    combined_env.update(os.environ)
+    backends = _classify_backend_availability(env=combined_env, dotenv_path=dotenv_path)
     if backends.figures_backend is None and backends.claims_backend is None and backends.references_backend is None:
         print(
             "error: no enrichment backend available (set OPENAI_API_KEY in "
             ".env or the environment)",
+            file=sys.stderr,
+        )
+        return _EXIT_GENERIC
+    openai_api_key = combined_env.get("OPENAI_API_KEY") or None
+    # OpenAI is mandatory for Stage 2.1 — figures + claims components
+    # cannot run without it. Fail loudly here (Principle VI) so the
+    # operator does not discover the missing key deep inside a worker
+    # thread after partial state has been committed to the per-
+    # component caches.
+    if not openai_api_key:
+        print(
+            "error: OPENAI_API_KEY is required for Stage 2.1 (figures + claims "
+            "components both use the OpenAI Responses API). Set it in .env or "
+            "the environment.",
             file=sys.stderr,
         )
         return _EXIT_GENERIC
@@ -1076,6 +1226,37 @@ def main(argv: list[str] | None = None) -> int:
 
     enriched_records: list[dict] = []
 
+    # Construct ONE OpenAI client with the .env-loaded key (never
+    # in os.environ) and share it across all worker threads. The
+    # openai SDK's HTTP client is thread-safe.
+    shared_client = _make_openai_client(api_key=openai_api_key)
+
+    # FR-014 — resolve all references for the whole accepted
+    # corpus BEFORE the per-abstract pool. The openalex.py pipeline
+    # has its own async-pool concurrency + rate-limit back-off; we
+    # let it do that work, then pass the per-abstract resolution
+    # map into the per-abstract workers as `precomputed=...`.
+    print(
+        f"INFO references: running openalex pipeline over "
+        f"{len(accepted)} accepted abstracts (LLM-split + DOI/PMID + "
+        f"OpenAlex title-search + Semantic Scholar discovery)",
+        file=sys.stderr,
+    )
+    try:
+        reference_resolutions = _resolve_corpus_references(
+            accepted,
+            strategy_id=args.reference_strategy_id,
+            cache_root=cache_root,
+            env_file_path=dotenv_path,
+        )
+    except Exception as exc:
+        print(
+            f"error: references corpus-wide resolution failed: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return _EXIT_GENERIC
+
     # Per-abstract closure that the concurrency wrapper fans out.
     # Use the smaller of the two per-component concurrency caps as
     # the pool size — figures and claims serialize within one
@@ -1094,6 +1275,8 @@ def main(argv: list[str] | None = None) -> int:
             cwd=cwd,
             flex_figures=flex_figures,
             flex_claims=flex_claims,
+            client=shared_client,
+            reference_resolutions=reference_resolutions,
         )
 
     results = _run_component_concurrent(

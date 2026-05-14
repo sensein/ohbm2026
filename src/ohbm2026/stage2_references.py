@@ -120,21 +120,41 @@ def run_references_component(
         return [], ReferencesRunSummary(0, 0, 0, 0.0)
 
     if resolver is None:
-        # Default resolver: openalex.collect_reference_metadata if
-        # available; otherwise raise so the orchestrator's failure-
-        # threshold logic captures it.
-        try:
-            from ohbm2026 import openalex
-        except ImportError as exc:
-            raise EnrichmentError(
-                f"references: openalex module not importable: {exc}"
-            ) from exc
-        resolver = getattr(openalex, "collect_reference_metadata", None)
-        if resolver is None:
-            raise EnrichmentError(
-                "references: openalex.collect_reference_metadata not available; "
-                "wire a resolver via the `resolver=` kwarg or upgrade openalex.py."
-            )
+        # Default resolver: local DOI/PMID extraction only. Returns
+        # `resolution_status="unresolved"` for every reference unless
+        # a DOI or PMID can be extracted from the raw text. The
+        # heavyweight OpenAlex / Semantic Scholar resolution path
+        # lives in `openalex.collect_reference_cache` and operates
+        # on the whole corpus at once; wiring it to a per-abstract
+        # seam requires a separate spec round (Stage 2.2 candidate).
+        # Operators can pass an explicit resolver via the
+        # `resolver=` kwarg to plug richer resolution in.
+        from ohbm2026 import openalex as _openalex
+
+        def _local_resolver(reference_text: str, strategy_id: str) -> list[dict]:
+            lines = _split_references(reference_text)
+            records: list[dict] = []
+            for raw in lines:
+                dois = _openalex.extract_dois(raw)
+                pmid = _openalex.extract_pmid(raw)
+                title = _openalex.guess_reference_title(raw)
+                year = _openalex.extract_reference_year(raw)
+                doi = _openalex.normalize_doi(dois[0]) if dois else None
+                status = "partial" if (doi or pmid) else "unresolved"
+                source = "local_doi" if doi else ("local_pmid" if pmid else None)
+                records.append({
+                    "raw_reference": raw,
+                    "doi": doi,
+                    "pmid": pmid,
+                    "openalex_id": None,
+                    "title": title or None,
+                    "authors": None,
+                    "year": year,
+                    "resolution_status": status,
+                    "resolution_source": source,
+                })
+            return records
+        resolver = _local_resolver
 
     start = time.perf_counter()
     try:

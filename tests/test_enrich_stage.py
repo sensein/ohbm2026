@@ -193,7 +193,15 @@ def _patch_components(
     """Patch the three Stage 2.1 per-abstract production seams + the
     backend-availability classifier on `ohbm2026.enrich_stage`. Each
     runner is a callable that takes a per-abstract signature and
-    returns a `(records_list, RunSummary)` tuple."""
+    returns a `(records_list, RunSummary)` tuple.
+
+    Also stubs `_resolve_corpus_references` (the corpus-wide
+    openalex pipeline call) by computing a synthetic
+    per-abstract resolution map from the `reference_runner`'s
+    output. This keeps the test fixtures focused on per-abstract
+    behavior even though the production path runs references
+    corpus-wide before per-abstract dispatch.
+    """
     from ohbm2026 import enrich_stage
 
     patches = []
@@ -209,6 +217,78 @@ def _patch_components(
                 enrich_stage, "_classify_backend_availability", return_value=backend_availability
             )
         )
+
+    # Always stub the corpus-wide references pipeline so tests
+    # never hit live OpenAlex / OpenAI. When `reference_runner` is
+    # supplied, invoke it per abstract so the per-abstract assertions
+    # (e.g., "reference_runner called once per abstract") keep
+    # working. Convert from Stage 2.1 ReferenceResolution → the
+    # openalex-output shape `_run_references_component` accepts via
+    # `precomputed=...`.
+    def _fake_resolve_corpus(accepted, *, strategy_id, cache_root, env_file_path, **kw):
+        # Mimic openalex.py's behavior of reading an existing snapshot
+        # file on re-runs — when the snapshot exists, skip the
+        # per-abstract resolver invocations and return the cached
+        # per-abstract map directly.
+        snapshot = cache_root / "reference_metadata" / "openalex_resolved.json"
+        if snapshot.exists():
+            try:
+                payload = json.loads(snapshot.read_text(encoding="utf-8"))
+                cached: dict[int, list[dict]] = {}
+                for ab in payload.get("abstracts", []):
+                    cached[int(ab["id"])] = list(ab.get("references", []))
+                return cached
+            except Exception:
+                pass  # fall through to recompute
+        result: dict[int, list[dict]] = {}
+        for ab in accepted:
+            if reference_runner is not None:
+                records, _summary = reference_runner(ab, strategy_id=strategy_id)
+                result[int(ab["id"])] = [
+                    {
+                        "raw_text": r["raw_reference"],
+                        "doi": r.get("doi"),
+                        "pmid": r.get("pmid"),
+                        "openalex_id": r.get("openalex_id"),
+                        "title": r.get("title"),
+                        "authors": r.get("authors"),
+                        "year": r.get("year"),
+                        "resolution_status": r.get("resolution_status"),
+                        "resolution_source": r.get("resolution_source"),
+                    }
+                    for r in records
+                ]
+            else:
+                block = ""
+                for response in ab.get("responses", []) or []:
+                    if "reference" in (response.get("question_name") or "").lower():
+                        block = response.get("value") or ""
+                        break
+                refs = [line.strip() for line in block.splitlines() if line.strip()]
+                result[int(ab["id"])] = [
+                    {"raw_text": raw, "doi": None, "pmid": None,
+                     "openalex_id": None, "title": None, "authors": None,
+                     "year": None, "resolution_status": "unresolved",
+                     "resolution_source": None}
+                    for raw in refs
+                ]
+        # Persist a synthetic snapshot so the next run short-circuits
+        # via the cache-hit path above (mirrors openalex's actual
+        # re-run behavior).
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_payload = {
+            "abstracts": [
+                {"id": aid, "references": records}
+                for aid, records in result.items()
+            ]
+        }
+        snapshot.write_text(json.dumps(snapshot_payload), encoding="utf-8")
+        return result
+
+    patches.append(mock.patch.object(enrich_stage, "_resolve_corpus_references", side_effect=_fake_resolve_corpus))
+    # Also stub the OpenAI client construction so tests never hit
+    # the real API even if a stage2 module bypasses the runner mocks.
+    patches.append(mock.patch.object(enrich_stage, "_make_openai_client", return_value=mock.MagicMock(name="FakeOpenAIClient")))
     return patches
 
 
