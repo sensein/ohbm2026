@@ -8,7 +8,7 @@ the canonical reference for the orchestrator's contract surfaces.
 ## Prerequisites
 
 - Stage 1 has produced `data/primary/abstracts.json`.
-- Python 3.11 + `uv` + `.venv` already set up.
+- Python 3.14 + `uv` + `.venv` already set up (canonical local target).
 - API keys in `.env`:
   - `OPENAI_API_KEY` — required for figures + claims.
   - `OPENALEX_API` — optional but recommended for references.

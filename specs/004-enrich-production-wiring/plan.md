@@ -54,7 +54,7 @@ spec). Existing `[parquet]` extra remains unchanged.
 
 ## Technical Context
 
-**Language/Version**: Python 3.11.
+**Language/Version**: Python 3.14 (local canonical; `pyproject.toml` declares `requires-python = ">=3.11"` for downstream compatibility).
 **Primary Dependencies**: stdlib (`asyncio`, `concurrent.futures`,
   `hashlib`, `json`, `pathlib`, `tempfile`, `time`, `os`); `openai
   >=2.0.0` for the Responses API (`client.responses.create`,
