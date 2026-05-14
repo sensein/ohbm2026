@@ -802,9 +802,11 @@ def run_matrix(args: argparse.Namespace) -> int:
             continue
         bundles.append(result)
         if model_key == "voyage":
-            voyage_bundles_by_component[component] = (
-                embeddings_root / result.bundle_path.split("/")[-1]
-            )
+            # `result.bundle_path` is project-relative
+            # (`data/outputs/embeddings/voyage/<component>__<state>`).
+            # Stash the full path so the neuroscape derivation step
+            # can load it directly.
+            voyage_bundles_by_component[component] = Path(result.bundle_path)
         _print_bundle_summary(result)
 
     # Run-level provenance + rollup summary.
