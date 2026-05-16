@@ -476,7 +476,13 @@ def communities_runner(config: AnalysisConfig, entry: PlanEntry) -> dict[str, An
     # Build the per-cluster topics artifact (FR-009 hybrid pipeline).
     topics_payload: dict[int, dict[str, Any]] = {}
     if result.n_communities > 0:
+        from ohbm2026.analyze.llm_adapter import build_topics_llm_adapter
+
         abstract_texts = load_abstract_texts(ids)
+        llm_call = (
+            None if config.skip_llm_topics
+            else build_topics_llm_adapter(component="stage4.communities.topics")
+        )
         topics_payload = build_topics_artifact(
             result.community_ids.astype(int).tolist(),
             abstract_texts,
@@ -486,7 +492,7 @@ def communities_runner(config: AnalysisConfig, entry: PlanEntry) -> dict[str, An
             skip_llm=config.skip_llm_topics,
             llm_model_id=DEFAULT_LLM_MODEL_ID,
             prompt_version=DEFAULT_PROMPT_VERSION,
-            llm_call=None,
+            llm_call=llm_call,
         )
 
     write_communities_bundle(
@@ -642,12 +648,18 @@ def topic_clusters_runner(
     # Build the per-cluster topics artifact (spaCy + c-TF-IDF + optional LLM).
     topics_payload: dict[int, dict[str, Any]] = {}
     if result.n_topics > 0:
+        from ohbm2026.analyze.llm_adapter import build_topics_llm_adapter
+
         abstract_texts = load_abstract_texts(ids)
         # Exclude HDBSCAN noise (cluster_id == -1) from the topics map.
         mask = result.topic_cluster_ids >= 0
         if mask.any():
             assignments = result.topic_cluster_ids[mask].astype(int).tolist()
             texts = [abstract_texts[i] for i, keep in enumerate(mask.tolist()) if keep]
+            llm_call = (
+                None if config.skip_llm_topics
+                else build_topics_llm_adapter(component="stage4.topic_clusters.topics")
+            )
             topics_payload = build_topics_artifact(
                 assignments,
                 texts,
@@ -657,7 +669,7 @@ def topic_clusters_runner(
                 skip_llm=config.skip_llm_topics,
                 llm_model_id=DEFAULT_LLM_MODEL_ID,
                 prompt_version=DEFAULT_PROMPT_VERSION,
-                llm_call=None,  # caller wires enrich.flex_tier when ready
+                llm_call=llm_call,
             )
 
     write_topic_clusters_bundle(

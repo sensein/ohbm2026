@@ -358,7 +358,11 @@ def _cache_store(cache_dir: Path, key: str, payload: dict[str, Any]) -> None:
 def _enforce_subset_guard(
     keywords: list[str], candidate_phrases: list[str], *, cluster_id: int
 ) -> list[str]:
-    """Raise `TopicGroupingHallucination` if the LLM emits an invented term."""
+    """Raise `TopicGroupingHallucination` if the LLM emits an invented term.
+
+    Strict variant — used for cache replays where the on-disk value MUST
+    already obey the contract.
+    """
     candidate_set = set(candidate_phrases)
     invented = [k for k in keywords if k not in candidate_set]
     if invented:
@@ -368,6 +372,35 @@ def _enforce_subset_guard(
             f"re-rank but cannot invent terms."
         )
     return keywords
+
+
+def _filter_to_subset(
+    keywords: list[str], candidate_phrases: list[str], *, cluster_id: int
+) -> tuple[list[str], list[str]]:
+    """Return `(kept, dropped)` after dropping non-candidate terms.
+
+    Production callers preserve the `Keywords ⊆ candidate_phrases` contract
+    by dropping invented terms rather than raising — the cached payload
+    that lands on disk is still subset-clean. Raises
+    `TopicGroupingHallucination` only when EVERY emitted keyword was
+    invented (degenerate output — the LLM ignored the shortlist entirely).
+    """
+    candidate_set = set(candidate_phrases)
+    kept: list[str] = []
+    dropped: list[str] = []
+    seen: set[str] = set()
+    for k in keywords:
+        if k in candidate_set and k not in seen:
+            kept.append(k)
+            seen.add(k)
+        elif k not in candidate_set:
+            dropped.append(k)
+    if not kept and keywords:
+        raise TopicGroupingHallucination(
+            f"cluster {cluster_id}: all {len(keywords)} emitted keywords were "
+            f"invented; first 5 dropped = {dropped[:5]}."
+        )
+    return kept, dropped
 
 
 LLMCaller = Callable[[str, str], str]  # (prompt, model_id) -> JSON response string
@@ -416,14 +449,18 @@ def group_phrases_via_llm(
             f"LLM returned non-JSON for cluster {cluster_id}: {exc}"
         ) from exc
 
-    keywords = list(data.get("Keywords", []))
-    _enforce_subset_guard(keywords, candidate_phrases, cluster_id=cluster_id)
-    payload = {
-        "Keywords": keywords,
+    raw_keywords = list(data.get("Keywords", []))
+    kept, dropped = _filter_to_subset(
+        raw_keywords, candidate_phrases, cluster_id=cluster_id
+    )
+    payload: dict[str, Any] = {
+        "Keywords": kept,
         "Title": str(data.get("Title", "") or ""),
         "Description": str(data.get("Description", "") or ""),
         "Focus": str(data.get("Focus", "") or ""),
     }
+    if dropped:
+        payload["DroppedKeywords"] = dropped
     _cache_store(cache_dir, key, payload)
     return payload
 

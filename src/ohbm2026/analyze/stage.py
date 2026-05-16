@@ -94,6 +94,7 @@ class AnalysisConfig:
     command_line: str = ""
     env_file: Path = Path(".env")
     dry_run: bool = False
+    n_jobs: int = -1  # joblib semantics: -1 = all cores, 1 = serial
 
 
 @dataclass(frozen=True)
@@ -310,6 +311,58 @@ def _emit_event(payload: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _run_one_entry(
+    config: AnalysisConfig, entry: "PlanEntry"
+) -> tuple[bool, dict[str, Any], float]:
+    """Execute a single runnable entry; return (ok, payload, duration_s).
+
+    On success: `(True, runner_result_dict, duration)`.
+    On failure: `(False, {"error": str(exc), "type": exc_class}, duration)`.
+
+    No I/O on stdout — the orchestrator emits events serially in plan order
+    once all entries return.
+    """
+    runner = KIND_RUNNERS.get(entry.kind)
+    if runner is None:
+        return False, {"error": "runner_not_registered", "type": "AnalysisError"}, 0.0
+    start = time.monotonic()
+    try:
+        result = runner(config, entry)
+    except Exception as exc:  # noqa: BLE001
+        return (
+            False,
+            {"error": str(exc), "type": exc.__class__.__name__},
+            time.monotonic() - start,
+        )
+    return True, result, time.monotonic() - start
+
+
+def _run_entries_parallel(
+    config: AnalysisConfig,
+    runnable: list[tuple["PlanEntry", Path]],
+) -> list[tuple[bool, dict[str, Any], float]]:
+    """Run all entries with joblib (or serially when `n_jobs == 1`).
+
+    Workers are independent (each bundle writes its own directory; topic
+    cache writes are atomic temp+rename). Result list is plan-ordered.
+    """
+    if not runnable:
+        return []
+    if config.n_jobs == 1 or len(runnable) == 1:
+        return [_run_one_entry(config, entry) for entry, _ in runnable]
+
+    try:
+        from joblib import Parallel, delayed
+    except ImportError:
+        # Graceful: joblib should be present (declared in [analysis] extra)
+        # but if missing we fall back to serial rather than crashing.
+        return [_run_one_entry(config, entry) for entry, _ in runnable]
+
+    return Parallel(n_jobs=config.n_jobs, backend="loky")(
+        delayed(_run_one_entry)(config, entry) for entry, _ in runnable
+    )
+
+
 def run_matrix(config: AnalysisConfig) -> int:
     """Iterate the matrix, run each entry, write rollup, return exit code.
 
@@ -356,6 +409,9 @@ def run_matrix(config: AnalysisConfig) -> int:
     bundle_records: list[dict[str, Any]] = []
     any_failure = False
 
+    # Split into skip/collision events (emitted in plan order, no work) and
+    # the runnable list (dispatched via joblib).
+    runnable: list[tuple[PlanEntry, Path]] = []
     for entry in plan.entries:
         if entry.skipped:
             _emit_event({
@@ -394,22 +450,24 @@ def run_matrix(config: AnalysisConfig) -> int:
             bundles_skipped += 1
             continue
 
-        bundle_start = time.monotonic()
-        try:
-            result = runner(config, entry)
-        except Exception as exc:  # noqa: BLE001
+        runnable.append((entry, out_path))
+
+    results = _run_entries_parallel(config, runnable)
+
+    for (entry, out_path), bundle_result in zip(runnable, results):
+        ok, payload, duration = bundle_result
+        if not ok:
             _emit_event({
                 "event": "bundle_error",
                 "input_key": f"{entry.model_key}_{entry.input_source}",
                 "kind": entry.kind,
-                "error": str(exc),
-                "type": exc.__class__.__name__,
+                "error": payload["error"],
+                "type": payload["type"],
             })
             any_failure = True
             continue
-        duration = time.monotonic() - bundle_start
 
-        if result.get("cache") == "hit":
+        if payload.get("cache") == "hit":
             bundles_cached += 1
         else:
             bundles_written += 1
@@ -420,7 +478,7 @@ def run_matrix(config: AnalysisConfig) -> int:
                 "kind": entry.kind,
                 "model": entry.model_key,
                 "input_source": entry.input_source,
-                "cache": result.get("cache", "miss"),
+                "cache": payload.get("cache", "miss"),
             }
         )
         _emit_event({
@@ -428,9 +486,9 @@ def run_matrix(config: AnalysisConfig) -> int:
             "input_key": f"{entry.model_key}_{entry.input_source}",
             "kind": entry.kind,
             "bundle_path": str(out_path),
-            "cache": result.get("cache", "miss"),
+            "cache": payload.get("cache", "miss"),
             "duration_seconds": round(duration, 2),
-            **{k: v for k, v in result.items() if k != "cache"},
+            **{k: v for k, v in payload.items() if k != "cache"},
         })
 
     # Rollup write
@@ -540,6 +598,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--code-revision", default=None)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--log-level", default="INFO")
+    p.add_argument(
+        "--n-jobs", type=int, default=-1,
+        help="Parallel workers (joblib): -1 = all cores (default), 1 = serial. "
+             "Per-bundle work is independent; each worker fits its own UMAP / "
+             "FAISS+Leiden / HDBSCAN; recommend constraining "
+             "OMP_NUM_THREADS=1 when n_jobs > 1 to avoid OpenMP oversubscription."
+    )
     # Hyperparameters — declared for argparse completeness; per-kind
     # runners consume them via config.
     p.add_argument("--umap-n-neighbors", type=int, default=15)
@@ -556,7 +621,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _load_env_file(env_path: Path) -> dict[str, str]:
-    """Load `.env` in-memory only (Principle V) — do NOT mutate `os.environ`."""
+    """Load `.env` and seed `os.environ` for keys the runners need (only
+    `OPENAI_API_KEY` for the topic-grouping LLM call); the rest stays
+    in-memory. Existing `os.environ` values win (Principle V — never
+    overwrite an exported secret)."""
     if not env_path.exists():
         return {}
     values: dict[str, str] = {}
@@ -565,7 +633,11 @@ def _load_env_file(env_path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        values[k.strip()] = v.strip().strip('"').strip("'")
+        key = k.strip()
+        val = v.strip().strip('"').strip("'")
+        values[key] = val
+        if key == "OPENAI_API_KEY" and not os.environ.get(key):
+            os.environ[key] = val
     return values
 
 
@@ -605,6 +677,7 @@ def main(argv: list[str] | None = None) -> int:
         command_line=" ".join(sys.argv if argv is None else ["ohbmcli", "analyze-matrix"] + list(argv)),
         env_file=args.env_file,
         dry_run=args.dry_run,
+        n_jobs=args.n_jobs,
     )
     return run_matrix(config)
 

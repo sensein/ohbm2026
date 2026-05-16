@@ -103,15 +103,41 @@ class CtfidfTests(unittest.TestCase):
 
 
 class GroupPhrasesViaLlmTests(unittest.TestCase):
-    def test_subset_guard_rejects_invented_keyword(self) -> None:
+    def test_subset_guard_filters_invented_keyword(self) -> None:
+        """LLM invents `fmri` (not in candidates) — production drops the
+        invented term but keeps the valid one. `Keywords ⊆ candidate_phrases`
+        contract is preserved; the invented term is recorded for telemetry."""
         with _isolated_cwd() as tmp:
             cache_dir = tmp / "cache"
             candidates = ["functional connectivity", "default mode network"]
 
             def fake_llm(prompt: str, model_id: str) -> str:
-                # LLM invents "fmri" — NOT in candidates → should be refused
                 return json.dumps({
                     "Keywords": ["functional connectivity", "fmri"],
+                    "Title": "T",
+                    "Description": "D",
+                    "Focus": "themes",
+                })
+
+            result = group_phrases_via_llm(
+                candidates,
+                cluster_id=0,
+                cache_dir=cache_dir,
+                llm_call=fake_llm,
+            )
+            self.assertEqual(result["Keywords"], ["functional connectivity"])
+            self.assertEqual(result["DroppedKeywords"], ["fmri"])
+
+    def test_subset_guard_raises_when_all_invented(self) -> None:
+        """If EVERY emitted keyword is invented, the bundle still fails —
+        the LLM ignored the shortlist entirely."""
+        with _isolated_cwd() as tmp:
+            cache_dir = tmp / "cache"
+            candidates = ["functional connectivity", "default mode network"]
+
+            def fake_llm(prompt: str, model_id: str) -> str:
+                return json.dumps({
+                    "Keywords": ["fmri", "ROI analysis"],
                     "Title": "T",
                     "Description": "D",
                     "Focus": "themes",
