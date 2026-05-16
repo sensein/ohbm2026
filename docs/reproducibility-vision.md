@@ -126,6 +126,24 @@ The defaults that future users should treat as current project reality are:
   bundle directly (no composition needed; one component)
 - run-level provenance for Stage 3 lives under `data/provenance/`
   alongside the per-bundle `provenance.json` files
+- Stage 4 analysis & annotation produces per-(model, input, kind)
+  bundles under `data/outputs/analysis/<model>_<input>/<kind>__<state-key>/`
+  for four analysis kinds: `projections` (UMAP 2D+3D), `communities`
+  (FAISS+Leiden+CPM), `neuroscape_clusters` (spherical-mean nearest-
+  centroid in the published NeuroScape domain-embedding space; only
+  runs for `model == "neuroscape"`), and `topic_clusters` (BERTopic-
+  style UMAP + HDBSCAN). Every clustering bundle ships a per-cluster
+  `topics.json` produced by a hybrid pipeline: spaCy phrase
+  extraction + class-based TF-IDF locally, then an optional LLM
+  grouping pass (opt-out via `--skip-llm-topics`) that re-ranks the
+  shortlist into `{Keywords, Title, Description, Focus}` while
+  enforcing `Keywords ⊆ candidate_phrases` to prevent hallucination.
+- the canonical Stage 4 rollup the UI consumes is
+  `data/outputs/analysis/annotations__<corpus-state-key>.{parquet,sqlite}`,
+  carrying per-abstract UMAP coordinates + community / NeuroScape-
+  cluster / topic-cluster ids for every model present, plus a joined
+  `cluster_topics` table with the per-cluster keyword/title/description
+  metadata.
 - the final delivery artifact is the static site under `export/ui-site/`
 
 The local pre-publish exported-site root now lives under

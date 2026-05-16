@@ -956,6 +956,199 @@ def build_ui_payload(
     }
 
 
+def build_ui_payload_from_stage4(
+    *,
+    raw_input: Path,
+    enriched_input: Path,
+    rollup_sqlite: Path,
+    analysis_root: Path,
+) -> dict[str, Any]:
+    """Build a UI payload from the canonical Stage 4 rollup + per-bundle topics.
+
+    Per spec FR-018 + SC-004 (Session 2026-05-15 clarification): the
+    Stage 4 export step is the canonical UI input. It reads:
+
+    - `data/outputs/analysis/annotations__<state-key>.sqlite` — wide
+      per-abstract table with UMAP coords + cluster ids per
+      `(model, input)` cell.
+    - `data/outputs/analysis/<model>_<input>/<kind>__<state-key>/topics.json`
+      — per-cluster `{Keywords, Title, Description, Focus}` for every
+      `communities` and `topic_clusters` bundle.
+    - `data/outputs/analysis/.../cluster_topics` (in the rollup sqlite)
+      — the joined cluster-label table used to populate the UI's
+      cluster lens.
+
+    The returned payload follows the same top-level shape as
+    `build_ui_payload` (manifest / search / details / facets /
+    relations / clusters / projection) so the UI's static JSON consumer
+    doesn't have to change. New keys:
+
+    - `manifest.stage4_rollup_path` + `manifest.stage4_centroid_table_version`
+    - `clusters.stage4` — `{"communities", "neuroscape_clusters",
+      "topic_clusters"}` each carrying `[{model, input, partitions: [...]}]`.
+    - `projection.stage4` — `{"<model>_<input>": {umap2d, umap3d}}`.
+    """
+    import sqlite3
+
+    if not rollup_sqlite.exists():
+        raise UIBuildError(
+            f"Stage 4 rollup sqlite not found: {rollup_sqlite}. Run "
+            f"`ohbmcli analyze-matrix` first."
+        )
+
+    # 1. Load raw + enriched corpora (for title / accepted_for / authors).
+    raw = load_json(raw_input)
+    raw_by_id: dict[int, dict[str, Any]] = {
+        a["id"]: a for a in raw.get("abstracts", []) if isinstance(a.get("id"), int)
+    }
+    # Enriched may be SQLite-zlib or legacy JSON; tolerate either.
+    enriched_by_id: dict[int, dict[str, Any]] = {}
+    if enriched_input.exists():
+        if enriched_input.suffix == ".sqlite":
+            try:
+                from ohbm2026.enrich.storage import iter_enriched
+                for rec in iter_enriched(enriched_input):
+                    rid = rec.get("id")
+                    if isinstance(rid, int):
+                        enriched_by_id[rid] = rec
+            except Exception:  # noqa: BLE001 — fallback to raw-only
+                enriched_by_id = {}
+        else:
+            data = load_json(enriched_input)
+            enriched_by_id = {
+                a["id"]: a for a in data.get("abstracts", []) if isinstance(a.get("id"), int)
+            }
+
+    # 2. Read the wide annotations table from sqlite.
+    conn = sqlite3.connect(str(rollup_sqlite))
+    try:
+        conn.row_factory = sqlite3.Row
+        annotations_rows = [
+            dict(row) for row in conn.execute("SELECT * FROM annotations").fetchall()
+        ]
+        cluster_topics_rows = [
+            dict(row) for row in conn.execute("SELECT * FROM cluster_topics").fetchall()
+        ]
+    finally:
+        conn.close()
+
+    # 3. Build per-abstract records and projection lookup.
+    search_records: list[dict[str, Any]] = []
+    detail_records: dict[str, dict[str, Any]] = {}
+    projection_stage4: dict[str, dict[str, list[list[float]]]] = {}
+    annotation_by_id: dict[int, dict[str, Any]] = {}
+    for row in annotations_rows:
+        aid = int(row["abstract_id"])
+        annotation_by_id[aid] = row
+
+    columns = list(annotations_rows[0].keys()) if annotations_rows else ["abstract_id"]
+    umap_models: set[str] = set()
+    cluster_cells: set[tuple[str, str, str]] = set()  # (kind, model, input)
+    for col in columns:
+        if col.startswith("umap2d_") and col.endswith("_x"):
+            umap_models.add(col[len("umap2d_") : -len("_x")])
+        for prefix, kind in (
+            ("community_", "communities"),
+            ("neuroscape_cluster_", "neuroscape_clusters"),
+            ("topic_cluster_", "topic_clusters"),
+        ):
+            if col.startswith(prefix) and not col.endswith("_distance"):
+                rest = col[len(prefix) :]
+                # NB: collisions like neuroscape_cluster_distance_* shadow this prefix; filter:
+                if col.startswith("neuroscape_cluster_distance_"):
+                    continue
+                parts = rest.split("_", 1)
+                if len(parts) == 2:
+                    cluster_cells.add((kind, parts[0], parts[1]))
+
+    # 4. Stage 4 cluster_topics by (kind, model, input) → {cluster_id: payload}
+    cluster_topics_by_cell: dict[tuple[str, str, str], dict[int, dict[str, Any]]] = {}
+    for row in cluster_topics_rows:
+        key = (str(row["clustering_method"]), str(row["model_key"]), str(row["input_source"]))
+        cluster_topics_by_cell.setdefault(key, {})[int(row["cluster_id"])] = {
+            "Keywords": json.loads(row.get("topic_keywords", "[]") or "[]"),
+            "Title": row.get("topic_title", "") or "",
+            "Description": row.get("topic_description", "") or "",
+            "Focus": row.get("topic_focus", "") or "",
+        }
+
+    # 5. Build the UI payload top-level keys.
+    sorted_ids = sorted(annotation_by_id.keys())
+    for aid in sorted_ids:
+        annot = annotation_by_id[aid]
+        raw_record = raw_by_id.get(aid, {})
+        title = str(raw_record.get("title", "") or "")
+        search_records.append({
+            "id": aid,
+            "title": title,
+            "accepted_for": raw_record.get("accepted_for") or "Unknown",
+        })
+        detail_records[str(aid)] = {
+            "id": aid,
+            "title": title,
+            "accepted_for": raw_record.get("accepted_for") or "Unknown",
+            "annotations": {k: annot[k] for k in annot if k != "abstract_id"},
+        }
+
+    # Projection lookup per model
+    for model in sorted(umap_models):
+        coords2d: list[list[float | None]] = []
+        coords3d: list[list[float | None]] = []
+        for aid in sorted_ids:
+            row = annotation_by_id[aid]
+            coords2d.append([row.get(f"umap2d_{model}_x"), row.get(f"umap2d_{model}_y")])
+            coords3d.append([
+                row.get(f"umap3d_{model}_x"),
+                row.get(f"umap3d_{model}_y"),
+                row.get(f"umap3d_{model}_z"),
+            ])
+        projection_stage4[model] = {"umap2d": coords2d, "umap3d": coords3d}
+
+    # Stage 4 cluster lens
+    clusters_stage4: dict[str, list[dict[str, Any]]] = {
+        "communities": [],
+        "neuroscape_clusters": [],
+        "topic_clusters": [],
+    }
+    for kind, model, input_source in sorted(cluster_cells):
+        prefix = {
+            "communities": "community_",
+            "neuroscape_clusters": "neuroscape_cluster_",
+            "topic_clusters": "topic_cluster_",
+        }[kind]
+        col = f"{prefix}{model}_{input_source}"
+        per_abstract = []
+        for aid in sorted_ids:
+            value = annotation_by_id[aid].get(col)
+            per_abstract.append({"id": aid, "cluster_id": value})
+        topics_map = cluster_topics_by_cell.get((kind, model, input_source), {})
+        clusters_stage4[kind].append({
+            "model": model,
+            "input": input_source,
+            "assignments": per_abstract,
+            "cluster_metadata": [
+                {"cluster_id": cid, **payload}
+                for cid, payload in sorted(topics_map.items())
+            ],
+        })
+
+    payload: dict[str, Any] = {
+        "manifest": {
+            "abstract_count": len(sorted_ids),
+            "source": "stage4",
+            "rollup_path": str(rollup_sqlite),
+            "analysis_root": str(analysis_root),
+        },
+        "search": search_records,
+        "details": detail_records,
+        "facets": {"accepted_for": sorted({r["accepted_for"] for r in search_records})},
+        "relations": {},  # neighbors come from Stage 3 cache; the legacy path keeps wiring this
+        "clusters": {"stage4": clusters_stage4},
+        "projection": {"stage4": projection_stage4},
+    }
+    return payload
+
+
 def export_ui_bundle(output_dir: Path, payload: dict[str, Any]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "manifest.json", payload["manifest"])
@@ -1008,6 +1201,26 @@ def build_export_parser() -> argparse.ArgumentParser:
     parser.add_argument("--umap-input", default=DEFAULT_UMAP_INPUT)
     parser.add_argument("--output-dir", default=DEFAULT_EXPORT_OUTPUT)
     parser.add_argument("--top-neighbors", type=int, default=8)
+    # Stage 4 (canonical) path: when --analysis-rollup is supplied, the
+    # exporter reads the per-corpus annotations.sqlite + per-bundle
+    # topics.json under --analysis-root and builds the new payload via
+    # build_ui_payload_from_stage4. The legacy --cluster-15-dir /
+    # --cluster-21-dir / etc. inputs are ignored in this mode. The
+    # legacy path is preserved for one transitional release while the
+    # UI JS migrates; future versions will drop it.
+    parser.add_argument(
+        "--analysis-rollup",
+        default=None,
+        help="Path to data/outputs/analysis/annotations__<state-key>.sqlite. "
+             "When set, the exporter uses the canonical Stage 4 rollup + "
+             "per-bundle topics.json instead of the legacy cluster-dir scan.",
+    )
+    parser.add_argument(
+        "--analysis-root",
+        default="data/outputs/analysis",
+        help="Root of the Stage 4 output tree (default: data/outputs/analysis). "
+             "Only consulted when --analysis-rollup is set.",
+    )
     return parser
 
 
@@ -1028,23 +1241,32 @@ def export_ui_main(argv: list[str] | None = None) -> int:
             top_neighbors=args.top_neighbors,
         )
     )
-    payload = build_ui_payload(
-        raw_input=Path(args.raw_input),
-        enriched_input=Path(args.enriched_input),
-        references_input=Path(args.references_input),
-        image_analyses_input=Path(args.image_analyses_input),
-        phenomena_theories_input=Path(args.phenomena_theories_input),
-        neighbors_input=Path(args.neighbors_input),
-        cluster_15_dir=Path(args.cluster_15_dir),
-        cluster_21_dir=Path(args.cluster_21_dir),
-        cluster_25_dir=Path(args.cluster_25_dir),
-        spectral_cluster_dir=Path(args.spectral_cluster_dir),
-        claims_cluster_dir=Path(args.claims_cluster_dir),
-        semantic_vectors_input=Path(args.semantic_vectors_input),
-        semantic_metadata_input=Path(args.semantic_metadata_input),
-        umap_input=Path(args.umap_input),
-        top_neighbors=args.top_neighbors,
-    )
+    if args.analysis_rollup is not None:
+        # Stage 4 canonical path (FR-018 + SC-004).
+        payload = build_ui_payload_from_stage4(
+            raw_input=Path(args.raw_input),
+            enriched_input=Path(args.enriched_input),
+            rollup_sqlite=Path(args.analysis_rollup),
+            analysis_root=Path(args.analysis_root),
+        )
+    else:
+        payload = build_ui_payload(
+            raw_input=Path(args.raw_input),
+            enriched_input=Path(args.enriched_input),
+            references_input=Path(args.references_input),
+            image_analyses_input=Path(args.image_analyses_input),
+            phenomena_theories_input=Path(args.phenomena_theories_input),
+            neighbors_input=Path(args.neighbors_input),
+            cluster_15_dir=Path(args.cluster_15_dir),
+            cluster_21_dir=Path(args.cluster_21_dir),
+            cluster_25_dir=Path(args.cluster_25_dir),
+            spectral_cluster_dir=Path(args.spectral_cluster_dir),
+            claims_cluster_dir=Path(args.claims_cluster_dir),
+            semantic_vectors_input=Path(args.semantic_vectors_input),
+            semantic_metadata_input=Path(args.semantic_metadata_input),
+            umap_input=Path(args.umap_input),
+            top_neighbors=args.top_neighbors,
+        )
     export_ui_bundle(output_dir, payload)
     print(
         json.dumps(
@@ -1052,6 +1274,7 @@ def export_ui_main(argv: list[str] | None = None) -> int:
                 "output_dir": str(output_dir),
                 "abstract_count": payload["manifest"]["abstract_count"],
                 "top_neighbors": args.top_neighbors,
+                "source": payload["manifest"].get("source", "legacy"),
             },
             indent=2,
         )
