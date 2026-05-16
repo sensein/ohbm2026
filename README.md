@@ -581,11 +581,12 @@ PYTHONPATH=src .venv/bin/python scripts/derive_neuroscape_centroids.py \
 #   data/inputs/neuroscape/centroid_metadata.json
 ```
 
-Default-matrix run (32 bundles: 10 projections + 10 communities +
-10 topic_clusters + 2 neuroscape_clusters; the published NeuroScape
-centroids only assign rows for the `neuroscape` domain embedding, so
-voyage/minilm/openai/pubmedbert are auto-skipped for the
-`neuroscape_clusters` kind):
+Default-matrix run (48 bundles: 15 projections + 15 communities +
+15 topic_clusters + 3 neuroscape_clusters across 5 models × 3 inputs —
+`abstract` recipe + `claims` component + `methods` component; the
+published NeuroScape centroids only assign rows for the `neuroscape`
+domain embedding, so voyage/minilm/openai/pubmedbert are auto-skipped
+for the `neuroscape_clusters` kind):
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-matrix

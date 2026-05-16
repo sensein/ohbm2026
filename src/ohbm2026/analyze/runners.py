@@ -90,6 +90,8 @@ def _load_input_matrix(
     per-component bundle directly.
     """
     if entry.input_source == "abstract":
+        from hashlib import sha256
+
         from ohbm2026.embed.compose import compose_recipe
 
         result = compose_recipe(
@@ -98,10 +100,19 @@ def _load_input_matrix(
             bundles_root=config.embeddings_root,
             corpus_state_key=config.corpus_state_key,
         )
+        # compose_recipe returns the legacy stage-1 bundle shape:
+        # {"ids", "matrix", "metadata": {... "source_bundles": [...] ...}}.
+        # The assembly_hash for cache keying is sha256 of the sorted
+        # source-bundle paths so re-running with the same per-component
+        # bundles hits cache.
+        source_bundles = result.get("metadata", {}).get("source_bundles", [])
+        assembly_hash = sha256(
+            "\n".join(sorted(str(p) for p in source_bundles)).encode("utf-8")
+        ).hexdigest()[:16]
         return (
-            np.asarray(result.ids, dtype=np.int64),
-            np.asarray(result.vectors, dtype=np.float32),
-            getattr(result, "assembly_hash", "") or "",
+            np.asarray(result["ids"], dtype=np.int64),
+            np.asarray(result["matrix"], dtype=np.float32),
+            assembly_hash,
         )
 
     bundle_path = (

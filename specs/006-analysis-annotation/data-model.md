@@ -11,7 +11,7 @@ The top-level orchestration record. One per `ohbmcli analyze-matrix` invocation.
 class AnalysisRun:
     corpus_state_key: str            # 12-char hex; e.g., "f0c51e80dc0e"
     requested_models: list[str]      # ["voyage", "minilm", "openai", "pubmedbert", "neuroscape"]
-    requested_inputs: list[str]      # ["abstract", "claims"] (the canonical defaults)
+    requested_inputs: list[str]      # ["abstract", "claims", "methods"] (the canonical defaults)
     requested_kinds: list[str]       # ["projections", "communities", "neuroscape_clusters", "topic_clusters"]
     seed: int                        # default 42; recorded in every bundle's metadata.json
     skip_llm_topics: bool            # default False
@@ -24,7 +24,7 @@ Validation:
 - Every `(model, input)` referenced MUST resolve to a valid Stage 3 bundle on disk before any analysis fires.
 - `run_state_key` is derived from `(corpus_state_key, requested_models, requested_inputs, requested_kinds, seed, skip_llm_topics, strict_matrix, code_revision)`.
 - The orchestrator auto-skips `(model, "neuroscape_clusters")` for `model ∈ {voyage, minilm, openai, pubmedbert}` because the published NeuroScape centroids live in the domain-embedding space and the runner consumes the Stage 3 `neuroscape` bundle directly. Set `strict_matrix=True` to convert the auto-skip into a typed `AnalysisError`.
-- Default matrix size: **32 bundles** (10 projections + 10 communities + 10 topic_clusters + 2 neuroscape_clusters).
+- Default matrix size: **48 bundles** (15 projections + 15 communities + 15 topic_clusters + 3 neuroscape_clusters).
 
 ## 2. InputSource
 
@@ -43,6 +43,7 @@ class InputSource:
 Validation:
 - For the canonical `abstract` recipe: vectors come from `embed.compose.compose_recipe([title, introduction, methods, results, conclusion], …)`.
 - For the canonical `claims` component: vectors are loaded directly from `data/outputs/embeddings/<model>/claims__<state-key>/`.
+- For the canonical `methods` component: vectors are loaded directly from `data/outputs/embeddings/<model>/methods__<state-key>/`.
 - Rows must align across all components; missing rows in any component → row excluded with the count recorded in `metadata.json` (edge case in spec).
 
 ## 3. AnalysisBundle
@@ -189,7 +190,7 @@ A row exists for every abstract present in the corpus; missing analyses for an a
 |---|---|---|
 | `clustering_method` | str | `"communities"` \| `"neuroscape_clusters"` \| `"topic_clusters"` |
 | `model_key` | str | |
-| `input_source` | str | `"abstract"` \| `"claims"` |
+| `input_source` | str | `"abstract"` \| `"claims"` \| `"methods"` |
 | `cluster_id` | int32 | |
 | `topic_keywords` | str | JSON-encoded list[str] |
 | `topic_title` | str | |

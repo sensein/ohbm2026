@@ -41,7 +41,7 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-matrix
 PYTHONPATH=src .venv/bin/python scripts/run_analyze_matrix.py
 ```
 
-By default this produces **34 bundles** (10 projections + 10 communities + 10 topic_clusters + 4 neuroscape_clusters, with 6 dim-incompatible NeuroScape-cluster cells skipped) + 1 canonical rollup file pair (parquet + sqlite). Wall-clock budget: < 30 min (SC-001).
+By default this produces **48 bundles** (15 projections + 15 communities + 15 topic_clusters + 3 neuroscape_clusters; voyage/minilm/openai/pubmedbert × {abstract, claims, methods} on the neuroscape_clusters kind are auto-skipped — 12 cells) + 1 canonical rollup file pair (parquet + sqlite). Wall-clock budget: < 30 min (SC-001).
 
 Each bundle directory looks like:
 ```
@@ -76,7 +76,7 @@ The topic-keyword pipeline runs locally only (spaCy + c-TF-IDF). `Keywords` in e
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-matrix --models voyage
 ```
 
-Produces 8 bundles (1 model × 2 inputs × 4 kinds) + the rollup limited to voyage columns.
+Produces 12 bundles (1 model × 3 inputs × 4 kinds) + the rollup limited to voyage columns.
 
 ## 4. Force-recompute one kind without invalidating the rest
 

@@ -22,13 +22,13 @@ neuroscape_cluster_distance_<M>_<I> FLOAT32     -- angular distance on hypersphe
 topic_cluster_<M>_<I> INT32                      -- topic-model-driven cluster id
 ```
 
-For the canonical default matrix (5 models × 2 inputs), the column count is:
+For the canonical default matrix (5 models × 3 inputs), the column count is:
 - 1 id
-- 5 models × 5 UMAP-coord columns (`umap2d_x/y` + `umap3d_x/y/z`) = 25
-- 5 models × 2 inputs × 2 cluster-id columns (community + topic_cluster) = 20
-- 1 model (`neuroscape`) × 2 inputs × 2 columns (neuroscape_cluster_id + neuroscape_cluster_distance) = 4
+- 5 models × 5 UMAP-coord columns (`umap2d_x/y` + `umap3d_x/y/z`) = 25 — the rollup carries one canonical UMAP per model (`abstract` input); the per-bundle artifacts retain UMAP coords for the other inputs.
+- 5 models × 3 inputs × 2 cluster-id columns (community + topic_cluster) = 30
+- 1 model (`neuroscape`) × 3 inputs × 2 columns (neuroscape_cluster_id + neuroscape_cluster_distance) = 6
 
-Total: **50 columns** for the default full run. Sparser runs (e.g., one model) emit a subset; `neuroscape_cluster_*` columns are absent for non-compatible source models because their bundles are auto-skipped.
+Total: **62 columns** for the default full run. Sparser runs (e.g., one model) emit a subset; `neuroscape_cluster_*` columns are absent for non-compatible source models because their bundles are auto-skipped.
 
 ## `cluster_topics` table
 
@@ -37,7 +37,7 @@ A row per `(clustering_method, model_key, input_source, cluster_id)`. Composite 
 ```text
 clustering_method TEXT NOT NULL        -- "communities" | "neuroscape_clusters" | "topic_clusters"
 model_key         TEXT NOT NULL        -- "voyage", "minilm", "openai", "pubmedbert", "neuroscape"
-input_source      TEXT NOT NULL        -- "abstract" | "claims" | <component>
+input_source      TEXT NOT NULL        -- "abstract" | "claims" | "methods" | <component>
 cluster_id        INT32 NOT NULL
 topic_keywords    TEXT                 -- JSON-encoded list[str]; non-empty
 topic_title       TEXT                 -- may be "" when --skip-llm-topics

@@ -100,16 +100,16 @@ class BuildPlanTests(unittest.TestCase):
             _seed_stage3_bundles(
                 Path("data/outputs/embeddings"),
                 models=list(DEFAULT_MODELS),
-                components=["title", "claims"],
+                components=["title", "claims", "methods"],
                 state_key="abc123def456",
             )
             config = _baseline_config()
             plan = build_plan(config)
-            # 5 models × 2 inputs × 4 kinds = 40 entries (incl. skips)
-            self.assertEqual(len(plan.entries), 40)
-            # 4 incompatible models × 2 inputs × 1 kind = 8 should be marked skipped
+            # 5 models × 3 inputs × 4 kinds = 60 entries (incl. skips)
+            self.assertEqual(len(plan.entries), 60)
+            # 4 incompatible models × 3 inputs × 1 kind = 12 should be marked skipped
             skipped = [e for e in plan.entries if e.skipped]
-            self.assertEqual(len(skipped), 8)
+            self.assertEqual(len(skipped), 12)
             for entry in skipped:
                 self.assertEqual(entry.kind, "neuroscape_clusters")
                 self.assertNotEqual(entry.model_key, "neuroscape")
@@ -149,7 +149,7 @@ class BuildPlanTests(unittest.TestCase):
             _seed_stage3_bundles(
                 Path("data/outputs/embeddings"),
                 models=["voyage"],
-                components=["title", "claims"],
+                components=["title", "claims", "methods"],
                 state_key="abc123def456",
             )
             config = _baseline_config(kinds=["projections"], models=["voyage"])
@@ -165,7 +165,7 @@ class DryRunTests(unittest.TestCase):
             _seed_stage3_bundles(
                 Path("data/outputs/embeddings"),
                 models=["voyage"],
-                components=["title", "claims"],
+                components=["title", "claims", "methods"],
                 state_key="abc123def456",
             )
             config = _baseline_config(kinds=["projections"], models=["voyage"])
@@ -181,8 +181,8 @@ class DryRunTests(unittest.TestCase):
             output = stdout.getvalue()
             event = json.loads([line for line in output.strip().splitlines() if "dry_run_plan" in line][0])
             self.assertEqual(event["event"], "dry_run_plan")
-            self.assertEqual(event["n_entries"], 2)  # voyage × 2 inputs × 1 kind
-            self.assertEqual(event["n_to_run"], 2)
+            self.assertEqual(event["n_entries"], 3)  # voyage × 3 inputs × 1 kind
+            self.assertEqual(event["n_to_run"], 3)
             # No bundle directory was created
             self.assertFalse(Path("data/outputs/analysis").exists())
 
@@ -193,7 +193,7 @@ class StateKeyCollisionTests(unittest.TestCase):
             _seed_stage3_bundles(
                 Path("data/outputs/embeddings"),
                 models=["voyage"],
-                components=["title", "claims"],
+                components=["title", "claims", "methods"],
                 state_key="abc123def456",
             )
             config = _baseline_config(kinds=["projections"], models=["voyage"])
@@ -238,7 +238,7 @@ class MainCLITests(unittest.TestCase):
             _seed_stage3_bundles(
                 Path("data/outputs/embeddings"),
                 models=["voyage"],
-                components=["title", "claims"],
+                components=["title", "claims", "methods"],
                 state_key="abc123def456",
             )
             stdout = io.StringIO()

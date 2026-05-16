@@ -224,9 +224,10 @@ embedding annotation pipeline driven by a single CLI entrypoint:
   checkpoint SHA. The runner gate refuses to assign centroids when
   the centroid metadata's `domain_model_checkpoint_sha256` disagrees
   with the Stage 3 `neuroscape` bundle provenance.
-- Default matrix is **32 bundles** (5 models × 2 inputs × 4 kinds =
-  40 cells, with 8 auto-skipped for non-`neuroscape` source models on
-  the `neuroscape_clusters` kind).
+- Default matrix is **48 bundles** (5 models × 3 inputs × 4 kinds =
+  60 cells, with 12 auto-skipped for non-`neuroscape` source models on
+  the `neuroscape_clusters` kind). Inputs: the manuscript `abstract`
+  recipe + the per-component `claims` and `methods` bundles.
 - Same reorganization treatment Stages 1–3 received: the flat
   `analyze.py` (≈ 2800 LOC) was split into the `analyze/` package
   (`stage.py`, `storage.py`, `clusters.py`, `projections.py`,

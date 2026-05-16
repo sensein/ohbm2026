@@ -175,7 +175,7 @@ canonical `ohbmcli analyze-matrix` entrypoint producing four per-bundle
 artifacts (`projections` 2D+3D UMAP, `communities` via FAISS+Leiden+CPM
 with resolution sweep, `neuroscape_clusters` via precomputed spherical-
 mean centroids on the unit hypersphere, `topic_clusters`) across the
-default 5-model × 2-input matrix (`abstract` recipe + `claims` component),
+default 5-model × 3-input matrix (`abstract` recipe + `claims` and `methods` components — 48 bundles, 12 cells auto-skipped),
 plus a canonical per-corpus rollup at `data/outputs/analysis/annotations__
 <state-key>.{parquet,sqlite}`. Topic keywords come from a hybrid pipeline:
 spaCy (`en_core_web_md`; optional scispacy) noun-chunk + NER extraction

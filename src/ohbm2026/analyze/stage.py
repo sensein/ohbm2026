@@ -66,7 +66,7 @@ __all__ = [
 
 
 DEFAULT_MODELS = ("voyage", "minilm", "openai", "pubmedbert", "neuroscape")
-DEFAULT_INPUTS = ("abstract", "claims")
+DEFAULT_INPUTS = ("abstract", "claims", "methods")
 DEFAULT_KINDS = ("projections", "communities", "neuroscape_clusters", "topic_clusters")
 NEUROSCAPE_COMPATIBLE_MODELS = frozenset({"neuroscape"})
 

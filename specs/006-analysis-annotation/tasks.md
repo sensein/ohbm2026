@@ -95,7 +95,7 @@ description: "Task list for Stage 4 — Analysis & Annotation"
 
 > **Write these tests FIRST, ensure they FAIL before implementation. Each test uses synthetic small matrices to keep runtime under the existing suite envelope.**
 
-- [X] T025 [P] [US1] Write `tests/test_analyze_stage.py::test_dry_run_resolves_matrix` — a fake Stage 3 root with 2 models × 2 inputs × 6 components; runner produces a plan for 2×2×4 = 16 bundle paths and writes no files
+- [X] T025 [P] [US1] Write `tests/test_analyze_stage.py::test_dry_run_resolves_matrix` — a fake Stage 3 root with 2 models × 2 inputs × 6 components; runner produces a plan for 2×2×4 = 16 bundle paths and writes no files (note: the test stays at 2 inputs to keep the fixture compact; the live default of 3 inputs is validated by T097)
 - [X] T026 [P] [US1] Write `tests/test_analyze_stage.py::test_missing_input_bundle_refusal` — referenced input bundle absent on disk → exits 2 with `InputBundleMissing` containing the expected path
 - [X] T027 [P] [US1] Write `tests/test_analyze_stage.py::test_cache_hit_skips_compute` — second run with identical config writes nothing new; reports `"cache":"hit"` per bundle
 - [X] T028 [P] [US1] Write `tests/test_analyze_stage.py::test_state_key_collision_refusal` — pre-existing bundle dir with a mismatched `corpus_state_key` in its provenance → runner refuses to overwrite (FR-013)
@@ -115,7 +115,7 @@ description: "Task list for Stage 4 — Analysis & Annotation"
 - [X] T039 [US1] Add the venv-only wrapper `scripts/run_analyze_matrix.py` (mirrors `scripts/run_embed_matrix.py`): loads `.env`, sets `PYTHONPATH=src`, delegates to `ohbm2026.analyze.stage.main(sys.argv[1:])`
 - [X] T040 [US1] Implement the per-`(model, input)` UMAP run inside `analyze/stage.py` (fits a 2D+3D UMAP, writes the `projections` bundle through `analyze.umap.write_projections_bundle` — the function ships in US2 below); for this MVP slice the dispatch only handles `kind == "projections"`. (Communities + neuroscape_clusters + topic_clusters dispatches are stubbed and raise `NotImplementedError` so US1 tests pass with `--kinds projections` only.)
 
-**Checkpoint**: `ohbmcli analyze-matrix --kinds projections` runs end-to-end against the current Stage 3 corpus and emits 10 (5 models × 2 inputs) `projections` bundles + a UMAP-only rollup. The orchestrator + CLI + provenance + cache scaffolding are validated.
+**Checkpoint**: `ohbmcli analyze-matrix --kinds projections` runs end-to-end against the current Stage 3 corpus and emits 15 (5 models × 3 inputs) `projections` bundles + a UMAP-only rollup. The orchestrator + CLI + provenance + cache scaffolding are validated.
 
 ---
 
@@ -174,7 +174,7 @@ description: "Task list for Stage 4 — Analysis & Annotation"
 - [X] T064a [P] [US3] Extend `scripts/derive_neuroscape_centroids.py` to write a sibling `centroid_metadata.json` carrying: `centroid_table_version`, source CSV sha256s (articles + clusters), HDF5 shard manifest hash (sorted-shard-path-list digest), discovered `cluster_count`, `cluster_ids` list, and `domain_model_checkpoint_sha256` from `Models/domain_embedding_model.pth`. Use the **polar mean_angle** recipe (`convert_to_polar → mean_angle → convert_to_cartesian`) per the published NeuroScape `get_centroids` so bytes match the reference.
 - [X] T065a [US3] Add the **checkpoint-SHA gate** in `analyze.runners.neuroscape_clusters_runner`: before calling `assign_nearest_centroid`, read the Stage 3 neuroscape bundle's `provenance.json`, extract its recorded `domain_model_checkpoint_sha256`, and compare against `centroid_metadata.domain_model_checkpoint_sha256`. Mismatch → raise `CentroidTableVersionMismatch`. Add a test exercising the mismatch path.
 
-**Checkpoint**: `ohbmcli analyze-matrix --kinds neuroscape_clusters` produces 10 bundles (5 models × 2 inputs) carrying NeuroScape cluster ids + angular distances + provenance; bundles join into `cluster_topics` via the `cluster_table.csv` lookup.
+**Checkpoint**: `ohbmcli analyze-matrix --kinds neuroscape_clusters` produces 3 bundles (`neuroscape` × 3 inputs — voyage/minilm/openai/pubmedbert are auto-skipped per FR-002) carrying NeuroScape cluster ids + angular distances + provenance; bundles join into `cluster_topics` via the `cluster_table.csv` lookup.
 
 ---
 
@@ -245,7 +245,7 @@ description: "Task list for Stage 4 — Analysis & Annotation"
 - [X] T094 Update `README.md` Stage 4 section with the new `ohbmcli analyze-matrix` quickstart (mirror `specs/006-analysis-annotation/quickstart.md`); mention `analyze-umap-project` + `derive-neuroscape-centroids` aliases
 - [X] T095 [P] Update `docs/reproducibility-vision.md` to list `data/outputs/analysis/annotations__<state-key>.{parquet,sqlite}` as the canonical UI input + the per-bundle directory layout
 - [X] T096 [P] Update `memory/summary.md` with Stage 4's design moves (one paragraph; nothing memory-sensitive)
-- [ ] T097 Run the live quickstart against the current Stage 3 corpus `f0c51e80dc0e`: `ohbmcli analyze-matrix` → confirm **32 bundles** + 1 rollup pair land under `data/outputs/analysis/` (10 projections + 10 communities + 10 topic_clusters + 2 neuroscape_clusters; verify 8 `bundle_skipped` events for voyage/minilm/openai/pubmedbert × {abstract, claims} on the neuroscape_clusters kind)
+- [ ] T097 Run the live quickstart against the current Stage 3 corpus `f0c51e80dc0e`: `ohbmcli analyze-matrix` → confirm **48 bundles** + 1 rollup pair land under `data/outputs/analysis/` (15 projections + 15 communities + 15 topic_clusters + 3 neuroscape_clusters; verify 12 `bundle_skipped` events for voyage/minilm/openai/pubmedbert × {abstract, claims, methods} on the neuroscape_clusters kind)
 - [X] T097a [P] [US1] **Validate SC-004** — update the UI export step (`src/ohbm2026/ui.py`'s `export_ui_main` + `build_ui_main`) to consume `data/outputs/analysis/annotations__<state-key>.sqlite` + the per-cluster `topics.json` bundles instead of the legacy embedding-bundle scan; run `ohbmcli export-ui` end-to-end against the new Stage 4 outputs and confirm the resulting UI bundle surfaces UMAP coordinates + community labels + NeuroScape cluster labels + topic keywords. Legacy UI consumption code is replaced, not preserved. Add `tests/test_ui_export.py::test_consumes_stage4_rollup` to lock the new contract
 - [ ] T098 Validate **SC-001** (< 30 min wall-clock) — record the live default-matrix wall-clock; if > 30 min, profile and either parallelize per-bundle work or raise the budget in spec with justification
 - [ ] T099 Validate **SC-002** (< 60 s cached re-run) — rerun the same command immediately; record the wall-clock
@@ -334,7 +334,7 @@ Task: "Implement src/ohbm2026/analyze/rollup.py::write_rollup"
 2. Complete Phase 2 (Foundational) — reorganization green; SC-007 cleared
 3. Land US2's UMAP module (T048–T051) so US1's projections dispatch has something to call
 4. Complete Phase 3 (US1) — orchestrator + CLI + rollup; `ohbmcli analyze-matrix --kinds projections` works
-5. **STOP and VALIDATE**: 10 projections bundles + a UMAP-only rollup land under `data/outputs/analysis/`; CLI emits the per-bundle JSON-per-line summary
+5. **STOP and VALIDATE**: 15 projections bundles + a UMAP-only rollup land under `data/outputs/analysis/`; CLI emits the per-bundle JSON-per-line summary
 6. Land US2's `project_into_umap` + CLI subcommand → fully testable out-of-corpus projection
 
 ### Incremental Delivery
