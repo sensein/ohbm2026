@@ -36,6 +36,15 @@ from ohbm2026.analyze.communities import (
     detect_communities,
     write_communities_bundle,
 )
+from ohbm2026.analyze.topic_clusters import (
+    run_topic_clustering,
+    write_topic_clusters_bundle,
+)
+from ohbm2026.analyze.topics import (
+    DEFAULT_LLM_MODEL_ID,
+    DEFAULT_PROMPT_VERSION,
+    build_topics_artifact,
+)
 from ohbm2026.analyze.provenance import write_bundle_provenance
 from ohbm2026.analyze.stage import (
     AnalysisConfig,
@@ -57,7 +66,13 @@ from ohbm2026.analyze.umap import (
 from ohbm2026.exceptions import AnalysisError
 
 
-__all__ = ["projections_runner", "neuroscape_clusters_runner", "communities_runner"]
+__all__ = [
+    "projections_runner",
+    "neuroscape_clusters_runner",
+    "communities_runner",
+    "topic_clusters_runner",
+    "load_abstract_texts",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +462,22 @@ def communities_runner(config: AnalysisConfig, entry: PlanEntry) -> dict[str, An
         seed=config.seed,
     )
 
+    # Build the per-cluster topics artifact (FR-009 hybrid pipeline).
+    topics_payload: dict[int, dict[str, Any]] = {}
+    if result.n_communities > 0:
+        abstract_texts = load_abstract_texts(ids)
+        topics_payload = build_topics_artifact(
+            result.community_ids.astype(int).tolist(),
+            abstract_texts,
+            cache_dir=config.cache_root
+            / "topics"
+            / f"{entry.model_key}_{entry.input_source}",
+            skip_llm=config.skip_llm_topics,
+            llm_model_id=DEFAULT_LLM_MODEL_ID,
+            prompt_version=DEFAULT_PROMPT_VERSION,
+            llm_call=None,
+        )
+
     write_communities_bundle(
         bundle_dir,
         ids=ids,
@@ -458,7 +489,7 @@ def communities_runner(config: AnalysisConfig, entry: PlanEntry) -> dict[str, An
         resolution_min=algorithm_config["resolution_min"],
         resolution_max=algorithm_config["resolution_max"],
         resolution_points=algorithm_config["resolution_points"],
-        topics=None,  # filled by US5's topics-attachment pass
+        topics=topics_payload or None,
     )
     completed_at = datetime.now(timezone.utc).isoformat()
     write_bundle_provenance(
@@ -494,7 +525,175 @@ def communities_runner(config: AnalysisConfig, entry: PlanEntry) -> dict[str, An
     }
 
 
+# ---------------------------------------------------------------------------
+# Corpus text loader (for topics-attachment)
+# ---------------------------------------------------------------------------
+
+
+def load_abstract_texts(
+    abstract_ids: np.ndarray,
+    *,
+    corpus_path: Path = Path("data/primary/abstracts.json"),
+    enriched_path: Path = Path("data/primary/abstracts_enriched.sqlite"),
+) -> list[str]:
+    """Load per-abstract text concatenations aligned with `abstract_ids`.
+
+    Prefers the enriched SQLite (which has the per-section markdown);
+    falls back to the raw `abstracts.json` title + claims-ish blob.
+    Returns a list of strings (empty for abstracts that don't resolve).
+    """
+    by_id: dict[int, str] = {}
+
+    # Try enriched SQLite first
+    if enriched_path.exists():
+        try:
+            from ohbm2026.enrich.storage import iter_enriched
+
+            for record in iter_enriched(enriched_path):
+                aid = record.get("id")
+                if not isinstance(aid, int):
+                    continue
+                parts = [
+                    record.get("title", "") or "",
+                    record.get("introduction_markdown", "") or "",
+                    record.get("methods_markdown", "") or "",
+                    record.get("results_markdown", "") or "",
+                    record.get("conclusion_markdown", "") or "",
+                ]
+                by_id[aid] = " ".join(p for p in parts if p)
+        except Exception:  # noqa: BLE001 — best-effort; fallback below
+            pass
+
+    # Fallback: raw corpus JSON
+    if not by_id and corpus_path.exists():
+        try:
+            data = json.loads(corpus_path.read_text(encoding="utf-8"))
+            for entry in data.get("abstracts", []):
+                aid = entry.get("id")
+                if not isinstance(aid, int):
+                    continue
+                by_id[aid] = str(entry.get("title", "") or "")
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    return [by_id.get(int(aid), "") for aid in abstract_ids.tolist()]
+
+
+# ---------------------------------------------------------------------------
+# topic_clusters runner
+# ---------------------------------------------------------------------------
+
+
+def _topic_clusters_algorithm_config(config: AnalysisConfig) -> dict[str, Any]:
+    return {
+        "umap_components": 5,
+        "umap_n_neighbors": 15,
+        "umap_min_dist": 0.0,
+        "min_cluster_size": "auto",
+        "seed": config.seed,
+    }
+
+
+def topic_clusters_runner(
+    config: AnalysisConfig, entry: PlanEntry
+) -> dict[str, Any]:
+    """UMAP-reduce → HDBSCAN cluster → optional LLM-grouped topics."""
+    from hashlib import sha256
+
+    ids, vectors, assembly_hash = _load_input_matrix(config, entry)
+
+    algorithm_config = _topic_clusters_algorithm_config(config)
+    cache_key_payload = {
+        "input_source_assembly_hash": assembly_hash,
+        "algorithm_config": algorithm_config,
+        "seed": config.seed,
+        "skip_llm_topics": config.skip_llm_topics,
+    }
+    cache_key = "sha256:" + sha256(
+        json.dumps(cache_key_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    bundle_dir = _bundle_output_path(config, entry)
+    if "topic_clusters" not in config.invalidate_kinds and _cache_hit_compatible(
+        bundle_dir, cache_key
+    ):
+        return {"cache": "hit", "n_rows": int(ids.shape[0])}
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    result = run_topic_clustering(
+        vectors,
+        umap_components=algorithm_config["umap_components"],
+        umap_n_neighbors=algorithm_config["umap_n_neighbors"],
+        umap_min_dist=algorithm_config["umap_min_dist"],
+        seed=config.seed,
+    )
+
+    # Build the per-cluster topics artifact (spaCy + c-TF-IDF + optional LLM).
+    topics_payload: dict[int, dict[str, Any]] = {}
+    if result.n_topics > 0:
+        abstract_texts = load_abstract_texts(ids)
+        # Exclude HDBSCAN noise (cluster_id == -1) from the topics map.
+        mask = result.topic_cluster_ids >= 0
+        if mask.any():
+            assignments = result.topic_cluster_ids[mask].astype(int).tolist()
+            texts = [abstract_texts[i] for i, keep in enumerate(mask.tolist()) if keep]
+            topics_payload = build_topics_artifact(
+                assignments,
+                texts,
+                cache_dir=config.cache_root
+                / "topics"
+                / f"{entry.model_key}_{entry.input_source}",
+                skip_llm=config.skip_llm_topics,
+                llm_model_id=DEFAULT_LLM_MODEL_ID,
+                prompt_version=DEFAULT_PROMPT_VERSION,
+                llm_call=None,  # caller wires enrich.flex_tier when ready
+            )
+
+    write_topic_clusters_bundle(
+        bundle_dir,
+        ids=ids,
+        result=result,
+        source_model=entry.model_key,
+        input_source=entry.input_source,
+        seed=config.seed,
+        topics=topics_payload or None,
+    )
+    completed_at = datetime.now(timezone.utc).isoformat()
+    write_bundle_provenance(
+        bundle_dir / "provenance.json",
+        {
+            "schema_version": "stage4.provenance.v1",
+            "stage": "analysis",
+            "kind": "topic_clusters",
+            "bundle_path": str(
+                bundle_dir.relative_to(Path.cwd())
+                if bundle_dir.is_absolute() and Path.cwd() in bundle_dir.parents
+                else bundle_dir
+            ),
+            "corpus_state_key": config.corpus_state_key,
+            "input_source_assembly_hash": assembly_hash or _kind_state_key(config, entry),
+            "algorithm_config_canonical_json": json.dumps(
+                algorithm_config, sort_keys=True
+            ),
+            "cache_key": cache_key,
+            "code_revision": config.code_revision,
+            "command": config.command_line,
+            "seed": config.seed,
+            "started_at": started_at,
+            "completed_at": completed_at,
+        },
+    )
+    return {
+        "cache": "miss",
+        "n_rows": int(ids.shape[0]),
+        "n_topics": int(result.n_topics),
+        "n_noise": int(result.n_noise),
+        "min_cluster_size": int(result.min_cluster_size),
+    }
+
+
 # Register on import.
 register_kind_runner("projections", projections_runner)
 register_kind_runner("neuroscape_clusters", neuroscape_clusters_runner)
 register_kind_runner("communities", communities_runner)
+register_kind_runner("topic_clusters", topic_clusters_runner)
