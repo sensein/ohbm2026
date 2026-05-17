@@ -281,13 +281,13 @@
 					type="button"
 					class="control-toggle"
 					class:active={$cartOnly}
-					disabled={$cartStore.size === 0}
+					disabled={$cartStore.size === 0 && !$cartOnly}
 					on:click={() => cartOnly.update((v) => !v)}
 					aria-pressed={$cartOnly}
-					title={$cartStore.size === 0
-						? 'Saved-only filter — your list is empty'
-						: $cartOnly
-							? 'Showing saved abstracts only — click to show everything'
+					title={$cartOnly
+						? 'Showing saved abstracts only — click to show everything'
+						: $cartStore.size === 0
+							? 'Saved-only filter — your list is empty'
 							: `Filter to the ${$cartStore.size} saved abstract${$cartStore.size === 1 ? '' : 's'}`}
 					data-testid="toggle-cart-only"
 				>
@@ -423,7 +423,8 @@
 		border-color: var(--warning-border);
 	}
 	.control-toggle:disabled {
-		cursor: progress;
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 	.layout {
 		display: grid;

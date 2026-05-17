@@ -74,14 +74,15 @@
 	}
 
 	// Visible poster_ids in the current filter/result state, used by the
-	// bulk add/remove control.
+	// bulk add control. The control is ADD-ONLY now — "Remove N from list"
+	// was a foot-gun in Saved-only mode (one click wipes the cart) and
+	// adding/removing in bulk should only ever grow the cart. Use the
+	// drawer's per-item × or the "Clear" footer button to remove.
 	$: visiblePosterIds = visible.map((r) => r.poster_id).filter(Boolean);
-	$: allVisibleInCart =
-		visiblePosterIds.length > 0 && visiblePosterIds.every((id) => $cartStore.has(id));
+	$: missingFromCart = visiblePosterIds.filter((id) => !$cartStore.has(id));
 
-	function toggleAllVisible() {
-		if (allVisibleInCart) cartStore.removeMany(visiblePosterIds);
-		else cartStore.addMany(visiblePosterIds);
+	function addAllVisible() {
+		if (missingFromCart.length > 0) cartStore.addMany(missingFromCart);
 	}
 </script>
 
@@ -91,20 +92,15 @@
 		{#if filteredIds !== null}
 			<span class="muted">(filtered)</span>
 		{/if}
-		{#if visiblePosterIds.length > 0}
+		{#if missingFromCart.length > 0}
 			<button
 				type="button"
 				class="bulk-action"
-				class:remove-mode={allVisibleInCart}
-				on:click={toggleAllVisible}
-				title={allVisibleInCart
-					? `Remove all ${visiblePosterIds.length} visible from your list`
-					: `Add all ${visiblePosterIds.length} visible to your list`}
-				data-testid="bulk-cart-toggle"
+				on:click={addAllVisible}
+				title={`Add the ${missingFromCart.length} visible abstract${missingFromCart.length === 1 ? '' : 's'} not yet in your list`}
+				data-testid="bulk-cart-add"
 			>
-				{allVisibleInCart
-					? `Remove ${visiblePosterIds.length} from list`
-					: `+ Add ${visiblePosterIds.length} to list`}
+				+ Add {missingFromCart.length} to list
 			</button>
 		{/if}
 	</header>
@@ -370,11 +366,6 @@
 	}
 	.bulk-action:hover {
 		background: var(--accent-soft-bg);
-	}
-	.bulk-action.remove-mode {
-		color: var(--text);
-		border-color: var(--warning-border, var(--border));
-		background: var(--warning-bg, var(--bg-sunken));
 	}
 	.load-more {
 		margin-top: 0.5rem;
