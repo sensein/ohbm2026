@@ -24,6 +24,7 @@
 	import UmapPanel from '$lib/components/UmapPanel.svelte';
 	import FacetSidebar from '$lib/components/FacetSidebar.svelte';
 	import { semanticEnabled } from '$lib/stores/searchMode';
+	import { semanticStatus } from '$lib/search/semantic';
 
 	let manifest: Manifest | null = null;
 	let abstracts: AbstractRecord[] = [];
@@ -38,13 +39,34 @@
 	let showFacets = false; // mobile drawer state; desktop always-shown
 	let cellShard: CellShard | null = null;
 	let cellTopics: TopicShard | null = null;
+	/**
+	 * Per-page-load random rank over abstract ids. The home grid sorts by
+	 * this when no search ranking applies so each visit shows a different
+	 * sample first. The underlying `abstracts` array is left in canonical
+	 * order — the semantic worker indexes vectors positionally and would
+	 * misalign if we shuffled in place.
+	 */
+	let defaultRank: Map<number, number> | null = null;
 	const envBuildInfo: BuildInfo | null = buildInfoFromEnv();
+
+	function buildRandomRank(records: AbstractRecord[]): Map<number, number> {
+		const ids = records.map((r) => r.abstract_id);
+		// Fisher-Yates shuffle.
+		for (let i = ids.length - 1; i > 0; i--) {
+			const j = Math.floor(Math.random() * (i + 1));
+			[ids[i], ids[j]] = [ids[j], ids[i]];
+		}
+		const out = new Map<number, number>();
+		ids.forEach((id, idx) => out.set(id, idx));
+		return out;
+	}
 
 	onMount(async () => {
 		const [m, a, au] = await Promise.all([loadManifest(), loadAbstracts(), loadAuthors()]);
 		manifest = m;
 		if (a && au) {
 			abstracts = a.abstracts;
+			defaultRank = buildRandomRank(abstracts);
 			authorsById = new Map(au.authors.map((x) => [x.author_id, x]));
 			abstractsByPosterId = new Map(
 				a.abstracts.filter((x) => x.poster_id).map((x) => [x.poster_id, x])
@@ -59,8 +81,9 @@
 		}
 		loaded = true;
 		// Warm the semantic worker in the background so the model is ready
-		// when the user types. No explicit toggle — semantic search is
-		// always on, merged with lexical via union below.
+		// the moment the user types. The worker does NOT influence ordering
+		// while the search box is empty — the reactive block below nulls
+		// `semanticScores` whenever `$searchQuery` is blank.
 		if (!dataMissing) {
 			void (async () => {
 				try {
@@ -190,15 +213,30 @@
 				<button
 					type="button"
 					class="control-toggle"
-					class:active={$semanticEnabled}
+					class:active={$semanticEnabled && $semanticStatus.state === 'ready'}
+					class:loading={$semanticStatus.state === 'loading-vectors' || $semanticStatus.state === 'loading-model'}
+					disabled={$semanticStatus.state !== 'ready' && $semanticStatus.state !== 'idle' && $semanticStatus.state !== 'error'}
 					on:click={() => semanticEnabled.toggle()}
 					aria-pressed={$semanticEnabled}
-					title={$semanticEnabled
-						? 'Semantic search is ON — clicking disables it'
-						: 'Semantic search is OFF — clicking enables it'}
+					title={$semanticStatus.state === 'ready'
+						? $semanticEnabled
+							? 'Semantic search is ON — click to disable'
+							: 'Semantic search is OFF — click to enable'
+						: $semanticStatus.state === 'loading-model'
+							? 'Loading MiniLM model… search will be live shortly'
+							: $semanticStatus.state === 'loading-vectors'
+								? 'Loading semantic vectors…'
+								: $semanticStatus.state === 'error'
+									? `Semantic search unavailable: ${$semanticStatus.message}`
+									: 'Semantic search idle — click to engage'}
 					data-testid="toggle-semantic"
 				>
-					✨ Semantic
+					{#if $semanticStatus.state === 'loading-vectors' || $semanticStatus.state === 'loading-model'}
+						⏳
+					{:else}
+						✨
+					{/if}
+					Semantic
 				</button>
 				<button
 					type="button"
@@ -258,6 +296,7 @@
 					{filteredIds}
 					{semanticScores}
 					lexicalExactness={lexicalExactness}
+					{defaultRank}
 				/>
 			</div>
 			<div class="detail-pane" class:active={focused !== null}>
@@ -322,6 +361,13 @@
 		background: var(--accent);
 		color: var(--accent-text);
 		border-color: var(--accent);
+	}
+	.control-toggle.loading {
+		opacity: 0.7;
+		cursor: progress;
+	}
+	.control-toggle:disabled {
+		cursor: progress;
 	}
 	.layout {
 		display: grid;

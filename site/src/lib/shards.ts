@@ -132,6 +132,36 @@ export interface TopicShard {
 	topics: TopicRecord[];
 }
 
+export interface ClaimRecord {
+	claim: string;
+	claim_type?: string;
+	evidence?: string;
+	evidence_eco_codes?: string[];
+	source?: string;
+	source_quote_verified?: boolean;
+}
+
+export interface FigureRecord {
+	interpretation: string;
+	keywords?: string[];
+	ocr_text?: string;
+	question_name?: string;
+	model_quality_estimate?: string;
+}
+
+export interface EnrichmentRecord {
+	claims: ClaimRecord[];
+	figures: FigureRecord[];
+}
+
+export interface EnrichmentShard {
+	schema_version: string;
+	build_info: BuildInfo;
+	ai_provenance: { claims_model_id: string | null; figures_model_id: string | null };
+	// key = string(abstract_id)
+	records: Record<string, EnrichmentRecord>;
+}
+
 export interface NeighborsShard {
 	schema_version: string;
 	build_info: BuildInfo;
@@ -187,6 +217,52 @@ export function loadTopics(cellKey: string, kind: string): Promise<TopicShard | 
 
 export function loadNeighbors(cellKey: string): Promise<NeighborsShard | null> {
 	return getFromPackage<NeighborsShard>(`data/neighbors/${cellKey}.json`);
+}
+
+/**
+ * Load every per-cell `data/neighbors/*.json` shard currently in the data
+ * package, keyed by cell_key. Cheap — the data package is already a Map
+ * resident in memory after first paint. Used by the detail panel to
+ * surface a corpus-wide view of related abstracts rather than one biased
+ * by the active (model, input) cell.
+ */
+export async function loadAllNeighbors(): Promise<Map<string, NeighborsShard>> {
+	const pkg = await loadDataPackage();
+	const out = new Map<string, NeighborsShard>();
+	if (!pkg) return out;
+	const prefix = 'data/neighbors/';
+	for (const [path, v] of pkg) {
+		if (!path.startsWith(prefix) || !path.endsWith('.json')) continue;
+		const shard = v as NeighborsShard;
+		out.set(shard.cell_key, shard);
+	}
+	return out;
+}
+
+/**
+ * Load every per-cell shard + its matching `communities` topics shard so the
+ * detail panel can render this abstract's cluster membership across all 15
+ * (model, input) approaches. Returns a map of cell_key → { cell, topics }.
+ */
+export async function loadAllCellsWithTopics(): Promise<
+	Map<string, { cell: CellShard; topics: TopicShard | null }>
+> {
+	const pkg = await loadDataPackage();
+	const out = new Map<string, { cell: CellShard; topics: TopicShard | null }>();
+	if (!pkg) return out;
+	const cellPrefix = 'data/cells/';
+	for (const [path, v] of pkg) {
+		if (!path.startsWith(cellPrefix) || !path.endsWith('.json')) continue;
+		const cell = v as CellShard;
+		const topicsPath = `data/topics/${cell.cell_key}_communities.json`;
+		const topics = (pkg.get(topicsPath) as TopicShard | undefined) ?? null;
+		out.set(cell.cell_key, { cell, topics });
+	}
+	return out;
+}
+
+export function loadEnrichment(): Promise<EnrichmentShard | null> {
+	return getFromPackage<EnrichmentShard>('data/enrichment.json');
 }
 
 export interface MinilmVectorsSidecar {

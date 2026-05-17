@@ -18,6 +18,12 @@
 	 * literally contains the user's query (e.g. "pydra") surfaces above
 	 * fuzzy/proximal matches (hydra, pydry, etc.). */
 	export let lexicalExactness: Map<number, number> | null = null;
+	/** Per-abstract default rank — applied only when no search/semantic
+	 * ranking is active. The parent shuffles abstract_ids on every page load
+	 * so the home grid surfaces a different sample each visit. The semantic
+	 * worker still indexes by the original positional order in
+	 * `abstracts.json`, so we MUST NOT shuffle the underlying array. */
+	export let defaultRank: Map<number, number> | null = null;
 	/** Truncate to this many cards to keep DOM size bounded; "Show more" appends. */
 	export let initialWindow = 60;
 
@@ -27,7 +33,13 @@
 		const matched = abstracts.filter((a) => filteredIds === null || filteredIds.has(a.abstract_id));
 		const hasExactness = lexicalExactness !== null && lexicalExactness.size > 0;
 		const hasSemantic = semanticScores !== null && semanticScores.size > 0;
-		if (!hasExactness && !hasSemantic) return matched;
+		if (!hasExactness && !hasSemantic) {
+			// No search ranking — apply the random default order if provided.
+			if (!defaultRank) return matched;
+			return matched
+				.slice()
+				.sort((a, b) => (defaultRank!.get(a.abstract_id) ?? 0) - (defaultRank!.get(b.abstract_id) ?? 0));
+		}
 		// Sort key: primary = lexical exactness (higher first), secondary =
 		// semantic score (higher first). Exactness wins because the user's
 		// expectation when typing a rare technical term ("pydra") is that the

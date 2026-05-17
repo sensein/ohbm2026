@@ -1,7 +1,18 @@
 <script lang="ts">
-	import { focusedAbstract, selectedCell } from '$lib/stores/selection';
+	import { focusedAbstract } from '$lib/stores/selection';
 	import { cartStore } from '$lib/stores/cart';
-	import { loadNeighbors, type AbstractRecord, type AuthorRecord, type NeighborsShard } from '$lib/shards';
+	import {
+		loadAllCellsWithTopics,
+		loadAllNeighbors,
+		loadEnrichment,
+		type AbstractRecord,
+		type AuthorRecord,
+		type CellShard,
+		type EnrichmentRecord,
+		type EnrichmentShard,
+		type NeighborsShard,
+		type TopicShard
+	} from '$lib/shards';
 
 	export let abstract: AbstractRecord | null = null;
 	export let authorsById: Map<number, AuthorRecord>;
@@ -9,6 +20,86 @@
 	export let dismissable = true;
 
 	let showAllAuthors = false;
+	// Section expansion: each body section starts collapsed; user opens what
+	// they want to read. Per-claim and per-figure cards also follow this
+	// open/closed pattern so the panel stays a scannable overview.
+	let openSections: Record<string, boolean> = {};
+	let openClaims: Record<number, boolean> = {};
+	let openFigures: Record<number, boolean> = {};
+
+	function toggleSection(key: string) {
+		openSections = { ...openSections, [key]: !openSections[key] };
+	}
+	function toggleClaim(i: number) {
+		openClaims = { ...openClaims, [i]: !openClaims[i] };
+	}
+	function toggleFigure(i: number) {
+		openFigures = { ...openFigures, [i]: !openFigures[i] };
+	}
+
+	// Reset per-section/per-card open state when the focused abstract changes
+	// so the next abstract starts in the same collapsed default.
+	let prevAbstractId: number | null = null;
+	$: if (abstract && abstract.abstract_id !== prevAbstractId) {
+		prevAbstractId = abstract.abstract_id;
+		openSections = {};
+		openClaims = {};
+		openFigures = {};
+	}
+
+	// --- Cross-cell cluster membership -----------------------------------
+	// For every (model, input) cell, look up which community this abstract
+	// belongs to + the community's label. Lets the user compare what
+	// different embeddings consider "this abstract's neighbourhood".
+	let allCells: Map<string, { cell: CellShard; topics: TopicShard | null }> | null = null;
+	$: void (async () => {
+		if (allCells !== null) return;
+		allCells = await loadAllCellsWithTopics();
+	})();
+	type ClusterRow = { cellKey: string; communityId: number; label: string };
+	$: clusterMemberships = (() => {
+		if (!abstract || !allCells) return [] as ClusterRow[];
+		const rows: ClusterRow[] = [];
+		for (const [cellKey, { cell, topics }] of allCells) {
+			const row = cell.rows.find((r) => r.abstract_id === abstract!.abstract_id);
+			if (!row) continue;
+			const topicMap = new Map<number, string>();
+			if (topics) {
+				for (const t of topics.topics) {
+					const label = t.title
+						? t.title
+						: t.keywords?.length
+							? t.keywords.slice(0, 3).join(', ')
+							: `cluster ${t.cluster_id}`;
+					topicMap.set(t.cluster_id, label);
+				}
+			}
+			rows.push({
+				cellKey,
+				communityId: row.community_id,
+				label: topicMap.get(row.community_id) ?? `community ${row.community_id}`
+			});
+		}
+		rows.sort((a, b) => a.cellKey.localeCompare(b.cellKey));
+		return rows;
+	})();
+
+	// --- Stage 2.1 enrichment (claims + figure interpretations) ----------
+	let enrichmentShard: EnrichmentShard | null = null;
+	let enrichmentLoaded = false;
+	$: void (async () => {
+		if (enrichmentLoaded) return;
+		const shard = await loadEnrichment();
+		enrichmentShard = shard;
+		enrichmentLoaded = true;
+	})();
+	$: enrichment = (() => {
+		if (!abstract || !enrichmentShard) return null;
+		const rec = enrichmentShard.records[String(abstract.abstract_id)];
+		return (rec as EnrichmentRecord | undefined) ?? null;
+	})();
+	$: claimsModelId = enrichmentShard?.ai_provenance.claims_model_id ?? null;
+	$: figuresModelId = enrichmentShard?.ai_provenance.figures_model_id ?? null;
 
 	$: authorList = abstract
 		? abstract.author_ids
@@ -25,45 +116,89 @@
 		return $cartStore.has(posterId);
 	}
 
-	// --- Related abstracts via the per-cell neighbors shard --------------
-	$: cellKey = `${$selectedCell.model}_${$selectedCell.input}`;
-	let neighborsShard: NeighborsShard | null = null;
+	// --- Related abstracts: aggregated across ALL cells -----------------
+	// The earlier single-cell view biased the "most similar" list toward the
+	// active (model, input) embedding. Aggregating over every cell surfaces
+	// abstracts that are consistently close (or distant) across multiple
+	// embeddings — a stronger signal of true topical similarity. Each row
+	// shows the min distance plus the count of cells in which the abstract
+	// appeared in the focused record's nearest/farthest 10.
+	let allNeighbors: Map<string, NeighborsShard> | null = null;
 	let neighborsLoading = false;
-
 	$: void (async () => {
-		const key = cellKey;
+		if (allNeighbors !== null) return;
 		neighborsLoading = true;
-		const shard = await loadNeighbors(key);
-		if (key === cellKey) {
-			neighborsShard = shard;
-			neighborsLoading = false;
-		}
+		allNeighbors = await loadAllNeighbors();
+		neighborsLoading = false;
 	})();
 
-	type RelatedEntry = { abstract: AbstractRecord; distance: number };
+	type RelatedEntry = {
+		abstract: AbstractRecord;
+		minDistance: number;
+		meanDistance: number;
+		cellCount: number;
+		cellKeys: string[];
+	};
 
-	function buildRelated(
-		shard: NeighborsShard | null,
+	function aggregateRelated(
+		shards: Map<string, NeighborsShard> | null,
 		focusedId: number | undefined,
-		kind: 'nearest' | 'farthest',
-		limit = 5
+		kind: 'nearest' | 'farthest'
 	): RelatedEntry[] {
-		if (!shard || focusedId === undefined) return [];
-		const row = shard.abstract_ids.indexOf(focusedId);
-		if (row < 0) return [];
-		const ids = kind === 'nearest' ? shard.nearest_ids[row] : shard.farthest_ids[row];
-		const dist = kind === 'nearest' ? shard.nearest_distances[row] : shard.farthest_distances[row];
+		if (!shards || focusedId === undefined) return [];
+		// abstract_id → { distances: [], cellKeys: [] }
+		const buckets = new Map<number, { distances: number[]; cellKeys: string[] }>();
+		for (const [cellKey, shard] of shards) {
+			const row = shard.abstract_ids.indexOf(focusedId);
+			if (row < 0) continue;
+			const ids = kind === 'nearest' ? shard.nearest_ids[row] : shard.farthest_ids[row];
+			const dist =
+				kind === 'nearest' ? shard.nearest_distances[row] : shard.farthest_distances[row];
+			for (let i = 0; i < ids.length; i++) {
+				const aid = ids[i];
+				const d = dist[i];
+				let b = buckets.get(aid);
+				if (!b) {
+					b = { distances: [], cellKeys: [] };
+					buckets.set(aid, b);
+				}
+				b.distances.push(d);
+				b.cellKeys.push(cellKey);
+			}
+		}
 		const out: RelatedEntry[] = [];
-		for (let i = 0; i < Math.min(ids.length, limit); i++) {
-			const rec = abstractsById.get(ids[i]);
-			if (rec) out.push({ abstract: rec, distance: dist[i] });
+		for (const [aid, b] of buckets) {
+			const rec = abstractsById.get(aid);
+			if (!rec) continue;
+			const minD = Math.min(...b.distances);
+			const meanD = b.distances.reduce((s, x) => s + x, 0) / b.distances.length;
+			out.push({
+				abstract: rec,
+				minDistance: minD,
+				meanDistance: meanD,
+				cellCount: b.cellKeys.length,
+				cellKeys: b.cellKeys
+			});
+		}
+		// "Closest 5" → sort by min-distance ascending; "Most different" by
+		// max-distance descending (negated min for "farthest" mode).
+		if (kind === 'nearest') {
+			out.sort(
+				(a, b) => a.minDistance - b.minDistance || b.cellCount - a.cellCount
+			);
+		} else {
+			// For farthest, use mean for ranking — a single outlier cell shouldn't
+			// dominate; we want consistently distant abstracts at the top.
+			out.sort(
+				(a, b) => b.meanDistance - a.meanDistance || b.cellCount - a.cellCount
+			);
 		}
 		return out;
 	}
 
 	$: focusedId = abstract?.abstract_id;
-	$: nearest = buildRelated(neighborsShard, focusedId, 'nearest', 5);
-	$: farthest = buildRelated(neighborsShard, focusedId, 'farthest', 5);
+	$: nearest = aggregateRelated(allNeighbors, focusedId, 'nearest');
+	$: farthest = aggregateRelated(allNeighbors, focusedId, 'farthest');
 
 	function focusRelated(posterId: string) {
 		if (posterId) $focusedAbstract = posterId;
@@ -128,28 +263,154 @@
 			{/if}
 		</section>
 
-		{#if abstract.sections.introduction}
-			<section class="section" data-testid="section-introduction">
-				<h2>Introduction</h2>
-				<p>{abstract.sections.introduction}</p>
+		{#each [ ['introduction','Introduction'], ['methods','Methods'], ['results','Results'], ['conclusion','Conclusion'] ] as [skey, slabel] (skey)}
+			{@const sbody = abstract.sections[skey]}
+			{#if sbody}
+				<section class="section collapsible" data-testid={`section-${skey}`}>
+					<button
+						type="button"
+						class="section-header"
+						on:click={() => toggleSection(skey)}
+						aria-expanded={!!openSections[skey]}
+					>
+						<span class="caret">{openSections[skey] ? '▾' : '▸'}</span>
+						<span class="section-label">{slabel}</span>
+					</button>
+					{#if openSections[skey]}
+						<p class="section-body">{sbody}</p>
+					{/if}
+				</section>
+			{/if}
+		{/each}
+
+		{#if enrichment && enrichment.claims.length}
+			<section class="section collapsible" data-testid="section-claims">
+				<button
+					type="button"
+					class="section-header"
+					on:click={() => toggleSection('claims')}
+					aria-expanded={!!openSections.claims}
+				>
+					<span class="caret">{openSections.claims ? '▾' : '▸'}</span>
+					<span class="section-label">
+						Claims <span class="badge">{enrichment.claims.length}</span>
+					</span>
+					{#if claimsModelId}
+						<span class="ai-pill" title={`AI-extracted by ${claimsModelId}`}>
+							✨ AI
+						</span>
+					{/if}
+				</button>
+				{#if openSections.claims}
+					<ul class="card-list">
+						{#each enrichment.claims as claim, i (i)}
+							{@const isOpen = !!openClaims[i]}
+							<li class="card-item">
+								<button
+									type="button"
+									class="card-header"
+									on:click={() => toggleClaim(i)}
+									aria-expanded={isOpen}
+								>
+									<span class="caret">{isOpen ? '▾' : '▸'}</span>
+									<span class="card-summary">{claim.claim}</span>
+									{#if claim.claim_type}
+										<span class="card-tag">{claim.claim_type}</span>
+									{/if}
+								</button>
+								{#if isOpen}
+									<div class="card-body">
+										{#if claim.evidence}
+											<dl class="kv">
+												<dt>Evidence</dt>
+												<dd>{claim.evidence}</dd>
+												{#if claim.evidence_eco_codes?.length}
+													<dt>ECO codes</dt>
+													<dd>
+														<code>{claim.evidence_eco_codes.join(', ')}</code>
+													</dd>
+												{/if}
+												{#if claim.source}
+													<dt>Source quote</dt>
+													<dd class="quote">
+														“{claim.source}”
+														{#if claim.source_quote_verified}
+															<span class="verified" title="verified against the abstract">✓</span>
+														{/if}
+													</dd>
+												{/if}
+											</dl>
+										{/if}
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			</section>
 		{/if}
-		{#if abstract.sections.methods}
-			<section class="section" data-testid="section-methods">
-				<h2>Methods</h2>
-				<p>{abstract.sections.methods}</p>
-			</section>
-		{/if}
-		{#if abstract.sections.results}
-			<section class="section" data-testid="section-results">
-				<h2>Results</h2>
-				<p>{abstract.sections.results}</p>
-			</section>
-		{/if}
-		{#if abstract.sections.conclusion}
-			<section class="section" data-testid="section-conclusion">
-				<h2>Conclusion</h2>
-				<p>{abstract.sections.conclusion}</p>
+
+		{#if enrichment && enrichment.figures.length}
+			<section class="section collapsible" data-testid="section-figures">
+				<button
+					type="button"
+					class="section-header"
+					on:click={() => toggleSection('figures')}
+					aria-expanded={!!openSections.figures}
+				>
+					<span class="caret">{openSections.figures ? '▾' : '▸'}</span>
+					<span class="section-label">
+						Figure interpretations <span class="badge">{enrichment.figures.length}</span>
+					</span>
+					{#if figuresModelId}
+						<span class="ai-pill" title={`AI-interpreted by ${figuresModelId}`}>
+							✨ AI
+						</span>
+					{/if}
+				</button>
+				{#if openSections.figures}
+					<ul class="card-list">
+						{#each enrichment.figures as fig, i (i)}
+							{@const isOpen = !!openFigures[i]}
+							<li class="card-item">
+								<button
+									type="button"
+									class="card-header"
+									on:click={() => toggleFigure(i)}
+									aria-expanded={isOpen}
+								>
+									<span class="caret">{isOpen ? '▾' : '▸'}</span>
+									<span class="card-summary">
+										{fig.question_name || `Figure ${i + 1}`}
+									</span>
+								</button>
+								{#if isOpen}
+									<div class="card-body">
+										<p class="fig-interpretation">{fig.interpretation}</p>
+										<dl class="kv">
+											{#if fig.keywords?.length}
+												<dt>Keywords</dt>
+												<dd>
+													<ul class="chips chips-sm">
+														{#each fig.keywords as kw (kw)}<li>{kw}</li>{/each}
+													</ul>
+												</dd>
+											{/if}
+											{#if fig.ocr_text}
+												<dt>OCR text</dt>
+												<dd class="ocr"><code>{fig.ocr_text}</code></dd>
+											{/if}
+											{#if fig.model_quality_estimate}
+												<dt>Model quality</dt>
+												<dd>{fig.model_quality_estimate}</dd>
+											{/if}
+										</dl>
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			</section>
 		{/if}
 
@@ -194,16 +455,34 @@
 			</section>
 		{/if}
 
-		{#if neighborsShard && (nearest.length || farthest.length)}
+		{#if clusterMemberships.length}
+			<section class="extra clusters" data-testid="extra-clusters">
+				<h2>Cluster membership <span class="muted">— per (model × input)</span></h2>
+				<ul class="cluster-grid">
+					{#each clusterMemberships as row (row.cellKey)}
+						<li class="cluster-row">
+							<code class="cluster-cell">{row.cellKey}</code>
+							<span class="cluster-id">#{row.communityId}</span>
+							<span class="cluster-label" title={row.label}>{row.label}</span>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
+
+		{#if allNeighbors && (nearest.length || farthest.length)}
 			<section class="related" data-testid="detail-related">
 				<h2>
 					Related abstracts
-					<span class="muted">— from <code>{cellKey}</code></span>
+					<span class="muted">— across all {allNeighbors.size} maps</span>
 				</h2>
 				{#if nearest.length}
 					<div class="related-block">
-						<h3 class="related-heading">Most similar</h3>
-						<ul class="related-list">
+						<h3 class="related-heading">
+							Most similar
+							<span class="hint">closest 5 shown; scroll for more</span>
+						</h3>
+						<ul class="related-list related-scroll" data-testid="related-nearest-list">
 							{#each nearest as entry, i (entry.abstract.abstract_id)}
 								<li>
 									<button
@@ -216,7 +495,15 @@
 										<span class="related-rank">#{i + 1}</span>
 										<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
 										<span class="related-title">{entry.abstract.title}</span>
-										<span class="related-distance" title="cosine distance">d={entry.distance.toFixed(3)}</span>
+										<span
+											class="related-cells"
+											title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps: ${entry.cellKeys.join(', ')}`}
+										>
+											×{entry.cellCount}
+										</span>
+										<span class="related-distance" title="min cosine distance across maps">
+											d={entry.minDistance.toFixed(3)}
+										</span>
 									</button>
 								</li>
 							{/each}
@@ -225,8 +512,11 @@
 				{/if}
 				{#if farthest.length}
 					<div class="related-block">
-						<h3 class="related-heading">Most different</h3>
-						<ul class="related-list">
+						<h3 class="related-heading">
+							Most different
+							<span class="hint">farthest 5 shown; scroll for more</span>
+						</h3>
+						<ul class="related-list related-scroll" data-testid="related-farthest-list">
 							{#each farthest as entry, i (entry.abstract.abstract_id)}
 								<li>
 									<button
@@ -239,7 +529,15 @@
 										<span class="related-rank">#{i + 1}</span>
 										<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
 										<span class="related-title">{entry.abstract.title}</span>
-										<span class="related-distance" title="cosine distance">d={entry.distance.toFixed(3)}</span>
+										<span
+											class="related-cells"
+											title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps`}
+										>
+											×{entry.cellCount}
+										</span>
+										<span class="related-distance" title="mean cosine distance across maps">
+											d={entry.meanDistance.toFixed(3)}
+										</span>
 									</button>
 								</li>
 							{/each}
@@ -373,8 +671,157 @@
 		line-height: 1.55;
 		color: var(--text);
 	}
-	.section p {
+	.section-body {
 		white-space: pre-wrap;
+		padding: 0.4rem 0 0.2rem 1.3rem;
+	}
+	.collapsible {
+		border-top: 1px solid var(--border);
+		padding-top: 0.4rem;
+	}
+	.section-header {
+		all: unset;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		width: 100%;
+		font-size: 0.85rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+		font-weight: 600;
+	}
+	.section-header:hover {
+		color: var(--text);
+	}
+	.section-header .caret {
+		font-size: 0.7rem;
+		color: var(--text-muted);
+		width: 0.7rem;
+	}
+	.section-label {
+		flex: 1;
+	}
+	.badge {
+		display: inline-block;
+		background: var(--bg-sunken);
+		color: var(--text-muted);
+		font-size: 0.7rem;
+		padding: 0.05rem 0.4rem;
+		border-radius: 999px;
+		margin-left: 0.3rem;
+		text-transform: none;
+		letter-spacing: 0;
+		font-weight: 500;
+	}
+	.ai-pill {
+		font-size: 0.65rem;
+		font-weight: 600;
+		color: var(--accent-soft-text);
+		background: var(--accent-soft-bg);
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
+		letter-spacing: 0.04em;
+		text-transform: none;
+		flex-shrink: 0;
+	}
+	.card-list {
+		list-style: none;
+		padding: 0 0 0.25rem 1.3rem;
+		margin: 0.3rem 0 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.card-item {
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: var(--bg-elevated);
+	}
+	.card-header {
+		all: unset;
+		cursor: pointer;
+		display: flex;
+		align-items: flex-start;
+		gap: 0.4rem;
+		padding: 0.4rem 0.55rem;
+		font-size: 0.85rem;
+		line-height: 1.35;
+		color: var(--text);
+		width: 100%;
+		box-sizing: border-box;
+	}
+	.card-header:hover {
+		background: var(--bg-sunken);
+	}
+	.card-header .caret {
+		font-size: 0.65rem;
+		color: var(--text-muted);
+		width: 0.7rem;
+		margin-top: 0.2rem;
+	}
+	.card-summary {
+		flex: 1;
+		min-width: 0;
+		word-break: break-word;
+	}
+	.card-tag {
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		color: var(--text-muted);
+		background: var(--bg-sunken);
+		padding: 0.1rem 0.35rem;
+		border-radius: 3px;
+		letter-spacing: 0.04em;
+		flex-shrink: 0;
+	}
+	.card-body {
+		padding: 0 0.55rem 0.55rem 1.55rem;
+		font-size: 0.83rem;
+		color: var(--text);
+	}
+	.kv {
+		grid-template-columns: max-content 1fr;
+		gap: 0.2rem 0.6rem;
+		font-size: 0.82rem;
+	}
+	.kv dt {
+		color: var(--text-muted);
+		font-weight: 500;
+	}
+	.kv dd code {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.8rem;
+		color: var(--text);
+		background: var(--bg-sunken);
+		padding: 0 0.3rem;
+		border-radius: 3px;
+	}
+	.quote {
+		font-style: italic;
+		color: var(--text-muted);
+	}
+	.verified {
+		color: var(--success);
+		font-weight: 700;
+		margin-left: 0.2rem;
+	}
+	.chips-sm li {
+		font-size: 0.72rem;
+		padding: 0.1rem 0.4rem;
+	}
+	.fig-interpretation {
+		margin: 0 0 0.4rem;
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text);
+	}
+	.ocr code {
+		white-space: pre-wrap;
+		display: block;
+		padding: 0.3rem 0.5rem;
+		font-size: 0.75rem;
 	}
 	.author-list {
 		margin: 0;
@@ -418,6 +865,47 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.4rem;
+	}
+	.cluster-grid {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: grid;
+		grid-template-columns: 1fr;
+		gap: 0.2rem;
+		max-height: 14rem;
+		overflow-y: auto;
+		padding-right: 0.3rem;
+	}
+	.cluster-row {
+		display: grid;
+		grid-template-columns: minmax(8rem, max-content) 2.5rem 1fr;
+		gap: 0.5rem;
+		align-items: baseline;
+		padding: 0.25rem 0.4rem;
+		border-bottom: 1px solid var(--border);
+		font-size: 0.8rem;
+	}
+	.cluster-row:last-child {
+		border-bottom: none;
+	}
+	.cluster-cell {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.75rem;
+		color: var(--accent);
+		background: var(--bg-sunken);
+		padding: 0 0.3rem;
+		border-radius: 3px;
+	}
+	.cluster-id {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.72rem;
+		color: var(--text-faint);
+	}
+	.cluster-label {
+		color: var(--text);
+		min-width: 0;
+		word-break: break-word;
 	}
 	.chips li {
 		background: var(--accent-soft-bg);
@@ -516,7 +1004,7 @@
 		all: unset;
 		cursor: pointer;
 		display: grid;
-		grid-template-columns: 2rem minmax(4rem, 6rem) 1fr auto;
+		grid-template-columns: 2rem minmax(4rem, 6rem) 1fr auto auto;
 		gap: 0.5rem;
 		align-items: baseline;
 		padding: 0.3rem 0.5rem;
@@ -524,6 +1012,25 @@
 		border: 1px solid transparent;
 		font-size: 0.85rem;
 		color: var(--text);
+	}
+	.related-scroll {
+		max-height: 14rem; /* ~5 rows; rest reachable by scroll */
+		overflow-y: auto;
+		padding-right: 0.3rem;
+	}
+	.related-cells {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.7rem;
+		color: var(--text-faint);
+		cursor: help;
+	}
+	.related-heading .hint {
+		font-size: 0.7rem;
+		text-transform: none;
+		letter-spacing: 0;
+		color: var(--text-faint);
+		font-weight: 400;
+		margin-left: 0.4rem;
 	}
 	.related-link:hover {
 		background: var(--bg-sunken);

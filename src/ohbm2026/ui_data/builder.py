@@ -22,6 +22,7 @@ DETERMINISTIC_MTIME = 1767225600  # 2026-01-01T00:00:00Z
 from ohbm2026.ui_data.abstracts import build_abstracts
 from ohbm2026.ui_data.authors import build_authors
 from ohbm2026.ui_data.cells import build_cells
+from ohbm2026.ui_data.enrichment import build_enrichment
 from ohbm2026.ui_data.manifest import build_manifest, make_build_info
 from ohbm2026.ui_data.neighbors import build_neighbors
 from ohbm2026.ui_data.state_key import (
@@ -182,6 +183,15 @@ def build_ui_data_package(
     _emit("manifest.json", manifest)
     _emit("abstracts.json", abstracts_envelope)
     _emit("authors.json", authors_envelope)
+    # Claims + figure interpretations live in a separate shard so that the
+    # main abstracts.json stays small enough for first paint. The detail
+    # panel reads `data/enrichment.json` lazily on focus.
+    enrichment_envelope = build_enrichment(
+        enriched_path=Path(enriched_path) if enriched_path else None,
+        abstract_ids=abstract_ids,
+        build_info=build_info,
+    )
+    _emit("enrichment.json", enrichment_envelope)
     for cell_key, envelope in cells_envelopes.items():
         _emit(f"cells/{cell_key}.json", envelope)
     for (model, inp, kind), envelope in topics_envelopes.items():

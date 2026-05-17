@@ -48,6 +48,13 @@
 	let handlers3dAttached = false;
 	let chart3dInitialized = false;
 
+	// Authoritative camera eye for the 3D chart, kept in sync with both
+	// programmatic rotation frames AND user mouse interactions via the
+	// `plotly_relayout` event. Reading `_fullLayout.scene.camera.eye` after
+	// a pause+zoom turned out to be unreliable in this Plotly bundle —
+	// listening to the event gives us a deterministic source of truth.
+	let currentEye3D: { x: number; y: number; z: number } | null = null;
+
 	$: cellKey = `${$selectedCell.model}_${$selectedCell.input}`;
 
 	function onResize() {
@@ -117,6 +124,38 @@
 	$: void renderChart2D(plotly, chart2dEl, cellShard, abstracts, selection, mobile, theme, topicByCluster);
 	$: void renderChart3D(plotly, chart3dEl, cellShard, abstracts, selection, theme, topicByCluster);
 
+	// Paul Tol's "bright" qualitative palette — high-contrast, deuteranopia /
+	// protanopia / tritanopia safe. Communities are CATEGORICAL (the integer
+	// ids are labels, not magnitudes) so we MUST use a discrete palette and
+	// NOT a continuous colorscale. To extend past 7 distinct communities the
+	// renderer also cycles through marker symbols, giving 7 × N_SYMBOLS
+	// (~35–40) perceptually distinct combinations before any pair repeats.
+	const TOL_BRIGHT = [
+		'#4477AA', // blue
+		'#EE6677', // red-pink
+		'#228833', // green
+		'#CCBB44', // yellow
+		'#66CCEE', // cyan
+		'#AA3377', // purple
+		'#BBBBBB' // grey
+	];
+	const SYMBOLS_2D = ['circle', 'diamond', 'square', 'triangle-up', 'cross'];
+	// scatter3d supports a narrower set; use only those.
+	const SYMBOLS_3D = ['circle', 'diamond', 'square', 'cross', 'x'];
+
+	function colorFor(communityId: number): string {
+		const idx = ((communityId % TOL_BRIGHT.length) + TOL_BRIGHT.length) % TOL_BRIGHT.length;
+		return TOL_BRIGHT[idx];
+	}
+	function symbol2DFor(communityId: number): string {
+		const bucket = Math.floor(communityId / TOL_BRIGHT.length);
+		return SYMBOLS_2D[((bucket % SYMBOLS_2D.length) + SYMBOLS_2D.length) % SYMBOLS_2D.length];
+	}
+	function symbol3DFor(communityId: number): string {
+		const bucket = Math.floor(communityId / TOL_BRIGHT.length);
+		return SYMBOLS_3D[((bucket % SYMBOLS_3D.length) + SYMBOLS_3D.length) % SYMBOLS_3D.length];
+	}
+
 	function buildSeries(
 		shard: CellShard,
 		records: AbstractRecord[],
@@ -131,7 +170,10 @@
 		const posters: string[] = [];
 		const titles: string[] = [];
 		const communityLabels: string[] = [];
-		const colors: number[] = [];
+		const communityIds: number[] = [];
+		const markerColors: string[] = [];
+		const markerSymbols2D: string[] = [];
+		const markerSymbols3D: string[] = [];
 		const selectedIdx: number[] = [];
 		const idx2dByAbstract = new Map<number, number>();
 		for (let i = 0; i < shard.rows.length; i++) {
@@ -147,7 +189,10 @@
 			posters.push(rec.poster_id);
 			titles.push(rec.title);
 			communityLabels.push(topicMap.get(row.community_id) ?? `community ${row.community_id}`);
-			colors.push(row.community_id);
+			communityIds.push(row.community_id);
+			markerColors.push(colorFor(row.community_id));
+			markerSymbols2D.push(symbol2DFor(row.community_id));
+			markerSymbols3D.push(symbol3DFor(row.community_id));
 			idx2dByAbstract.set(row.abstract_id, xs2.length - 1);
 			if (selected !== null && selected.has(row.abstract_id)) selectedIdx.push(xs2.length - 1);
 		}
@@ -160,7 +205,10 @@
 			posters,
 			titles,
 			communityLabels,
-			colors,
+			communityIds,
+			markerColors,
+			markerSymbols2D,
+			markerSymbols3D,
 			selectedIdx,
 			idx2dByAbstract
 		};
@@ -190,9 +238,9 @@
 			x: s.xs2,
 			y: s.ys2,
 			marker: {
-				size: 6,
-				color: s.colors,
-				colorscale: 'Viridis',
+				size: 7,
+				color: s.markerColors,
+				symbol: s.markerSymbols2D,
 				opacity: 0.85,
 				line: { width: 0 }
 			},
@@ -308,9 +356,6 @@
 		// Collect indices for each partition.
 		const traces: unknown[] = [];
 		const customdata = s.posters.map((p, i) => [p, s.titles[i], s.communityLabels[i]]);
-		// Find the global color range so both traces share the same scale.
-		const cmin = Math.min(...s.colors);
-		const cmax = Math.max(...s.colors);
 		function buildTrace(name: string, indices: number[], opacity: number, showColorbar: boolean) {
 			if (indices.length === 0) return null;
 			return {
@@ -322,10 +367,8 @@
 				z: indices.map((i) => s.zs3[i]),
 				marker: {
 					size: 3,
-					color: indices.map((i) => s.colors[i]),
-					colorscale: 'Viridis',
-					cmin,
-					cmax,
+					color: indices.map((i) => s.markerColors[i]),
+					symbol: indices.map((i) => s.markerSymbols3D[i]),
 					opacity,
 					showscale: showColorbar,
 					line: { width: 0 }
@@ -358,17 +401,13 @@
 		const axisCfg = { visible: false, showbackground: false };
 		// Explicitly carry the current camera forward into each react() so
 		// Plotly doesn't reset to its default. (`uirevision` should do this
-		// automatically per the docs, but in this bundle it doesn't.) The
-		// rotation animation uses `relayout` to update camera between
-		// react() calls; we read whatever camera is current and pass it back.
+		// automatically per the docs, but in this bundle it doesn't.) We
+		// trust `currentEye3D` (updated by the rotation step + by
+		// `plotly_relayout` user interactions) over `_fullLayout`, which
+		// occasionally lags the user's last gesture in this bundle.
 		let cameraEye: { x: number; y: number; z: number } = { x: 1.6, y: 1.6, z: 0.9 };
-		if (chart3dInitialized) {
-			const flLayout = (el as unknown as { _fullLayout?: { scene?: { camera?: { eye?: { x: number; y: number; z: number } } } } })
-				._fullLayout;
-			const eye = flLayout?.scene?.camera?.eye;
-			if (eye && typeof eye.x === 'number') {
-				cameraEye = { x: eye.x, y: eye.y, z: eye.z };
-			}
+		if (chart3dInitialized && currentEye3D) {
+			cameraEye = currentEye3D;
 		}
 		const scene: Record<string, unknown> = {
 			xaxis: axisCfg,
@@ -413,6 +452,24 @@
 						const posterId = pt?.customdata?.[0];
 						if (posterId) $focusedAbstract = posterId;
 					});
+					// Capture every camera change (user orbit / zoom / pan, OR our
+					// own rotation `relayout`) into `currentEye3D`. The event
+					// payload arrives in two shapes depending on the cause:
+					//   - mouse interaction: { 'scene.camera': { eye, center, ...} }
+					//   - our relayout({ 'scene.camera.eye': ... }):
+					//       { 'scene.camera.eye': { x, y, z } }
+					node.on('plotly_relayout', (e: unknown) => {
+						const ev = e as Record<string, unknown> | null;
+						if (!ev) return;
+						let eye: { x?: number; y?: number; z?: number } | undefined;
+						const flat = ev['scene.camera.eye'] as { x?: number; y?: number; z?: number } | undefined;
+						const nested = (ev['scene.camera'] as { eye?: { x?: number; y?: number; z?: number } } | undefined)
+							?.eye;
+						eye = flat ?? nested;
+						if (eye && typeof eye.x === 'number' && typeof eye.y === 'number' && typeof eye.z === 'number') {
+							currentEye3D = { x: eye.x, y: eye.y, z: eye.z };
+						}
+					});
 				}
 				ensureRotate();
 			})
@@ -424,23 +481,18 @@
 	function ensureRotate() {
 		stopRotate();
 		if (!autoRotate || !plotly || !chart3dEl) return;
-		// Seed the orbit from the user's CURRENT camera so that pausing,
-		// zooming/orbiting, then unpausing continues from where they left off
-		// instead of snapping back to the hard-coded default (r=2.2, z=0.9).
+		// Seed the orbit from `currentEye3D` (kept in sync via the
+		// `plotly_relayout` listener) so pause → user zoom/orbit → unpause
+		// continues from where the user left off instead of snapping back to
+		// the factory default.
 		let r = 2.2;
 		let z = 0.9;
-		const flLayout = (
-			chart3dEl as unknown as {
-				_fullLayout?: { scene?: { camera?: { eye?: { x: number; y: number; z: number } } } };
-			}
-		)._fullLayout;
-		const eye0 = flLayout?.scene?.camera?.eye;
-		if (eye0 && typeof eye0.x === 'number') {
-			const r0 = Math.hypot(eye0.x, eye0.y);
+		if (currentEye3D) {
+			const r0 = Math.hypot(currentEye3D.x, currentEye3D.y);
 			if (r0 > 1e-6) {
 				r = r0;
-				z = eye0.z;
-				rotateAngle = Math.atan2(eye0.y, eye0.x);
+				z = currentEye3D.z;
+				rotateAngle = Math.atan2(currentEye3D.y, currentEye3D.x);
 			}
 		}
 		const step = () => {
@@ -451,6 +503,7 @@
 				y: r * Math.sin(rotateAngle),
 				z
 			};
+			currentEye3D = eye;
 			try {
 				(plotly as unknown as { relayout: (el: HTMLDivElement, p: unknown) => Promise<unknown> }).relayout(
 					chart3dEl,
@@ -483,8 +536,9 @@
 		<div class="title-block">
 			<h3>UMAP — cell <code>{cellKey}</code></h3>
 			<p class="hint">
-				Points are coloured by <em>cluster</em> (community detected for this cell).
-				Lasso on 2D filters the result list; click any point to open its detail panel.
+				Points are coloured + shaped by <em>cluster</em> (community detected for this
+				cell, Tol-bright palette × 5 symbols, colour-vision-friendly). Lasso on 2D
+				filters the result list; click any point to open its detail panel.
 			</p>
 		</div>
 		<div class="header-actions">
