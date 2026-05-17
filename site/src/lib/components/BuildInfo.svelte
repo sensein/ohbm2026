@@ -109,10 +109,12 @@
 	.label {
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: var(--text-faint);
+		/* Use --text-muted (not --text-faint) so the chip clears WCAG AA
+		   contrast against --bg-subtle (axe color-contrast). */
+		color: var(--text-muted);
 	}
 	.sep {
-		color: var(--text-faint);
+		color: var(--text-muted);
 	}
 	.data-time {
 		color: var(--text-faint);
