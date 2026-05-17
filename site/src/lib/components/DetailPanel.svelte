@@ -365,10 +365,14 @@
 							algorithmic; <span class="ai-pill-inline">✨ AI</span> sections labelled
 						</span>
 					</div>
-					{@render clusterBlock()}
-					{@render relatedBlock()}
+					<!-- AI-derived sections first so the most distinctive
+						 surfaces (extracted claims + figure interpretations) sit
+						 at the top of the computed column; algorithmic context
+						 (cluster membership + neighbour rails) follows below. -->
 					{@render claimsBlock()}
 					{@render figuresBlock()}
+					{@render clusterBlock()}
+					{@render relatedBlock()}
 				</div>
 			{:else}
 				<!-- Compact mode: linear flow, only the home-pane essentials. -->
