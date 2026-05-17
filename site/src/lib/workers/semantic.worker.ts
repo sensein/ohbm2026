@@ -28,6 +28,7 @@ env.useBrowserCache = true;
 let extractor: FeatureExtractionPipeline | null = null;
 let corpus: Int8Array | null = null;
 let dim = 384;
+let invScale = 1; // 1 / quantization-scale → multiplied into each dot-product result
 
 type InitMsg = { type: 'init'; vectors: ArrayBuffer; dim: number; scale: number };
 type QueryMsg = { type: 'query'; query: string; topK: number; id: string };
@@ -41,6 +42,7 @@ self.addEventListener('message', async (e: MessageEvent<InMsg>) => {
 		if (msg.type === 'init') {
 			corpus = new Int8Array(msg.vectors);
 			dim = msg.dim;
+			invScale = msg.scale > 0 ? 1 / msg.scale : 1;
 			post({ type: 'progress', stage: 'model', detail: 'loading' });
 			extractor = (await pipeline(
 				'feature-extraction',
@@ -62,7 +64,12 @@ self.addEventListener('message', async (e: MessageEvent<InMsg>) => {
 				let s = 0;
 				const off = i * dim;
 				for (let j = 0; j < dim; j++) s += query[j] * corpus[off + j];
-				scores[i] = s;
+				// Dequantize: the corpus dot-product is scaled by the quantization
+				// factor; divide once per row instead of per-element to stay fast.
+				// Query is already L2-normalized; dequantized corpus rows have
+				// max-abs ≈ original_max_abs ≈ 0.25 (norm ≈ 1.0 across 384 dims),
+				// so the resulting score is the cosine similarity in [-1, 1].
+				scores[i] = s * invScale;
 			}
 			const topK = Math.min(msg.topK || 50, n);
 			// Heap-pick via partial sort: collect indices, sort by descending score, slice.
