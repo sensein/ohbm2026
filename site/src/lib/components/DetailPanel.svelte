@@ -527,16 +527,18 @@
 										data-testid="related-nearest"
 									>
 										<span class="related-rank">#{i + 1}</span>
-										<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+										<span class="related-poster-pile">
+											<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+											<span class="related-distance" title="min cosine distance across maps">
+												d={entry.minDistance.toFixed(3)}
+											</span>
+										</span>
 										<span class="related-title">{entry.abstract.title}</span>
 										<span
 											class="related-cells"
 											title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps: ${entry.cellKeys.join(', ')}`}
 										>
 											×{entry.cellCount}
-										</span>
-										<span class="related-distance" title="min cosine distance across maps">
-											d={entry.minDistance.toFixed(3)}
 										</span>
 									</button>
 								</li>
@@ -561,16 +563,18 @@
 										data-testid="related-farthest"
 									>
 										<span class="related-rank">#{i + 1}</span>
-										<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+										<span class="related-poster-pile">
+											<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+											<span class="related-distance" title="mean cosine distance across maps">
+												d={entry.meanDistance.toFixed(3)}
+											</span>
+										</span>
 										<span class="related-title">{entry.abstract.title}</span>
 										<span
 											class="related-cells"
 											title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps`}
 										>
 											×{entry.cellCount}
-										</span>
-										<span class="related-distance" title="mean cosine distance across maps">
-											d={entry.meanDistance.toFixed(3)}
 										</span>
 									</button>
 								</li>
@@ -1062,14 +1066,21 @@
 		all: unset;
 		cursor: pointer;
 		display: grid;
-		grid-template-columns: 2rem minmax(4rem, 6rem) 1fr auto auto;
+		/* rank · (poster + distance stacked) · title (wraps, full) · cellCount */
+		grid-template-columns: 2rem minmax(4.5rem, 6rem) 1fr auto;
 		gap: 0.5rem;
-		align-items: baseline;
-		padding: 0.3rem 0.5rem;
+		align-items: start;
+		padding: 0.4rem 0.5rem;
 		border-radius: 4px;
 		border: 1px solid transparent;
 		font-size: 0.85rem;
 		color: var(--text);
+	}
+	.related-poster-pile {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		align-items: flex-start;
 	}
 	.related-scroll {
 		max-height: 14rem; /* ~5 rows; rest reachable by scroll */
@@ -1110,10 +1121,10 @@
 		font-weight: 600;
 	}
 	.related-title {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
 		color: var(--text);
+		line-height: 1.3;
+		word-break: break-word;
+		min-width: 0;
 	}
 	.related-distance {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
