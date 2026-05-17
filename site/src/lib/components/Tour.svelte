@@ -184,15 +184,21 @@
 				},
 				{
 					id: 'home-permalink',
-					title: 'Open the full detail page',
-					text: 'When you focus an abstract, the detail pane shows a "full details ↗" link in its top-right. Open it (or right-click → new tab) to land on a permalink page that lays out the body sections, AI claims & figures, references, and cluster membership in a two-column reading layout.',
+					title: 'Full-detail (permalink) page',
+					text: 'The "full details ↗" link in the detail pane opens a shareable permalink for this abstract. It lays out the submission verbatim on the left (intro / methods / results / conclusion / topics / methods checklist / references) and the AI + algorithmic insights on the right (extracted claims, figure interpretations, cluster membership, related abstracts). A "back to the atlas" link sits at the bottom of the page so you can always return.',
 					attachTo: { element: '[data-testid="detail-permalink"]', on: place('left') }
 				},
 				{
 					id: 'home-cart-toggle',
 					title: 'Your saved list',
-					text: "When you're ready, the 🛒 button in the top bar opens your saved list. From there you can email it to yourself (mailto link with poster ids + titles + permalinks), copy it to the clipboard, or clear it.",
+					text: "When you're ready, the 🛒 button in the top bar opens your saved list. From there you can email it to yourself (the mailto body includes a per-poster Open link back to the atlas), copy it to the clipboard, or clear it.",
 					attachTo: { element: '[data-testid="toggle-cart"]', on: place('bottom') }
+				},
+				{
+					id: 'home-about',
+					title: 'About + methodology',
+					text: 'The "About" link in the header opens a page describing how the data + the AI surfaces are produced — a short lay paragraph per stage, plus a "Technical details" toggle that expands code-grounded specifics (algorithms, parameters, file paths, cache keys). Every external citation is HEAD-checked at build time so the references stay live.',
+					attachTo: { element: '[data-testid="header-about-link"]', on: place('bottom') }
 				}
 			);
 		} else if (kind === 'detail') {
