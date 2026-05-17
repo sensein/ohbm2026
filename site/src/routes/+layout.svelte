@@ -18,28 +18,43 @@
 		// attribute + the system-pref watcher.
 		await import('$lib/stores/theme');
 
-		// Deep-link restore: when a user direct-loads e.g.
+		// Deep-link restore. When a user direct-loads e.g.
 		// `/pr-9/abstract/M-AM-101/`, gh-pages serves the root `404.html`
-		// which redirects to the SPA shell with the original path stashed
-		// in sessionStorage. Replay that path via SvelteKit's client router
-		// so the home page doesn't paint first.
+		// (the hand-written SPA-redirect shim on gh-pages). That shim
+		// stashes the original path in BOTH sessionStorage AND a `?spa=…`
+		// query param, then redirects to the SPA shell. Query-param wins —
+		// sessionStorage is unreliable across cold incognito loads on some
+		// browsers, the query param survives any same-origin redirect.
 		try {
-			const stash = sessionStorage.getItem(SPA_REDIRECT_KEY);
-			if (stash) {
-				sessionStorage.removeItem(SPA_REDIRECT_KEY);
-				// Only honour same-origin paths — the stash is always an
-				// absolute path from our 404 redirect, never an arbitrary URL.
-				if (stash.startsWith('/') && !stash.startsWith('//')) {
-					// Strip the SvelteKit base path from the front; goto()
-					// expects a route-relative URL.
-					const stripped = base && stash.startsWith(base) ? stash.slice(base.length) : stash;
-					if (stripped && stripped !== '/' && stripped !== window.location.pathname) {
-						void goto(stripped, { replaceState: true });
-					}
+			let stash: string | null = null;
+			const params = new URLSearchParams(window.location.search);
+			const fromQuery = params.get('spa');
+			if (fromQuery) {
+				stash = fromQuery;
+				// Strip the param so it doesn't show up in the address bar
+				// after goto. replaceState avoids a back-button entry.
+				params.delete('spa');
+				const cleanedSearch = params.toString();
+				const cleanedUrl =
+					window.location.pathname +
+					(cleanedSearch ? '?' + cleanedSearch : '') +
+					window.location.hash;
+				window.history.replaceState({}, '', cleanedUrl);
+			}
+			if (!stash) {
+				stash = sessionStorage.getItem(SPA_REDIRECT_KEY);
+			}
+			sessionStorage.removeItem(SPA_REDIRECT_KEY);
+			if (stash && stash.startsWith('/') && !stash.startsWith('//')) {
+				// Strip the SvelteKit base path from the front; goto()
+				// expects a route-relative URL.
+				const stripped = base && stash.startsWith(base) ? stash.slice(base.length) : stash;
+				if (stripped && stripped !== '/' && stripped !== window.location.pathname) {
+					void goto(stripped, { replaceState: true });
 				}
 			}
 		} catch {
-			/* sessionStorage may be blocked; falling through is fine */
+			/* sessionStorage / location may be blocked; falling through is fine */
 		}
 
 		manifest = await loadManifest();

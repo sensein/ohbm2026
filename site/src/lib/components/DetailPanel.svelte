@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { base } from '$app/paths';
 	import { focusedAbstract } from '$lib/stores/selection';
 	import { cartStore } from '$lib/stores/cart';
 	import {
@@ -236,7 +237,7 @@
 				{#if abstract.poster_id && compact}
 					<a
 						class="permalink permalink-top"
-						href={`./abstract/${abstract.poster_id}/`}
+						href={`${base}/abstract/${abstract.poster_id}/`}
 						data-testid="detail-permalink"
 						title="Open the full-detail page for this abstract"
 					>
@@ -518,29 +519,81 @@
 						</h3>
 						<ul class="related-list related-scroll" data-testid="related-nearest-list">
 							{#each nearest as entry, i (entry.abstract.abstract_id)}
+								{@const inCartNow = $cartStore.has(entry.abstract.poster_id)}
 								<li>
-									<button
-										type="button"
-										class="related-link"
-										on:click={() => focusRelated(entry.abstract.poster_id)}
-										disabled={!entry.abstract.poster_id}
-										data-testid="related-nearest"
-									>
-										<span class="related-rank">#{i + 1}</span>
-										<span class="related-poster-pile">
-											<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
-											<span class="related-distance" title="min cosine distance across maps">
-												d={entry.minDistance.toFixed(3)}
-											</span>
-										</span>
-										<span class="related-title">{entry.abstract.title}</span>
-										<span
-											class="related-cells"
-											title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps: ${entry.cellKeys.join(', ')}`}
+									<div class="related-link">
+										<button
+											type="button"
+											class="related-body"
+											on:click={() => focusRelated(entry.abstract.poster_id)}
+											disabled={!entry.abstract.poster_id}
+											data-testid="related-nearest"
 										>
-											×{entry.cellCount}
-										</span>
-									</button>
+											<span class="related-rank">#{i + 1}</span>
+											<span class="related-poster-pile">
+												<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+												<span class="related-distance" title="min cosine distance across maps">
+													d={entry.minDistance.toFixed(3)}
+												</span>
+											</span>
+											<span class="related-title">{entry.abstract.title}</span>
+											<span
+												class="related-cells"
+												title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps: ${entry.cellKeys.join(', ')}`}
+											>
+												×{entry.cellCount}
+											</span>
+										</button>
+										<button
+											type="button"
+											class="related-cart"
+											class:in-cart={inCartNow}
+											disabled={!entry.abstract.poster_id}
+											on:click={() =>
+												inCartNow
+													? cartStore.remove(entry.abstract.poster_id)
+													: cartStore.add(entry.abstract.poster_id)}
+											aria-label={inCartNow ? 'Remove from your list' : 'Add to your list'}
+											aria-pressed={inCartNow ? 'true' : 'false'}
+											title={inCartNow ? 'In your list — click to remove' : 'Add to your list'}
+											data-testid={inCartNow ? 'related-cart-remove' : 'related-cart-add'}
+										>
+											{#if inCartNow}
+												<svg
+													width="16"
+													height="16"
+													viewBox="0 0 24 24"
+													fill="currentColor"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<circle cx="9" cy="21" r="1.2" />
+													<circle cx="18" cy="21" r="1.2" />
+													<path d="M2 3h2.5L5.5 7H21l-2 9H7L5.5 7 4.5 3H2zM7 9l1 5h11l1-5z" />
+												</svg>
+												<span class="check-pip" aria-hidden="true">✓</span>
+											{:else}
+												<svg
+													width="16"
+													height="16"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<circle cx="9" cy="21" r="1.2" />
+													<circle cx="18" cy="21" r="1.2" />
+													<path d="M2 3h2.5L5.5 7H21l-2 9H7L5.5 7" />
+												</svg>
+											{/if}
+										</button>
+									</div>
 								</li>
 							{/each}
 						</ul>
@@ -554,29 +607,81 @@
 						</h3>
 						<ul class="related-list related-scroll" data-testid="related-farthest-list">
 							{#each farthest as entry, i (entry.abstract.abstract_id)}
+								{@const inCartFar = $cartStore.has(entry.abstract.poster_id)}
 								<li>
-									<button
-										type="button"
-										class="related-link"
-										on:click={() => focusRelated(entry.abstract.poster_id)}
-										disabled={!entry.abstract.poster_id}
-										data-testid="related-farthest"
-									>
-										<span class="related-rank">#{i + 1}</span>
-										<span class="related-poster-pile">
-											<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
-											<span class="related-distance" title="mean cosine distance across maps">
-												d={entry.meanDistance.toFixed(3)}
-											</span>
-										</span>
-										<span class="related-title">{entry.abstract.title}</span>
-										<span
-											class="related-cells"
-											title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps`}
+									<div class="related-link">
+										<button
+											type="button"
+											class="related-body"
+											on:click={() => focusRelated(entry.abstract.poster_id)}
+											disabled={!entry.abstract.poster_id}
+											data-testid="related-farthest"
 										>
-											×{entry.cellCount}
-										</span>
-									</button>
+											<span class="related-rank">#{i + 1}</span>
+											<span class="related-poster-pile">
+												<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+												<span class="related-distance" title="mean cosine distance across maps">
+													d={entry.meanDistance.toFixed(3)}
+												</span>
+											</span>
+											<span class="related-title">{entry.abstract.title}</span>
+											<span
+												class="related-cells"
+												title={`appears in ${entry.cellCount} of ${allNeighbors.size} maps`}
+											>
+												×{entry.cellCount}
+											</span>
+										</button>
+										<button
+											type="button"
+											class="related-cart"
+											class:in-cart={inCartFar}
+											disabled={!entry.abstract.poster_id}
+											on:click={() =>
+												inCartFar
+													? cartStore.remove(entry.abstract.poster_id)
+													: cartStore.add(entry.abstract.poster_id)}
+											aria-label={inCartFar ? 'Remove from your list' : 'Add to your list'}
+											aria-pressed={inCartFar ? 'true' : 'false'}
+											title={inCartFar ? 'In your list — click to remove' : 'Add to your list'}
+											data-testid={inCartFar ? 'related-cart-remove-far' : 'related-cart-add-far'}
+										>
+											{#if inCartFar}
+												<svg
+													width="16"
+													height="16"
+													viewBox="0 0 24 24"
+													fill="currentColor"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<circle cx="9" cy="21" r="1.2" />
+													<circle cx="18" cy="21" r="1.2" />
+													<path d="M2 3h2.5L5.5 7H21l-2 9H7L5.5 7 4.5 3H2zM7 9l1 5h11l1-5z" />
+												</svg>
+												<span class="check-pip" aria-hidden="true">✓</span>
+											{:else}
+												<svg
+													width="16"
+													height="16"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<circle cx="9" cy="21" r="1.2" />
+													<circle cx="18" cy="21" r="1.2" />
+													<path d="M2 3h2.5L5.5 7H21l-2 9H7L5.5 7" />
+												</svg>
+											{/if}
+										</button>
+									</div>
 								</li>
 							{/each}
 						</ul>
@@ -1063,7 +1168,19 @@
 		gap: 0.25rem;
 	}
 	.related-link {
+		display: flex;
+		align-items: stretch;
+		border-radius: 4px;
+		border: 1px solid transparent;
+	}
+	.related-link:hover {
+		background: var(--bg-sunken);
+		border-color: var(--border);
+	}
+	.related-body {
 		all: unset;
+		flex: 1;
+		min-width: 0;
 		cursor: pointer;
 		display: grid;
 		/* rank · (poster + distance stacked) · title (wraps, full) · cellCount */
@@ -1071,10 +1188,48 @@
 		gap: 0.5rem;
 		align-items: start;
 		padding: 0.4rem 0.5rem;
-		border-radius: 4px;
-		border: 1px solid transparent;
 		font-size: 0.85rem;
 		color: var(--text);
+	}
+	.related-cart {
+		all: unset;
+		cursor: pointer;
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		flex-shrink: 0;
+		color: var(--text-faint);
+		border-left: 1px solid var(--border);
+	}
+	.related-cart:hover {
+		background: var(--accent-soft-bg);
+		color: var(--accent);
+	}
+	.related-cart.in-cart {
+		color: var(--accent);
+	}
+	.related-cart .check-pip {
+		position: absolute;
+		bottom: 0.2rem;
+		right: 0.2rem;
+		background: var(--success);
+		color: var(--bg-elevated);
+		border-radius: 999px;
+		width: 0.8rem;
+		height: 0.8rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.55rem;
+		font-weight: 700;
+		line-height: 1;
+		border: 1.2px solid var(--bg-elevated);
+	}
+	.related-cart:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
 	}
 	.related-poster-pile {
 		display: flex;
@@ -1101,11 +1256,7 @@
 		font-weight: 400;
 		margin-left: 0.4rem;
 	}
-	.related-link:hover {
-		background: var(--bg-sunken);
-		border-color: var(--border);
-	}
-	.related-link:disabled {
+	.related-body:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
