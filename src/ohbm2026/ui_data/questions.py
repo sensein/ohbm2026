@@ -157,7 +157,11 @@ def _build_figure_text_blob(enriched_abstract: dict[str, Any]) -> str:
         rich_markdown = str(analysis.get("rich_markdown") or "").strip()
         if rich_markdown:
             parts.append(_markdown_to_plain_text(rich_markdown))
-        keywords = [str(keyword).strip() for keyword in analysis.get("keywords", []) if str(keyword).strip()]
+        keywords = [
+            str(keyword).strip()
+            for keyword in (analysis.get("keywords") or [])
+            if str(keyword).strip()
+        ]
         if keywords:
             parts.append(" ".join(keywords))
     return "\n".join(part for part in parts if part)
