@@ -36,13 +36,21 @@ if [[ -n "${OHBM2026_UI_DATA_PACKAGE_URL:-}" ]]; then
 	mkdir -p "$UI_DATA_DIR"
 	tmp=$(mktemp -d)
 	trap "rm -rf '$tmp'" EXIT
-	# Dropbox direct-download convenience: rewrite ?dl=0 → ?dl=1 if needed
-	# and follow redirects.
 	url="$OHBM2026_UI_DATA_PACKAGE_URL"
-	url="${url/\?dl=0/?dl=1}"
+	# Sanity check that we got binary content, not an HTML interstitial
+	# (Dropbox / Google Drive both wrap shared links in HTML now). If the
+	# downloaded file doesn't gzip-decompress we exit early so the workflow
+	# fails loudly instead of falling back to stale gh-pages data.
 	if ! curl -fsSL "$url" -o "$tmp/package.tar.gz"; then
 		echo "fetch_ui_inputs.sh: download failed from $url" >&2
 		exit 3
+	fi
+	if ! gzip -t "$tmp/package.tar.gz" 2>/dev/null; then
+		echo "fetch_ui_inputs.sh: downloaded file is not a valid gzip archive — the URL probably returned an HTML interstitial" >&2
+		echo "  first 200 bytes follow:" >&2
+		head -c 200 "$tmp/package.tar.gz" >&2
+		echo "" >&2
+		exit 5
 	fi
 	# Optional sha256 verify when OHBM2026_UI_DATA_PACKAGE_SHA256 is set.
 	if [[ -n "${OHBM2026_UI_DATA_PACKAGE_SHA256:-}" ]]; then

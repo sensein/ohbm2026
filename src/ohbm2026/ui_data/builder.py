@@ -9,10 +9,15 @@ a byte-identical ``build_info`` block), and writes shards atomically to
 from __future__ import annotations
 
 import json
-import tempfile
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+
+# Fixed mtime applied to every emitted shard so a rebuild against unchanged
+# inputs produces byte-identical tar output (which in turn preserves Dropbox /
+# CDN content hashes). Epoch 0 trips some tools; use 2026-01-01 instead.
+DETERMINISTIC_MTIME = 1767225600  # 2026-01-01T00:00:00Z
 
 from ohbm2026.ui_data.abstracts import build_abstracts
 from ohbm2026.ui_data.authors import build_authors
@@ -29,12 +34,22 @@ __all__ = ["build_ui_data_package", "Stage6BuildError"]
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    """Write a JSON shard via in-place truncate (O_WRONLY|O_CREAT|O_TRUNC).
+
+    Keeps the destination file's inode + Dropbox file_id stable across
+    rebuilds — when this directory is later tar-czf'd into a Dropbox shared
+    file, the share link survives the refresh. The previous tmp-then-rename
+    pattern would generate a fresh inode every build, which Dropbox observes
+    as delete+create and invalidates the share URL.
+    """
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w") as fh:
+    with path.open("w") as fh:
         json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"), sort_keys=False)
         fh.write("\n")
-    tmp.replace(path)
+    # Pin mtime so subsequent tar -czf produces byte-identical archives
+    # (tar embeds per-file mtime in headers).
+    os.utime(path, (DETERMINISTIC_MTIME, DETERMINISTIC_MTIME))
 
 
 def _resolve_rollup(
@@ -135,45 +150,50 @@ def build_ui_data_package(
         build_info=build_info,
     )
 
-    # --- Atomic write ----------------------------------------------------
+    # --- In-place write -------------------------------------------------
+    # Write each shard directly into the output dir. Files that already
+    # exist are truncated in place (preserves inode + Dropbox file_id);
+    # new files are created. After writing, prune any stale shards left
+    # over from prior builds (e.g. cells/topics from a removed cell_key).
     output = Path(output_dir)
-    with tempfile.TemporaryDirectory(prefix=".ui-data-", dir=output.parent if output.parent.exists() else None) as tmp_root:
-        staging = Path(tmp_root) / "data"
-        staging.mkdir(parents=True, exist_ok=True)
-        _write_json(staging / "manifest.json", manifest)
-        _write_json(staging / "abstracts.json", abstracts_envelope)
-        _write_json(staging / "authors.json", authors_envelope)
-        for cell_key, envelope in cells_envelopes.items():
-            _write_json(staging / "cells" / f"{cell_key}.json", envelope)
-        for (model, inp, kind), envelope in topics_envelopes.items():
-            _write_json(staging / "topics" / f"{model}_{inp}_{kind}.json", envelope)
-        # Search shards (lexical_index + minilm_vectors) are populated by
-        # US3 builders; the skeleton writes placeholder build_info sidecars
-        # so the manifest's referenced URLs always 200.
-        _write_json(
-            staging / "search" / "minilm_vectors.build_info.json",
-            {
-                "schema_version": "minilm_vectors.v1",
-                "build_info": dict(build_info),
-                "shape": [len(abstract_ids), 384],
-                "dtype": "int8",
-                "byte_offset_url": "data/search/minilm_vectors.bin",
-            },
-        )
+    output.mkdir(parents=True, exist_ok=True)
 
-        # Move into place atomically (replacing existing data/ if any).
-        if output.exists():
-            backup = output.with_name(output.name + ".prev")
-            if backup.exists():
-                import shutil
-                shutil.rmtree(backup)
-            output.rename(backup)
-            staging.rename(output)
-            import shutil
-            shutil.rmtree(backup)
-        else:
-            output.parent.mkdir(parents=True, exist_ok=True)
-            staging.rename(output)
+    expected: set[Path] = set()
+
+    def _emit(rel: str, payload: Mapping[str, Any]) -> None:
+        target = output / rel
+        _write_json(target, payload)
+        expected.add(target)
+
+    _emit("manifest.json", manifest)
+    _emit("abstracts.json", abstracts_envelope)
+    _emit("authors.json", authors_envelope)
+    for cell_key, envelope in cells_envelopes.items():
+        _emit(f"cells/{cell_key}.json", envelope)
+    for (model, inp, kind), envelope in topics_envelopes.items():
+        _emit(f"topics/{model}_{inp}_{kind}.json", envelope)
+    _emit(
+        "search/minilm_vectors.build_info.json",
+        {
+            "schema_version": "minilm_vectors.v1",
+            "build_info": dict(build_info),
+            "shape": [len(abstract_ids), 384],
+            "dtype": "int8",
+            "byte_offset_url": "data/search/minilm_vectors.bin",
+        },
+    )
+
+    # Drop stale shards from prior runs that weren't re-emitted this build.
+    # Keep the `.fetched-from-package` marker that fetch_ui_inputs.sh drops.
+    for path in output.rglob("*.json"):
+        if path in expected:
+            continue
+        path.unlink()
+    # Also remove now-empty cells/topics/search subdirs (defensive).
+    for sub in ("cells", "topics", "search"):
+        d = output / sub
+        if d.exists() and not any(d.iterdir()):
+            d.rmdir()
 
     return 0
 
