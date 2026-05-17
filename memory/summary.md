@@ -185,11 +185,70 @@ Top observed result from that run:
 
 - `nocd_gcn_structural_mag_med_pretrained` on `voyage_stage2_published`
 
+### 8. Stage 4 analysis & annotation
+
+Stage 4 (specs/006-analysis-annotation/) added the canonical post-
+embedding annotation pipeline driven by a single CLI entrypoint:
+`ohbmcli analyze-matrix`. Key design moves:
+
+- Per-(model, input_source, analysis_kind) bundle layout under
+  `data/outputs/analysis/<model>_<input>/<kind>__<state-key>/` —
+  mirrors Stage 3's per-component directory shape. Canonical UI
+  rollup pair at
+  `data/outputs/analysis/annotations__<state-key>.{parquet,sqlite}`.
+- Four analysis kinds: `projections` (UMAP 2D+3D + parametric MLP for
+  out-of-corpus projection), `communities` (FAISS `IndexFlatIP` kNN +
+  Leiden CPM with 20-point resolution sweep + plateau-elbow
+  selection, per the published NeuroScape recipe), `neuroscape_clusters`
+  (spherical-mean nearest-centroid; **only runs for
+  `model == "neuroscape"`** — the published centroids live in the
+  domain-embedding space), `topic_clusters` (BERTopic-style UMAP +
+  HDBSCAN with noise-elbow `min_cluster_size` selection).
+- Hybrid topic pipeline: spaCy `en_core_web_md` (or opt-in scispacy)
+  noun-chunk + named-entity extraction → class-based TF-IDF locally;
+  optional one-LLM-call-per-cluster pass over the candidate-phrase
+  shortlist with strict `Keywords ⊆ candidate_phrases` guard. Cache
+  key is sha256-of-sorted-candidates so reruns and order-permutations
+  hit cache. `--skip-llm-topics` makes the whole pipeline fully local
+  (no OpenAI key needed).
+- `project_into_umap(new_vectors, fitted_bundle, algorithm=…)` for
+  US2 — supports `native` (umap-learn `transform`), `knn_weighted`
+  (model-free softmax of k-nearest reference coords), and `parametric`
+  (small numpy-only MLP persisted with the bundle).
+- One-off NeuroScape centroid derivation at
+  `scripts/derive_neuroscape_centroids.py` reads the published Zenodo
+  deposit (DomainEmbeddings/*.h5 + clusters CSVs + the
+  `Models/domain_embedding_model.pth` checkpoint) and writes
+  `centroids__<sha12>.npy` + `cluster_table.csv` +
+  `centroid_metadata.json` carrying source-data sha256s + the
+  checkpoint SHA. The runner gate refuses to assign centroids when
+  the centroid metadata's `domain_model_checkpoint_sha256` disagrees
+  with the Stage 3 `neuroscape` bundle provenance.
+- Default matrix is **48 bundles** (5 models × 3 inputs × 4 kinds =
+  60 cells, with 12 auto-skipped for non-`neuroscape` source models on
+  the `neuroscape_clusters` kind). Inputs: the manuscript `abstract`
+  recipe + the per-component `claims` and `methods` bundles.
+- Same reorganization treatment Stages 1–3 received: the flat
+  `analyze.py` (≈ 2800 LOC) was split into the `analyze/` package
+  (`stage.py`, `storage.py`, `clusters.py`, `projections.py`,
+  `communities.py`, `centroids.py`, `topics.py`, `topic_clusters.py`,
+  `umap.py`, `rollup.py`, `provenance.py`, `errors.py`, `runners.py`).
+  The Stage-2 NeuroScape model code moved physically into
+  `embed/neuroscape.py` (replacing the re-export façade).
+- Per the spec's clarification Q2 (Session 2026-05-15),
+  `analyze/__init__.py` carries NO package-level re-export shell.
+  Every consumer imports from the explicit submodule that owns the
+  symbol.
+
 ## Current Practical Defaults
 
 If someone needs the shortest durable summary of how to operate in this repo:
 
 - treat `voyage_stage2_published` as the primary semantic embedding reference
+- the canonical post-embedding annotations come from
+  `ohbmcli analyze-matrix`, and the UI consumes
+  `data/outputs/analysis/annotations__<state-key>.sqlite` plus the
+  per-cluster `topics.json` bundles
 - treat the four standard poster proposals as the active organizer comparison
   set
 - keep experiment runs immutable

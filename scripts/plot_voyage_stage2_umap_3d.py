@@ -11,10 +11,10 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import umap
 
-from ohbm2026.analyze import build_distinct_color_map
+from ohbm2026.analyze.storage import build_distinct_color_map
 
 
-def load_json(path: Path) -> dict[str, Any]:
+def load_dataset(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 

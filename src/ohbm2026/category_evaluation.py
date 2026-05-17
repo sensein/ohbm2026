@@ -12,12 +12,17 @@ from typing import Any
 import numpy as np
 
 from ohbm2026 import artifacts
-from ohbm2026.analyze import build_knn_graph, compute_clustering_metrics, load_embedding_bundle, parse_string_list_value
+from ohbm2026.analyze.clusters import (
+    build_knn_graph,
+    compute_clustering_metrics,
+)
+from ohbm2026.analyze.storage import (
+    load_embedding_bundle,
+    parse_string_list_value,
+)
 
-UNKNOWN_LABEL = "Unknown"
 
-
-class CategoryEvaluationError(RuntimeError):
+class CategoryEvaluationError(Exception):
     """Raised when category-evaluation inputs are invalid."""
 
 

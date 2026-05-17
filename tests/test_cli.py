@@ -53,56 +53,56 @@ class CLITest(unittest.TestCase):
         es_main.assert_called_once_with(argv[1:])
 
     def test_embed_stage2_subcommand_delegates_to_stage2_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "stage2_main", return_value=21) as stage2_main:
+        with mock.patch.object(cli.embed_neuroscape, "stage2_main", return_value=21) as stage2_main:
             result = cli.main(["embed-stage2", "--epochs", "5"])
 
         self.assertEqual(result, 21)
         stage2_main.assert_called_once_with(["--epochs", "5"])
 
     def test_apply_published_stage2_subcommand_delegates_to_pretrained_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "apply_pretrained_stage2_main", return_value=28) as pretrained_main:
+        with mock.patch.object(cli.embed_neuroscape, "apply_pretrained_stage2_main", return_value=28) as pretrained_main:
             result = cli.main(["apply-published-stage2", "--stage1-dir", "custom"])
 
         self.assertEqual(result, 28)
         pretrained_main.assert_called_once_with(["--stage1-dir", "custom"])
 
     def test_cluster_benchmark_subcommand_delegates_to_cluster_benchmark_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "cluster_benchmark_main", return_value=31) as cluster_benchmark_main:
+        with mock.patch.object(cli.analyze_clusters, "cluster_benchmark_main", return_value=31) as cluster_benchmark_main:
             result = cli.main(["cluster-benchmark", "--k-max", "12"])
 
         self.assertEqual(result, 31)
         cluster_benchmark_main.assert_called_once_with(["--k-max", "12"])
 
     def test_semantic_analysis_subcommand_delegates_to_semantic_analysis_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "semantic_analysis_main", return_value=22) as semantic_analysis_main:
+        with mock.patch.object(cli.analyze_clusters, "semantic_analysis_main", return_value=22) as semantic_analysis_main:
             result = cli.main(["semantic-analysis", "--num-neighbors", "25"])
 
         self.assertEqual(result, 22)
         semantic_analysis_main.assert_called_once_with(["--num-neighbors", "25"])
 
     def test_umap_plot_subcommand_delegates_to_umap_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "umap_main", return_value=23) as umap_main:
+        with mock.patch.object(cli.analyze_projections, "umap_main", return_value=23) as umap_main:
             result = cli.main(["umap-plot", "--n-neighbors", "25"])
 
         self.assertEqual(result, 23)
         umap_main.assert_called_once_with(["--n-neighbors", "25"])
 
     def test_compare_projections_subcommand_delegates_to_projection_compare_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "projection_compare_main", return_value=26) as compare_main:
+        with mock.patch.object(cli.analyze_projections, "projection_compare_main", return_value=26) as compare_main:
             result = cli.main(["compare-projections", "--umap-n-neighbors", "25"])
 
         self.assertEqual(result, 26)
         compare_main.assert_called_once_with(["--umap-n-neighbors", "25"])
 
     def test_optimize_projections_subcommand_delegates_to_projection_optimize_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "projection_optimize_main", return_value=27) as optimize_main:
+        with mock.patch.object(cli.analyze_projections, "projection_optimize_main", return_value=27) as optimize_main:
             result = cli.main(["optimize-projections", "--top-k", "3"])
 
         self.assertEqual(result, 27)
         optimize_main.assert_called_once_with(["--top-k", "3"])
 
     def test_analyze_stage2_subcommand_delegates_to_stage2_analysis_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "stage2_analysis_main", return_value=24) as stage2_analysis_main:
+        with mock.patch.object(cli.analyze_clusters, "stage2_analysis_main", return_value=24) as stage2_analysis_main:
             result = cli.main(["analyze-stage2", "--num-neighbors", "25"])
 
         self.assertEqual(result, 24)
@@ -135,7 +135,7 @@ class CLITest(unittest.TestCase):
         build_ui_main.assert_called_once_with(["--site-output-dir", "tmp/site"])
 
     def test_write_manifest_subcommand_delegates_to_manifest_main(self) -> None:
-        with mock.patch.object(cli.neuroscape, "manifest_main", return_value=25) as manifest_main:
+        with mock.patch.object(cli.embed_neuroscape, "manifest_main", return_value=25) as manifest_main:
             result = cli.main(["write-manifest", "--output", "manifest.json"])
 
         self.assertEqual(result, 25)

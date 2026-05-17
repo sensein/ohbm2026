@@ -3,57 +3,63 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-from ohbm2026.analyze import (
-    DEFAULT_EMBEDDING_FIELDS,
+from ohbm2026.analyze.clusters import (
     align_semantic_records,
-    build_embedding_output_name,
-    build_claim_embedding_text,
-    build_distinct_color_map,
-    build_embedding_visualization_title,
-    build_apply_pretrained_stage2_parser,
     build_cluster_benchmark_parser,
-    build_projection_compare_parser,
-    build_projection_graph,
-    build_projection_optimize_parser,
-    build_visualization_records,
     build_knn_graph,
     build_semantic_analysis_parser,
-    build_umap_parser,
-    compute_tsne_projection,
-    compute_clustering_metrics,
     cluster_benchmark_main,
     cluster_with_method,
-    default_umap_output_paths,
-    default_projection_output_paths,
-    build_embedding_text,
-    build_embedding_texts,
-    configure_huggingface_auth,
-    compute_umap_projection,
-    extract_raw_keywords,
+    compute_clustering_metrics,
     detect_semantic_communities,
     detect_semantic_communities_at_resolution,
     detect_stage2_communities,
-    embedding_variant_name,
-    load_annotation_lookup,
-    load_pretrained_stage2_model,
-    load_stage1_bundle,
-    model_name_slug,
-    normalize_embedding_fields,
-    normalize_hidden_dimensions,
-    parse_string_list_value,
-    projection_compare_main,
-    projection_optimize_main,
     rank_clustering_benchmark_results,
     run_clustering_benchmark,
-    score_projection,
     semantic_analysis_main,
-    split_stage2_matrix,
     summarize_membership_groups,
     summarize_semantic_clusters,
     summarize_stage2_clusters,
+)
+from ohbm2026.analyze.projections import (
+    build_projection_compare_parser,
+    build_projection_graph,
+    build_projection_optimize_parser,
+    build_umap_parser,
+    compute_tsne_projection,
+    compute_umap_projection,
+    default_projection_output_paths,
+    default_umap_output_paths,
+    projection_compare_main,
+    projection_optimize_main,
+    score_projection,
     umap_main,
-    apply_pretrained_stage2_main,
     write_projection_comparison_outputs,
+)
+from ohbm2026.analyze.storage import (
+    DEFAULT_EMBEDDING_FIELDS,
+    build_claim_embedding_text,
+    build_distinct_color_map,
+    build_embedding_output_name,
+    build_embedding_text,
+    build_embedding_texts,
+    build_embedding_visualization_title,
+    build_visualization_records,
+    configure_huggingface_auth,
+    embedding_variant_name,
+    extract_raw_keywords,
+    load_annotation_lookup,
+    load_stage1_bundle,
+    model_name_slug,
+    normalize_embedding_fields,
+    parse_string_list_value,
+)
+from ohbm2026.embed.neuroscape import (
+    apply_pretrained_stage2_main,
+    build_apply_pretrained_stage2_parser,
+    load_pretrained_stage2_model,
+    normalize_hidden_dimensions,
+    split_stage2_matrix,
     write_pretrained_stage2_bundle,
     write_stage2_bundle,
 )
@@ -864,7 +870,7 @@ class NeuroScapeHelpersTest(unittest.TestCase):
     def test_projection_traces_share_legend_groups_across_methods(self) -> None:
         import numpy as np
         from plotly.subplots import make_subplots
-        import ohbm2026.analyze as neuroscape_module
+        import ohbm2026.analyze.projections as neuroscape_module
 
         records = [
             {"id": 1, "title": "One", "accepted_for": "Poster", "primary_topic": "MRI", "keywords": ["a"]},
@@ -1247,8 +1253,8 @@ class NeuroScapeHelpersTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with mock.patch("ohbm2026.analyze.compute_umap_projection", return_value=np.asarray([[0.1, 0.2], [0.3, 0.4]])), \
-                 mock.patch("ohbm2026.analyze.write_umap_outputs") as write_umap_outputs_mock, \
+            with mock.patch("ohbm2026.analyze.projections.compute_umap_projection", return_value=np.asarray([[0.1, 0.2], [0.3, 0.4]])), \
+                 mock.patch("ohbm2026.analyze.projections.write_umap_outputs") as write_umap_outputs_mock, \
                  mock.patch("builtins.print") as fake_print:
                 result = umap_main(
                     [
@@ -1321,13 +1327,13 @@ class NeuroScapeHelpersTest(unittest.TestCase):
             enriched_path.write_text(json.dumps({"abstracts": [{"id": 1}, {"id": 2}]}), encoding="utf-8")
 
             with mock.patch(
-                "ohbm2026.analyze.compute_umap_projection",
+                "ohbm2026.analyze.projections.compute_umap_projection",
                 return_value=np.asarray([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32),
             ), mock.patch(
-                "ohbm2026.analyze.compute_tsne_projection",
+                "ohbm2026.analyze.projections.compute_tsne_projection",
                 return_value=np.asarray([[1.1, 1.2], [1.3, 1.4]], dtype=np.float32),
             ), mock.patch(
-                "ohbm2026.analyze.write_projection_comparison_outputs"
+                "ohbm2026.analyze.projections.write_projection_comparison_outputs"
             ) as write_projection_comparison_outputs_mock, mock.patch("builtins.print") as fake_print:
                 result = projection_compare_main(
                     [
@@ -1379,7 +1385,7 @@ class NeuroScapeHelpersTest(unittest.TestCase):
                 "results": [{"method": "umap"}, {"method": "tsne"}],
             }
             with mock.patch(
-                "ohbm2026.analyze.optimize_projection_parameters",
+                "ohbm2026.analyze.projections.optimize_projection_parameters",
                 return_value=optimization_payload,
             ) as optimize_mock, mock.patch("builtins.print") as fake_print:
                 result = projection_optimize_main(
@@ -1426,10 +1432,10 @@ class NeuroScapeHelpersTest(unittest.TestCase):
             fake_model = object()
             projected = np.asarray([[0.1] * 64, [0.2] * 64], dtype=np.float32)
             with mock.patch(
-                "ohbm2026.analyze.load_pretrained_stage2_model",
+                "ohbm2026.embed.neuroscape.load_pretrained_stage2_model",
                 return_value=(fake_model, "cpu"),
             ) as load_model_mock, mock.patch(
-                "ohbm2026.analyze.apply_stage2_model",
+                "ohbm2026.embed.neuroscape.apply_stage2_model",
                 return_value=projected,
             ) as apply_mock, mock.patch(
                 "builtins.print"

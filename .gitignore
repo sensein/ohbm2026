@@ -38,3 +38,10 @@ memory/archive/
 # Local packaging and lock artifacts
 src/*.egg-info/
 uv.lock
+build/
+
+# Stage 4 artifact roots (Principle II)
+data/outputs/analysis/
+data/cache/analysis/
+data/provenance/analysis/
+data/inputs/neuroscape/

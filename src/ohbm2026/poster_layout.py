@@ -14,7 +14,10 @@ from typing import Any
 import numpy as np
 
 from ohbm2026 import artifacts
-from ohbm2026.analyze import load_embedding_bundle, parse_string_list_value
+from ohbm2026.analyze.storage import (
+    load_embedding_bundle,
+    parse_string_list_value,
+)
 from ohbm2026.titles import cleaned_abstract_title
 
 SESSION_IDS = (1, 2, 3, 4)

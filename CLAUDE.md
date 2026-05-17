@@ -168,19 +168,33 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/005-embeddings-matrix/plan.md`. The companion design artifacts
+at `specs/006-analysis-annotation/plan.md`. The companion design artifacts
 under the same directory — `research.md`, `data-model.md`, `contracts/`,
-and `quickstart.md` — pin Stage 3 embedding-matrix design: per-component
-embeddings (title, introduction, methods, results, conclusion, claims)
-across five models (Voyage, MiniLM, OpenAI, PubMedBERT, NeuroScape-from-
-Voyage); multi-component recipes are composed downstream by averaging.
-Batch size 64 per paid-API call with dynamic concurrency starting at 8;
-long-input strategy defaults to chunk_mean_pool for MiniLM/PubMedBERT
-and truncate_end for Voyage/OpenAI; per-abstract caching under
-`data/cache/embeddings/<model_key>/` keyed by sha256(text || model_id ||
-model_version) for resume-friendly runs.
+and `quickstart.md` — pin Stage 4 analysis & annotation design: one
+canonical `ohbmcli analyze-matrix` entrypoint producing four per-bundle
+artifacts (`projections` 2D+3D UMAP, `communities` via FAISS+Leiden+CPM
+with resolution sweep, `neuroscape_clusters` via precomputed spherical-
+mean centroids on the unit hypersphere, `topic_clusters`) across the
+default 5-model × 3-input matrix (`abstract` recipe + `claims` and `methods` components — 48 bundles, 12 cells auto-skipped),
+plus a canonical per-corpus rollup at `data/outputs/analysis/annotations__
+<state-key>.{parquet,sqlite}`. Topic keywords come from a hybrid pipeline:
+spaCy (`en_core_web_md`; optional scispacy) noun-chunk + NER extraction
+→ class-based TF-IDF → optional opt-out LLM grouping pass over the
+candidate-phrase shortlist (NOT raw abstracts) with `Keywords ⊆
+candidate_phrases` guard. `project_into_umap(new_vectors, bundle,
+algorithm=…)` supports `native` / `knn_weighted` / `parametric`. Flat
+`src/ohbm2026/analyze.py` is deleted and split into the `analyze/`
+package (`stage.py`, `umap.py`, `communities.py`, `centroids.py`,
+`topics.py`, `topic_clusters.py`, `clusters.py`, `projections.py`,
+`rollup.py`, `storage.py`, `provenance.py`, `errors.py`); Stage-2
+NeuroScape model code physically moves to `embed/neuroscape.py`
+(replacing the façade); no backward-compat shim.
 
 Previous-stage plans:
+- Stage 3 embeddings matrix: `specs/005-embeddings-matrix/plan.md`
+  (per-component embeddings × 5 models with token-level chunking;
+  state-key keyed bundle directories; canonical
+  `compose_recipe(...)` composer).
 - Stage 2.1 production wiring: `specs/004-enrich-production-wiring/plan.md`
   (gpt-5.4-mini figures+claims, agentic Responses API, ECO v1
   annotation, OpenAlex async references; T058 corpus state_key

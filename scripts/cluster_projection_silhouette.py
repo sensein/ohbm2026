@@ -8,9 +8,11 @@ from typing import Any
 import numpy as np
 from sklearn.metrics import silhouette_score
 
-from ohbm2026.analyze import (
+from ohbm2026.analyze.projections import (
     DEFAULT_UMAP_MIN_DIST,
     DEFAULT_UMAP_NEIGHBORS,
+)
+from ohbm2026.analyze.storage import (
     NeuroScapeError,
     load_embedding_bundle,
 )

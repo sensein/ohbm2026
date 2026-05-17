@@ -560,6 +560,73 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli compare-projections
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli optimize-projections
 ```
 
+### 7.5 Stage 4 Analysis Matrix (`analyze-matrix`)
+
+Stage 4 is the canonical post-embedding annotation pipeline. It runs the
+**(model, input_source, analysis_kind)** matrix end-to-end and emits the
+canonical UI rollup. See `specs/006-analysis-annotation/quickstart.md`
+for the operator runbook; high-level recipe below.
+
+One-off setup (NeuroScape centroid derivation from the published Zenodo
+deposit at <https://zenodo.org/records/14865161>):
+
+```bash
+# After unzipping NeuroScape_v101.zip somewhere on disk:
+PYTHONPATH=src .venv/bin/python scripts/derive_neuroscape_centroids.py \
+  --input-root <path-to-unzipped-NeuroScape_v101> \
+  --output-root data/inputs/neuroscape
+# Produces:
+#   data/inputs/neuroscape/centroids__<version>.npy
+#   data/inputs/neuroscape/cluster_table.csv
+#   data/inputs/neuroscape/centroid_metadata.json
+```
+
+Default-matrix run (48 bundles: 15 projections + 15 communities +
+15 topic_clusters + 3 neuroscape_clusters across 5 models × 3 inputs —
+`abstract` recipe + `claims` component + `methods` component; the
+published NeuroScape centroids only assign rows for the `neuroscape`
+domain embedding, so voyage/minilm/openai/pubmedbert are auto-skipped
+for the `neuroscape_clusters` kind):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-matrix
+```
+
+Run without an OpenAI key (topic keywords come from a local
+spaCy + c-TF-IDF pipeline; `Title`/`Description`/`Focus` are left
+empty):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-matrix \
+  --skip-llm-topics
+```
+
+Restrict to one model (faster iteration; produces 6 bundles + 1
+auto-skip event):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-matrix \
+  --models voyage
+```
+
+Project a new abstract into an existing fitted UMAP bundle (US2):
+
+```bash
+PYTHONPATH=src .venv/bin/python -m ohbm2026.cli analyze-umap-project \
+  --fitted-bundle data/outputs/analysis/voyage_abstract/projections__<state-key>/ \
+  --input-vectors path/to/new_vectors.npy \
+  --algorithm native \
+  --output path/to/new_coords.npy
+```
+
+The orchestrator writes one bundle per `(model, input, kind)` cell
+under `data/outputs/analysis/<model>_<input>/<kind>__<state-key>/`
+plus a canonical rollup at
+`data/outputs/analysis/annotations__<corpus-state-key>.{parquet,sqlite}`
+that the UI export step consumes. See `contracts/bundle.md` +
+`contracts/rollup.md` under `specs/006-analysis-annotation/` for the
+exact schemas.
+
 ### 8. Generate And Analyze Layout Proposals
 
 The stable route for proposal generation currently lives in the script wrappers

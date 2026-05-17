@@ -37,6 +37,14 @@ __all__ = [
     "EmbeddingContractError",
     "ComponentAssemblyError",
     "EmbeddingThresholdError",
+    "AnalysisError",
+    "InputBundleMissing",
+    "CentroidTableMissing",
+    "CentroidTableVersionMismatch",
+    "UnsupportedProjectionAlgorithm",
+    "ProjectionDimensionMismatch",
+    "TopicGroupingHallucination",
+    "CommunityResolutionDegenerate",
 ]
 
 
@@ -198,4 +206,84 @@ class EmbeddingThresholdError(Stage3Error):
     Maps to exit code 5. The partial cache is preserved (matches
     Stage 2.1's `ComponentFailureThresholdError` pattern); the bundle
     directory is NOT written.
+    """
+
+
+class AnalysisError(OhbmStageError):
+    """Base for any failure originating inside Stage 4 (analyze-matrix)."""
+
+
+class InputBundleMissing(AnalysisError):
+    """A referenced Stage 3 embedding bundle was not on disk.
+
+    Raised at pre-flight resolution before any analysis fires. Carries
+    the expected bundle path in its message so the operator can run
+    Stage 3 for the missing `(model, component)` pair.
+    """
+
+
+class CentroidTableMissing(AnalysisError):
+    """The precomputed NeuroScape centroid file is absent.
+
+    Raised when `neuroscape_clusters` is requested but
+    `data/inputs/neuroscape/centroids__*.npy` (and its companion
+    `cluster_table.csv`) cannot be found. Operator must run
+    `scripts/derive_neuroscape_centroids.py` once before Stage 4 can
+    assign cluster ids.
+    """
+
+
+class CentroidTableVersionMismatch(AnalysisError):
+    """The centroid sidecar's version disagrees with the Stage-2
+    checkpoint's expected version (CA-007).
+
+    Distinct from `CentroidTableMissing` so operators can tell apart
+    "file absent" from "file present but stale". Version is discovered
+    at runtime from `cluster_table.csv`; mismatches raise rather than
+    silently mapping into the wrong cluster space.
+    """
+
+
+class UnsupportedProjectionAlgorithm(AnalysisError):
+    """`project_into_umap` was asked for an algorithm the bundle does
+    not list under `metadata.json:supported_algorithms`.
+
+    The bundle's `supported_algorithms` is derived at write time from
+    which artifacts were actually persisted — e.g., a coords-only
+    bundle (no UMAPModel pickle) does NOT support `native`. The error
+    message names the requested algorithm and the supported set so the
+    operator can pick a valid one.
+    """
+
+
+class ProjectionDimensionMismatch(AnalysisError):
+    """`new_vectors` has a different second-axis dim than the fitted
+    UMAP's reference matrix.
+
+    Edge case 2: e.g., projecting a 384-dim MiniLM vector into a UMAP
+    fitted on 1024-dim Voyage vectors. Carries both dims in the
+    message ("expected D, got d").
+    """
+
+
+class TopicGroupingHallucination(AnalysisError):
+    """The LLM topic-grouping pass emitted at least one keyword that
+    is not in the per-cluster candidate-phrase shortlist.
+
+    Enforces FR-009's `Keywords ⊆ candidate_phrases` guard so the LLM
+    can re-rank/group phrases but cannot invent terms. Carries the
+    offending keyword(s) and the cluster id in its message; the
+    orchestrator aborts the run rather than caching the hallucinated
+    response.
+    """
+
+
+class CommunityResolutionDegenerate(Warning):
+    """Warning emitted when community detection at the chosen
+    resolution produces a single community holding >90% of abstracts.
+
+    Distinct from `AnalysisError` because the run still writes the
+    bundle (edge case 5): the operator may want to adjust resolution,
+    not abort. A warning is the right vehicle so the runner's stdout
+    summary still records the run as successful.
     """
