@@ -28,16 +28,16 @@ description: "Task list for Stage 5 — Package Reorganization & Enrichment Clea
 
 ## Phase 1: Setup
 
-- [ ] T001 Capture the pre-stage baselines under `tmp/stage5-baseline/`: (a) `KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m unittest discover -s tests 2>&1 | tail -3` → `tmp/stage5-baseline/test-suite.txt` (expect `583 / 1 pre-existing`); (b) `KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrichment 2>&1 | tail -3` → `tmp/stage5-baseline/test-enrichment.txt` (expect `22 tests`); (c) one cached `data/cache/figure_analysis/<key>.json` filename → `tmp/stage5-baseline/figure-cache-key.txt`; (d) a pre-stage UI bundle at `/tmp/ui-pre-stage5/` via `ohbmcli build-ui --analysis-rollup data/outputs/analysis/annotations__f0c51e80dc0e.sqlite …` and its file list → `tmp/stage5-baseline/ui-filelist.txt`. These are referenced by SC-005 / SC-006 verification.
-- [ ] T002 [P] Create the new feature branch when implementation starts: `git switch -c 007-package-reorg`. Cut from `main` if PR #7 has merged; otherwise stack on `006-analysis-annotation` and rebase later (per plan.md Phasing). The branch name MUST match the spec dir name.
-- [ ] T003 [P] Confirm `tmp/` is gitignored: `git check-ignore tmp/stage5-baseline/` returns the path.
+- [X] T001 Capture the pre-stage baselines under `tmp/stage5-baseline/`: (a) `KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m unittest discover -s tests 2>&1 | tail -3` → `tmp/stage5-baseline/test-suite.txt` (expect `583 / 1 pre-existing`); (b) `KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m unittest tests.test_enrichment 2>&1 | tail -3` → `tmp/stage5-baseline/test-enrichment.txt` (expect `22 tests`); (c) one cached `data/cache/figure_analysis/<key>.json` filename → `tmp/stage5-baseline/figure-cache-key.txt`; (d) a pre-stage UI bundle at `/tmp/ui-pre-stage5/` via `ohbmcli build-ui --analysis-rollup data/outputs/analysis/annotations__f0c51e80dc0e.sqlite …` and its file list → `tmp/stage5-baseline/ui-filelist.txt`. These are referenced by SC-005 / SC-006 verification.
+- [X] T002 [P] Create the new feature branch when implementation starts: `git switch -c 007-package-reorg`. Cut from `main` if PR #7 has merged; otherwise stack on `006-analysis-annotation` and rebase later (per plan.md Phasing). The branch name MUST match the spec dir name.
+- [X] T003 [P] Confirm `tmp/` is gitignored: `git check-ignore tmp/stage5-baseline/` returns the path.
 
 ---
 
 ## Phase 2: Foundational (blocks all user stories)
 
-- [ ] T004 Move `UIBuildError` from `src/ohbm2026/ui.py:150` (class definition) to `src/ohbm2026/exceptions.py` alongside the other typed errors (`EnrichmentError`, `AnalysisError`, …). The action is mechanical: cut the class from `ui.py`, paste into `exceptions.py`, no `__init__.py` or re-export changes needed (`exceptions.py` is a flat module). MUST land before US3's T040 (the test that asserts `UIBuildError` is importable from `ohbm2026.exceptions`) and T047 (the `ui/manifest.py` impl that imports it).
-- [ ] T005 Confirm `ohbm2026.exceptions.EnrichmentError` already exists at its canonical location (it does per CLAUDE.md's typed-exception hierarchy doc); no source change. The redundant declaration at `enrichment.py:72` is removed as part of T016 without changing the exception's qualified name for any of the 28 callers.
+- [X] T004 Move `UIBuildError` from `src/ohbm2026/ui.py:150` (class definition) to `src/ohbm2026/exceptions.py` alongside the other typed errors (`EnrichmentError`, `AnalysisError`, …). The action is mechanical: cut the class from `ui.py`, paste into `exceptions.py`, no `__init__.py` or re-export changes needed (`exceptions.py` is a flat module). MUST land before US3's T040 (the test that asserts `UIBuildError` is importable from `ohbm2026.exceptions`) and T047 (the `ui/manifest.py` impl that imports it).
+- [X] T005 Confirm `ohbm2026.exceptions.EnrichmentError` already exists at its canonical location (it does per CLAUDE.md's typed-exception hierarchy doc); no source change. The redundant declaration at `enrichment.py:72` is removed as part of T016 without changing the exception's qualified name for any of the 28 callers.
 
 ---
 
@@ -49,38 +49,38 @@ description: "Task list for Stage 5 — Package Reorganization & Enrichment Clea
 
 ### Tests first (new test files for the new submodules)
 
-- [ ] T006 [P] [US1] Write `tests/test_enrich_text.py` covering: (a) `html_to_markdown("<p>x</p>") == "x"` and similar canonical conversions; (b) handling of empty / `None` input; (c) nested tags + entities (`&amp;`, `&lt;`); (d) the `HTMLToMarkdownParser` class can be instantiated and produces equivalent output to the function wrapper. These tests are red until T010 lands.
-- [ ] T007 [P] [US1] Write `tests/test_enrich_cache_paths.py` covering: (a) `default_image_analysis_cache_path` returns a deterministic path under `data/cache/figure_analysis/` for a given `(input_hash, model_id)` tuple; (b) `default_claim_analysis_cache_path` likewise under `data/cache/claim_analysis/`; (c) `load_json` + `write_json` round-trip a dict; (d) `load_image_analysis_cache` / `load_claim_analysis_cache` tolerate a missing file (return `{}`); (e) `refresh_analysis_cache_stats` updates a stats dict in-place. Red until T011 lands.
-- [ ] T008 [P] [US1] Write `tests/test_enrich_markdown_render.py` covering: (a) `build_sections_markdown` produces section dict + content-question list from a synthetic abstract; (b) `build_claim_manuscript_markdown` produces a single Markdown blob with all configured sections; (c) `render_abstract_markdown(title, sections)` glues title + sections; (d) `is_content_question("Methods") == True` and `is_content_question("Title") == False`; (e) `question_to_section("methods") == "methods"`; (f) `normalize_question_name` lowercases and strips; (g) `parse_list_value("a, b; c")` returns `["a", "b", "c"]`; (h) `filter_content_questions_markdown` filters out non-content questions. Red until T012 lands.
-- [ ] T009 [P] [US1] Write `tests/test_enrich_openai_compat.py` covering: (a) `parse_jsonish_content` handles plain JSON + JSON with markdown fences + JSON inside prose; (b) `image_to_data_url(jpeg_bytes)` returns `data:image/jpeg;base64,…`; (c) `resolve_openai_api_key` reads from `OPENAI_API_KEY` env first, falls back to a keyring lookup (mocked); (d) `openai_chat_multimodal(...)` returns the response when the mocked OpenAI client returns a fixture; (e) `openai_chat_multimodal_batch(...)` handles a 2-record batch. Use `unittest.mock.patch` on the `openai` SDK; do NOT hit the real API. Red until T013 lands.
+- [X] T006 [P] [US1] Write `tests/test_enrich_text.py` covering: (a) `html_to_markdown("<p>x</p>") == "x"` and similar canonical conversions; (b) handling of empty / `None` input; (c) nested tags + entities (`&amp;`, `&lt;`); (d) the `HTMLToMarkdownParser` class can be instantiated and produces equivalent output to the function wrapper. These tests are red until T010 lands.
+- [X] T007 [P] [US1] Write `tests/test_enrich_cache_paths.py` covering: (a) `default_image_analysis_cache_path` returns a deterministic path under `data/cache/figure_analysis/` for a given `(input_hash, model_id)` tuple; (b) `default_claim_analysis_cache_path` likewise under `data/cache/claim_analysis/`; (c) `load_json` + `write_json` round-trip a dict; (d) `load_image_analysis_cache` / `load_claim_analysis_cache` tolerate a missing file (return `{}`); (e) `refresh_analysis_cache_stats` updates a stats dict in-place. Red until T011 lands.
+- [X] T008 [P] [US1] Write `tests/test_enrich_markdown_render.py` covering: (a) `build_sections_markdown` produces section dict + content-question list from a synthetic abstract; (b) `build_claim_manuscript_markdown` produces a single Markdown blob with all configured sections; (c) `render_abstract_markdown(title, sections)` glues title + sections; (d) `is_content_question("Methods") == True` and `is_content_question("Title") == False`; (e) `question_to_section("methods") == "methods"`; (f) `normalize_question_name` lowercases and strips; (g) `parse_list_value("a, b; c")` returns `["a", "b", "c"]`; (h) `filter_content_questions_markdown` filters out non-content questions. Red until T012 lands.
+- [X] T009 [P] [US1] Write `tests/test_enrich_openai_compat.py` covering: (a) `parse_jsonish_content` handles plain JSON + JSON with markdown fences + JSON inside prose; (b) `image_to_data_url(jpeg_bytes)` returns `data:image/jpeg;base64,…`; (c) `resolve_openai_api_key` reads from `OPENAI_API_KEY` env first, falls back to a keyring lookup (mocked); (d) `openai_chat_multimodal(...)` returns the response when the mocked OpenAI client returns a fixture; (e) `openai_chat_multimodal_batch(...)` handles a 2-record batch. Use `unittest.mock.patch` on the `openai` SDK; do NOT hit the real API. Red until T013 lands.
 
 ### Implementation (new submodules + rewires + delete)
 
-- [ ] T010 [P] [US1] Create `src/ohbm2026/enrich/text.py` with `html_to_markdown` + `HTMLToMarkdownParser` lifted verbatim from `src/ohbm2026/enrichment.py` (lines around 136 + 225); leaf module — stdlib `html.parser.HTMLParser` only, no intra-package imports. Verify T006 turns green.
-- [ ] T011 [P] [US1] Create `src/ohbm2026/enrich/cache_paths.py` with `default_image_analysis_cache_path`, `default_claim_analysis_cache_path`, `load_image_analysis_cache`, `load_claim_analysis_cache`, `refresh_analysis_cache_stats`, `load_json`, `write_json` lifted from `src/ohbm2026/enrichment.py` (lines 96, 114, 216, 220, 450, 461, 463); leaf module — stdlib only. Verify T007 turns green.
-- [ ] T012 [US1] Create `src/ohbm2026/enrich/markdown_render.py` with `build_sections_markdown`, `build_claim_manuscript_markdown`, `render_abstract_markdown`, `filter_content_questions_markdown`, `is_content_question`, `question_to_section`, `normalize_question_name`, `parse_list_value` lifted from `src/ohbm2026/enrichment.py` (lines 236–445); imports `from ohbm2026.enrich.text import html_to_markdown` (mid-tier module). Verify T008 turns green.
-- [ ] T013 [P] [US1] Create `src/ohbm2026/enrich/openai_compat.py` with `openai_chat_multimodal`, `openai_chat_multimodal_batch`, `resolve_openai_api_key`, `parse_jsonish_content`, `image_to_data_url` lifted from `src/ohbm2026/enrichment.py`; leaf module — stdlib + `openai` + `keyring`. Verify T009 turns green.
-- [ ] T013a [P] [US1] Trim `src/ohbm2026/enrich/__init__.py` from its current 25 lines (docstring + `from ohbm2026.enrich import (claims, figures, flex_tier, image_quality, references, stage, storage)` + `__all__` block) down to ≤ 5 lines: keep the module docstring only. Remove the package-level re-export shell and the `__all__` list (Stage 4 / Q2 / T108b precedent — no backward-compat shim). Verify with `wc -l < src/ohbm2026/enrich/__init__.py` returning ≤ 5 and `grep -rE "from ohbm2026.enrich import (claims|figures|flex_tier|image_quality|references|stage|storage)\b" src/ tests/ scripts/` returning matches only at explicit-submodule paths (`from ohbm2026.enrich.claims import …` is allowed; `from ohbm2026.enrich import claims` as a re-export consumer pattern is not). Required by SC-002 (each new package `__init__.py` ≤ 5 lines).
-- [ ] T014 [US1] Rewire `src/ohbm2026/enrich/claims.py` line 32 `from ohbm2026 import enrichment as enrichment_module` to explicit submodule imports. Concretely: (a) `from ohbm2026.enrich.cache_paths import default_claim_analysis_cache_path, load_claim_analysis_cache, load_json, write_json, refresh_analysis_cache_stats`; (b) `from ohbm2026.enrich.markdown_render import build_claim_manuscript_markdown, build_sections_markdown`; (c) `from ohbm2026.enrich.openai_compat import resolve_openai_api_key, parse_jsonish_content`. Then replace every `enrichment_module.X` reference with the bare `X`.
-- [ ] T015 [US1] Rewire `src/ohbm2026/enrich/stage.py` line 47 same pattern: replace `from ohbm2026 import enrichment as enrichment_module` with explicit submodule imports per the symbols `stage.py` consumes (use `grep -nE "enrichment_module\." src/ohbm2026/enrich/stage.py` to enumerate).
-- [ ] T016 [US1] Rewire `src/ohbm2026/enrich/openalex.py` line 24: `from ohbm2026.enrichment import html_to_markdown` → `from ohbm2026.enrich.text import html_to_markdown`.
-- [ ] T017 [P] [US1] Rewire `src/ohbm2026/embed/components.py` line 17 (`from ohbm2026 import enrichment as enrichment_module`) to explicit imports. Concretely, `components.py` consumes the markdown-render helpers + `html_to_markdown`: replace with `from ohbm2026.enrich.markdown_render import build_sections_markdown, build_claim_manuscript_markdown` and `from ohbm2026.enrich.text import html_to_markdown`. Verify via `grep -nE "enrichment_module\." src/ohbm2026/embed/components.py` returns zero post-edit.
-- [ ] T018 [P] [US1] Rewire `src/ohbm2026/ui.py` line 18 `from ohbm2026.enrichment import default_image_analysis_cache_path` → `from ohbm2026.enrich.cache_paths import default_image_analysis_cache_path`. (US3 will further split `ui.py`; this is the minimal change for US1 so the consumer compiles.)
-- [ ] T019 [P] [US1] Rewire `scripts/reference_split_regression_probe.py` line 9: `from ohbm2026.enrichment import html_to_markdown` → `from ohbm2026.enrich.text import html_to_markdown`.
-- [ ] T020 [US1] Delete the legacy module + legacy tests + legacy script:
+- [X] T010 [P] [US1] Create `src/ohbm2026/enrich/text.py` with `html_to_markdown` + `HTMLToMarkdownParser` lifted verbatim from `src/ohbm2026/enrichment.py` (lines around 136 + 225); leaf module — stdlib `html.parser.HTMLParser` only, no intra-package imports. Verify T006 turns green.
+- [X] T011 [P] [US1] Create `src/ohbm2026/enrich/cache_paths.py` with `default_image_analysis_cache_path`, `default_claim_analysis_cache_path`, `load_image_analysis_cache`, `load_claim_analysis_cache`, `refresh_analysis_cache_stats`, `load_json`, `write_json` lifted from `src/ohbm2026/enrichment.py` (lines 96, 114, 216, 220, 450, 461, 463); leaf module — stdlib only. Verify T007 turns green.
+- [X] T012 [US1] Create `src/ohbm2026/enrich/markdown_render.py` with `build_sections_markdown`, `build_claim_manuscript_markdown`, `render_abstract_markdown`, `filter_content_questions_markdown`, `is_content_question`, `question_to_section`, `normalize_question_name`, `parse_list_value` lifted from `src/ohbm2026/enrichment.py` (lines 236–445); imports `from ohbm2026.enrich.text import html_to_markdown` (mid-tier module). Verify T008 turns green.
+- [X] T013 [P] [US1] Create `src/ohbm2026/enrich/openai_compat.py` with `openai_chat_multimodal`, `openai_chat_multimodal_batch`, `resolve_openai_api_key`, `parse_jsonish_content`, `image_to_data_url` lifted from `src/ohbm2026/enrichment.py`; leaf module — stdlib + `openai` + `keyring`. Verify T009 turns green.
+- [X] T013a [P] [US1] Trim `src/ohbm2026/enrich/__init__.py` from its current 25 lines (docstring + `from ohbm2026.enrich import (claims, figures, flex_tier, image_quality, references, stage, storage)` + `__all__` block) down to ≤ 5 lines: keep the module docstring only. Remove the package-level re-export shell and the `__all__` list (Stage 4 / Q2 / T108b precedent — no backward-compat shim). Verify with `wc -l < src/ohbm2026/enrich/__init__.py` returning ≤ 5 and `grep -rE "from ohbm2026.enrich import (claims|figures|flex_tier|image_quality|references|stage|storage)\b" src/ tests/ scripts/` returning matches only at explicit-submodule paths (`from ohbm2026.enrich.claims import …` is allowed; `from ohbm2026.enrich import claims` as a re-export consumer pattern is not). Required by SC-002 (each new package `__init__.py` ≤ 5 lines).
+- [X] T014 [US1] Rewire `src/ohbm2026/enrich/claims.py` line 32 `from ohbm2026 import enrichment as enrichment_module` to explicit submodule imports. Concretely: (a) `from ohbm2026.enrich.cache_paths import default_claim_analysis_cache_path, load_claim_analysis_cache, load_json, write_json, refresh_analysis_cache_stats`; (b) `from ohbm2026.enrich.markdown_render import build_claim_manuscript_markdown, build_sections_markdown`; (c) `from ohbm2026.enrich.openai_compat import resolve_openai_api_key, parse_jsonish_content`. Then replace every `enrichment_module.X` reference with the bare `X`.
+- [X] T015 [US1] Rewire `src/ohbm2026/enrich/stage.py` line 47 same pattern: replace `from ohbm2026 import enrichment as enrichment_module` with explicit submodule imports per the symbols `stage.py` consumes (use `grep -nE "enrichment_module\." src/ohbm2026/enrich/stage.py` to enumerate).
+- [X] T016 [US1] Rewire `src/ohbm2026/enrich/openalex.py` line 24: `from ohbm2026.enrichment import html_to_markdown` → `from ohbm2026.enrich.text import html_to_markdown`.
+- [X] T017 [P] [US1] Rewire `src/ohbm2026/embed/components.py` line 17 (`from ohbm2026 import enrichment as enrichment_module`) to explicit imports. Concretely, `components.py` consumes the markdown-render helpers + `html_to_markdown`: replace with `from ohbm2026.enrich.markdown_render import build_sections_markdown, build_claim_manuscript_markdown` and `from ohbm2026.enrich.text import html_to_markdown`. Verify via `grep -nE "enrichment_module\." src/ohbm2026/embed/components.py` returns zero post-edit.
+- [X] T018 [P] [US1] Rewire `src/ohbm2026/ui.py` line 18 `from ohbm2026.enrichment import default_image_analysis_cache_path` → `from ohbm2026.enrich.cache_paths import default_image_analysis_cache_path`. (US3 will further split `ui.py`; this is the minimal change for US1 so the consumer compiles.)
+- [X] T019 [P] [US1] Rewire `scripts/reference_split_regression_probe.py` line 9: `from ohbm2026.enrichment import html_to_markdown` → `from ohbm2026.enrich.text import html_to_markdown`.
+- [X] T020 [US1] Delete the legacy module + legacy tests + legacy script:
   ```bash
   git rm src/ohbm2026/enrichment.py
   git rm tests/test_enrichment.py
   git rm scripts/time_figure_enrichment.py
   ```
-- [ ] T021 [US1] Verify the contract (per `contracts/enrich-api.md`):
+- [X] T021 [US1] Verify the contract (per `contracts/enrich-api.md`):
   ```bash
   grep -rE "from ohbm2026 import enrichment|from ohbm2026\.enrichment" src/ tests/ scripts/ && exit 1 || true
   grep -rE "\b(enrich_main|analyze_figures_main|extract_claims_main|build_cllm_environment|extract_claims_with_cllm)\b" src/ tests/ scripts/ && exit 1 || true
   KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m unittest discover -s tests 2>&1 | tail -3
   ```
-- [ ] T022 [US1] Smoke (SC-005): run `KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m ohbm2026.cli enrich-abstracts --limit 1 --invalidate figures 2>&1 | grep cache_key`. Confirm the printed `cache_key` matches the value in `tmp/stage5-baseline/figure-cache-key.txt`.
-- [ ] T023 [US1] Commit US1. Commit message MUST record (a) the post-stage test count (recompute `(583 − 22 + N_new) passing / 1 pre-existing`), (b) the list of deleted symbols (point at `research.md` R1), (c) the four new submodules + four new test files. Use the template in `quickstart.md` §"US1 verification → 4. Commit".
+- [X] T022 [US1] Smoke (SC-005): run `KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m ohbm2026.cli enrich-abstracts --limit 1 --invalidate figures 2>&1 | grep cache_key`. Confirm the printed `cache_key` matches the value in `tmp/stage5-baseline/figure-cache-key.txt`.
+- [X] T023 [US1] Commit US1. Commit message MUST record (a) the post-stage test count (recompute `(583 − 22 + N_new) passing / 1 pre-existing`), (b) the list of deleted symbols (point at `research.md` R1), (c) the four new submodules + four new test files. Use the template in `quickstart.md` §"US1 verification → 4. Commit".
 
 ---
 
@@ -94,15 +94,15 @@ description: "Task list for Stage 5 — Package Reorganization & Enrichment Clea
 
 ### Implementation
 
-- [ ] T024 [P] [US2] Create `src/ohbm2026/layout/__init__.py` with the parking docstring exactly as specified in `data-model.md` §2 (one docstring, ≤ 5 lines, no `__all__`, no runtime warning).
-- [ ] T025 [US2] Move the three module files verbatim:
+- [X] T024 [P] [US2] Create `src/ohbm2026/layout/__init__.py` with the parking docstring exactly as specified in `data-model.md` §2 (one docstring, ≤ 5 lines, no `__all__`, no runtime warning).
+- [X] T025 [US2] Move the three module files verbatim:
   ```bash
   git mv src/ohbm2026/poster_layout.py     src/ohbm2026/layout/poster_layout.py
   git mv src/ohbm2026/poster_sequencing.py src/ohbm2026/layout/poster_sequencing.py
   git mv src/ohbm2026/nocd_experiments.py  src/ohbm2026/layout/nocd_experiments.py
   ```
-- [ ] T026 [US2] Update the internal cross-reference inside the moved `poster_sequencing.py`: `from ohbm2026.poster_layout import …` → `from ohbm2026.layout.poster_layout import …`.
-- [ ] T027 [US2] Move the 15 layout/NOCD scripts to `scripts/layout/`:
+- [X] T026 [US2] Update the internal cross-reference inside the moved `poster_sequencing.py`: `from ohbm2026.poster_layout import …` → `from ohbm2026.layout.poster_layout import …`.
+- [X] T027 [US2] Move the 15 layout/NOCD scripts to `scripts/layout/`:
   ```bash
   mkdir -p scripts/layout
   git mv scripts/analyze_poster_layout.py                  scripts/layout/
@@ -121,14 +121,14 @@ description: "Task list for Stage 5 — Package Reorganization & Enrichment Clea
   git mv scripts/write_layout_category_summaries.py        scripts/layout/
   git mv scripts/write_layout_reassignment_summaries.py    scripts/layout/
   ```
-- [ ] T028 [US2] For each moved script, fix the path-resolution: any `REPO_ROOT = Path(__file__).resolve().parents[1]` becomes `parents[2]`; any internal `from ohbm2026.poster_layout import …` becomes `from ohbm2026.layout.poster_layout import …` (and same for `poster_sequencing` / `nocd_experiments`). Verify by running `--help` for 3 representative scripts: `optimize_poster_layout.py`, `benchmark_poster_sequencing.py`, `run_nocd_classic_predict_experiment.py`.
-- [ ] T029 [P] [US2] Rewire `tests/test_nocd_experiments.py` imports: `from ohbm2026 import nocd_experiments` → `from ohbm2026.layout import nocd_experiments`.
-- [ ] T030 [P] [US2] Rewire `tests/test_poster_sequencing.py` imports analogously.
-- [ ] T031 [P] [US2] Rewire `tests/test_plot_poster_layout_floorplan.py` imports; the pre-existing test failure stays pre-existing (it is unrelated to this stage's rewires).
-- [ ] T032 [US2] Update `CLAUDE.md`: add a one-paragraph note under the module-list / package-layout section explicitly naming `ohbm2026.layout` as parked (no scheduled maintenance; revive when a new organizer cycle needs it). The phrasing MUST satisfy `grep -E "layout.*parked|parked.*layout" CLAUDE.md`.
-- [ ] T033 [P] [US2] Update `README.md`'s Track B / poster section with the same "parked" wording; `grep -E "layout.*parked|parked.*layout" README.md` MUST match.
-- [ ] T034 [P] [US2] Update `docs/reproducibility-vision.md`'s Track B subsection with the same "parked" wording; `grep -E "layout.*parked|parked.*layout" docs/reproducibility-vision.md` MUST match.
-- [ ] T035 [US2] Verify the contract (per `contracts/layout-api.md`):
+- [X] T028 [US2] For each moved script, fix the path-resolution: any `REPO_ROOT = Path(__file__).resolve().parents[1]` becomes `parents[2]`; any internal `from ohbm2026.poster_layout import …` becomes `from ohbm2026.layout.poster_layout import …` (and same for `poster_sequencing` / `nocd_experiments`). Verify by running `--help` for 3 representative scripts: `optimize_poster_layout.py`, `benchmark_poster_sequencing.py`, `run_nocd_classic_predict_experiment.py`.
+- [X] T029 [P] [US2] Rewire `tests/test_nocd_experiments.py` imports: `from ohbm2026 import nocd_experiments` → `from ohbm2026.layout import nocd_experiments`.
+- [X] T030 [P] [US2] Rewire `tests/test_poster_sequencing.py` imports analogously.
+- [X] T031 [P] [US2] Rewire `tests/test_plot_poster_layout_floorplan.py` imports; the pre-existing test failure stays pre-existing (it is unrelated to this stage's rewires).
+- [X] T032 [US2] Update `CLAUDE.md`: add a one-paragraph note under the module-list / package-layout section explicitly naming `ohbm2026.layout` as parked (no scheduled maintenance; revive when a new organizer cycle needs it). The phrasing MUST satisfy `grep -E "layout.*parked|parked.*layout" CLAUDE.md`.
+- [X] T033 [P] [US2] Update `README.md`'s Track B / poster section with the same "parked" wording; `grep -E "layout.*parked|parked.*layout" README.md` MUST match.
+- [X] T034 [P] [US2] Update `docs/reproducibility-vision.md`'s Track B subsection with the same "parked" wording; `grep -E "layout.*parked|parked.*layout" docs/reproducibility-vision.md` MUST match.
+- [X] T035 [US2] Verify the contract (per `contracts/layout-api.md`):
   ```bash
   grep -rE "from ohbm2026 import (poster_layout|poster_sequencing|nocd_experiments)|from ohbm2026\.(poster_layout|poster_sequencing|nocd_experiments)" src/ tests/ scripts/ && exit 1 || true
   PYTHONPATH=src .venv/bin/python scripts/layout/optimize_poster_layout.py --help >/dev/null
@@ -136,7 +136,7 @@ description: "Task list for Stage 5 — Package Reorganization & Enrichment Clea
   PYTHONPATH=src .venv/bin/python scripts/layout/run_nocd_classic_predict_experiment.py --help >/dev/null
   KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m unittest discover -s tests 2>&1 | tail -3
   ```
-- [ ] T036 [US2] Commit US2. Use the template in `quickstart.md` §"US2 verification → 4. Commit".
+- [X] T036 [US2] Commit US2. Use the template in `quickstart.md` §"US2 verification → 4. Commit".
 
 ---
 
@@ -148,38 +148,38 @@ description: "Task list for Stage 5 — Package Reorganization & Enrichment Clea
 
 ### Tests first (new test files for the four leaf submodules)
 
-- [ ] T037 [P] [US3] Write `tests/test_ui_text.py` covering: (a) `markdown_to_plain_text("**bold**") == "bold"`; (b) `markdown_to_html("**bold**")` contains `<strong>`; (c) `render_additional_content_markdown` handles list + scalar input; (d) `question_lookup` returns a dict keyed by question name; (e) `primary_topic_from_questions` + `secondary_topic_from_questions` extract the right pair from a synthetic abstract. Red until T042 lands (the `ui/text.py` impl).
-- [ ] T038 [P] [US3] Write `tests/test_ui_figures.py` covering: (a) `simplify_image_analysis` produces a small dict from a fixture image-analysis record; (b) `figure_note_sort_key` orders by `(method_order, label)`; (c) `order_figure_notes` returns sorted list; (d) `build_figure_text_blob` concatenates per-figure text into a single string; (e) `load_image_analysis_lookup` reads a JSON file into `{abstract_id: [records]}`. Red until T043 lands (the `ui/figures.py` impl).
-- [ ] T039 [P] [US3] Write `tests/test_ui_references.py` covering: (a) `load_reference_lookup` reads a synthetic JSON file into `{abstract_id: {…}}`; (b) `load_neighbors` returns `{abstract_id: [neighbors_top_k]}`; (c) `load_distant` returns `{abstract_id: [distant_bottom_k]}`; (d) all three tolerate a missing file (return `{}`). Red until T046 lands.
-- [ ] T040 [P] [US3] Write `tests/test_ui_manifest.py` covering: (a) `default_site_output_dir` returns a path under `data/outputs/exported-sites/`; (b) `default_export_output_dir` returns `export/ui-site/`; (c) `ClusterLayerSpec` constructs from kwargs; (d) `UIBuildError` is importable from `ohbm2026.exceptions` (T004 moved it there); (e) `load_json` + `write_json` round-trip a dict (the UI-local copy that lives in `ui/manifest.py`). Red until T047 lands.
+- [X] T037 [P] [US3] Write `tests/test_ui_text.py` covering: (a) `markdown_to_plain_text("**bold**") == "bold"`; (b) `markdown_to_html("**bold**")` contains `<strong>`; (c) `render_additional_content_markdown` handles list + scalar input; (d) `question_lookup` returns a dict keyed by question name; (e) `primary_topic_from_questions` + `secondary_topic_from_questions` extract the right pair from a synthetic abstract. Red until T042 lands (the `ui/text.py` impl).
+- [X] T038 [P] [US3] Write `tests/test_ui_figures.py` covering: (a) `simplify_image_analysis` produces a small dict from a fixture image-analysis record; (b) `figure_note_sort_key` orders by `(method_order, label)`; (c) `order_figure_notes` returns sorted list; (d) `build_figure_text_blob` concatenates per-figure text into a single string; (e) `load_image_analysis_lookup` reads a JSON file into `{abstract_id: [records]}`. Red until T043 lands (the `ui/figures.py` impl).
+- [X] T039 [P] [US3] Write `tests/test_ui_references.py` covering: (a) `load_reference_lookup` reads a synthetic JSON file into `{abstract_id: {…}}`; (b) `load_neighbors` returns `{abstract_id: [neighbors_top_k]}`; (c) `load_distant` returns `{abstract_id: [distant_bottom_k]}`; (d) all three tolerate a missing file (return `{}`). Red until T046 lands.
+- [X] T040 [P] [US3] Write `tests/test_ui_manifest.py` covering: (a) `default_site_output_dir` returns a path under `data/outputs/exported-sites/`; (b) `default_export_output_dir` returns `export/ui-site/`; (c) `ClusterLayerSpec` constructs from kwargs; (d) `UIBuildError` is importable from `ohbm2026.exceptions` (T004 moved it there); (e) `load_json` + `write_json` round-trip a dict (the UI-local copy that lives in `ui/manifest.py`). Red until T047 lands.
 
 ### Implementation (new submodules + rewires + delete)
 
-- [ ] T041 [P] [US3] Create `src/ohbm2026/ui/__init__.py` with a docstring only (≤ 5 lines, no re-exports, no `__all__`).
-- [ ] T042 [P] [US3] Create `src/ohbm2026/ui/text.py` with `markdown_to_plain_text`, `markdown_to_html`, `render_additional_content_markdown`, `question_lookup`, `topic_pair_from_questions`, `topic_parent`, `topic_subcategory`, `primary_topic_from_questions`, `secondary_topic_from_questions`, `topic_subcategories_from_questions` lifted verbatim from `src/ohbm2026/ui.py` (lines 213–322); leaf module.
-- [ ] T043 [P] [US3] Create `src/ohbm2026/ui/figures.py` with `simplify_image_analysis`, `figure_note_sort_key`, `order_figure_notes`, `build_figure_text_blob`, `load_image_analysis_lookup` lifted from `src/ohbm2026/ui.py` (lines 336–395); leaf module.
-- [ ] T044 [P] [US3] Verify T037 turns green by running `PYTHONPATH=src .venv/bin/python -m unittest tests.test_ui_text`.
-- [ ] T045 [P] [US3] Verify T038 turns green by running `PYTHONPATH=src .venv/bin/python -m unittest tests.test_ui_figures`.
-- [ ] T046 [P] [US3] Create `src/ohbm2026/ui/references.py` with `load_reference_lookup`, `load_neighbors`, `load_distant` lifted from `src/ohbm2026/ui.py` (lines 399–455); leaf module. Verify T039 turns green.
-- [ ] T047 [P] [US3] Create `src/ohbm2026/ui/manifest.py` with `default_site_output_dir`, `default_export_output_dir`, `ClusterLayerSpec`, plus UI-local copies of `load_json` + `write_json` (the UI keeps a local copy to avoid cross-package imports per `research.md` R5). Imports `UIBuildError` from `ohbm2026.exceptions` (T004 moved it there). Verify T040 turns green.
-- [ ] T048 [US3] Create `src/ohbm2026/ui/payload_legacy.py` with the legacy embedding-bundle-driven build path lifted from `src/ohbm2026/ui.py` (the pre-Stage-4 functions: `build_ui_payload`, `build_clusters_payload`, related). Imports leaves only: `from ohbm2026.ui.text import …`, `from ohbm2026.ui.figures import …`, `from ohbm2026.ui.references import …`, `from ohbm2026.ui.manifest import …`, plus `from ohbm2026.enrich.cache_paths import default_image_analysis_cache_path` directly (not via T018's `ui.py` rewire — that file is gone after T054). Inherited coverage: `tests/test_ui.py` exercises this path.
-- [ ] T049 [US3] Create `src/ohbm2026/ui/payload_stage4.py` with `build_ui_payload_from_stage4` lifted from `src/ohbm2026/ui.py` (~line 700); imports leaves only. Inherited coverage: `tests/test_ui_export.py::test_consumes_stage4_rollup` already exercises this end-to-end.
-- [ ] T050 [US3] Create `src/ohbm2026/ui/cli.py` with `export_ui_main` (line 1227) + `build_ui_main` (line 1308) + private `_cli_option_present` (line 154); imports `from ohbm2026.ui.payload_legacy import …`, `from ohbm2026.ui.payload_stage4 import build_ui_payload_from_stage4`, `from ohbm2026.ui.manifest import …`. Inherited coverage: `tests/test_ui_export.py::test_cli_export_ui_with_analysis_rollup_flag` already exercises this.
-- [ ] T051 [US3] Rewire `src/ohbm2026/cli.py` dispatch: replace any `from ohbm2026 import ui` and `ui.export_ui_main` / `ui.build_ui_main` references with `from ohbm2026.ui.cli import export_ui_main, build_ui_main`.
-- [ ] T052 [P] [US3] Rewire `tests/test_ui.py` line 9 `from ohbm2026.ui import (...)` to the explicit submodule paths (`from ohbm2026.ui.text import …`, `from ohbm2026.ui.figures import …`, etc. — match whatever symbols the test currently imports).
-- [ ] T053 [P] [US3] Rewire `tests/test_ui_export.py` lines 138, 198, 215: `from ohbm2026.ui import build_ui_payload_from_stage4` → `from ohbm2026.ui.payload_stage4 import build_ui_payload_from_stage4`; `from ohbm2026.ui import UIBuildError, build_ui_payload_from_stage4` → `from ohbm2026.exceptions import UIBuildError` + `from ohbm2026.ui.payload_stage4 import build_ui_payload_from_stage4`; `from ohbm2026.ui import export_ui_main` → `from ohbm2026.ui.cli import export_ui_main`.
-- [ ] T054 [US3] Delete the legacy file:
+- [X] T041 [P] [US3] Create `src/ohbm2026/ui/__init__.py` with a docstring only (≤ 5 lines, no re-exports, no `__all__`).
+- [X] T042 [P] [US3] Create `src/ohbm2026/ui/text.py` with `markdown_to_plain_text`, `markdown_to_html`, `render_additional_content_markdown`, `question_lookup`, `topic_pair_from_questions`, `topic_parent`, `topic_subcategory`, `primary_topic_from_questions`, `secondary_topic_from_questions`, `topic_subcategories_from_questions` lifted verbatim from `src/ohbm2026/ui.py` (lines 213–322); leaf module.
+- [X] T043 [P] [US3] Create `src/ohbm2026/ui/figures.py` with `simplify_image_analysis`, `figure_note_sort_key`, `order_figure_notes`, `build_figure_text_blob`, `load_image_analysis_lookup` lifted from `src/ohbm2026/ui.py` (lines 336–395); leaf module.
+- [X] T044 [P] [US3] Verify T037 turns green by running `PYTHONPATH=src .venv/bin/python -m unittest tests.test_ui_text`.
+- [X] T045 [P] [US3] Verify T038 turns green by running `PYTHONPATH=src .venv/bin/python -m unittest tests.test_ui_figures`.
+- [X] T046 [P] [US3] Create `src/ohbm2026/ui/references.py` with `load_reference_lookup`, `load_neighbors`, `load_distant` lifted from `src/ohbm2026/ui.py` (lines 399–455); leaf module. Verify T039 turns green.
+- [X] T047 [P] [US3] Create `src/ohbm2026/ui/manifest.py` with `default_site_output_dir`, `default_export_output_dir`, `ClusterLayerSpec`, plus UI-local copies of `load_json` + `write_json` (the UI keeps a local copy to avoid cross-package imports per `research.md` R5). Imports `UIBuildError` from `ohbm2026.exceptions` (T004 moved it there). Verify T040 turns green.
+- [X] T048 [US3] Create `src/ohbm2026/ui/payload_legacy.py` with the legacy embedding-bundle-driven build path lifted from `src/ohbm2026/ui.py` (the pre-Stage-4 functions: `build_ui_payload`, `build_clusters_payload`, related). Imports leaves only: `from ohbm2026.ui.text import …`, `from ohbm2026.ui.figures import …`, `from ohbm2026.ui.references import …`, `from ohbm2026.ui.manifest import …`, plus `from ohbm2026.enrich.cache_paths import default_image_analysis_cache_path` directly (not via T018's `ui.py` rewire — that file is gone after T054). Inherited coverage: `tests/test_ui.py` exercises this path.
+- [X] T049 [US3] Create `src/ohbm2026/ui/payload_stage4.py` with `build_ui_payload_from_stage4` lifted from `src/ohbm2026/ui.py` (~line 700); imports leaves only. Inherited coverage: `tests/test_ui_export.py::test_consumes_stage4_rollup` already exercises this end-to-end.
+- [X] T050 [US3] Create `src/ohbm2026/ui/cli.py` with `export_ui_main` (line 1227) + `build_ui_main` (line 1308) + private `_cli_option_present` (line 154); imports `from ohbm2026.ui.payload_legacy import …`, `from ohbm2026.ui.payload_stage4 import build_ui_payload_from_stage4`, `from ohbm2026.ui.manifest import …`. Inherited coverage: `tests/test_ui_export.py::test_cli_export_ui_with_analysis_rollup_flag` already exercises this.
+- [X] T051 [US3] Rewire `src/ohbm2026/cli.py` dispatch: replace any `from ohbm2026 import ui` and `ui.export_ui_main` / `ui.build_ui_main` references with `from ohbm2026.ui.cli import export_ui_main, build_ui_main`.
+- [X] T052 [P] [US3] Rewire `tests/test_ui.py` line 9 `from ohbm2026.ui import (...)` to the explicit submodule paths (`from ohbm2026.ui.text import …`, `from ohbm2026.ui.figures import …`, etc. — match whatever symbols the test currently imports).
+- [X] T053 [P] [US3] Rewire `tests/test_ui_export.py` lines 138, 198, 215: `from ohbm2026.ui import build_ui_payload_from_stage4` → `from ohbm2026.ui.payload_stage4 import build_ui_payload_from_stage4`; `from ohbm2026.ui import UIBuildError, build_ui_payload_from_stage4` → `from ohbm2026.exceptions import UIBuildError` + `from ohbm2026.ui.payload_stage4 import build_ui_payload_from_stage4`; `from ohbm2026.ui import export_ui_main` → `from ohbm2026.ui.cli import export_ui_main`.
+- [X] T054 [US3] Delete the legacy file:
   ```bash
   git rm src/ohbm2026/ui.py
   ```
-- [ ] T055 [US3] Verify the contract (per `contracts/ui-api.md`):
+- [X] T055 [US3] Verify the contract (per `contracts/ui-api.md`):
   ```bash
   PYTHONPATH=src .venv/bin/python -m ohbm2026.cli export-ui --help >/dev/null
   PYTHONPATH=src .venv/bin/python -m ohbm2026.cli build-ui --help >/dev/null
   grep -rE "from ohbm2026 import ui\b|^import ohbm2026\.ui\s*$" src/ tests/ scripts/
   KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m unittest discover -s tests 2>&1 | tail -3
   ```
-- [ ] T056 [US3] Smoke (SC-006): build a post-stage UI bundle and diff against `tmp/stage5-baseline/ui-filelist.txt`:
+- [X] T056 [US3] Smoke (SC-006): build a post-stage UI bundle and diff against `tmp/stage5-baseline/ui-filelist.txt`:
   ```bash
   KMP_DUPLICATE_LIB_OK=TRUE PYTHONPATH=src .venv/bin/python -m ohbm2026.cli build-ui \
     --raw-input data/primary/abstracts.json \
@@ -192,21 +192,21 @@ description: "Task list for Stage 5 — Package Reorganization & Enrichment Clea
   diff <(jq -S 'del(.timestamp,.code_revision)' /tmp/ui-pre-stage5/manifest.json) \
        <(jq -S 'del(.timestamp,.code_revision)' /tmp/ui-post-stage5/manifest.json)
   ```
-- [ ] T057 [US3] Commit US3. Use the template in `quickstart.md` §"US3 verification → 5. Commit".
+- [X] T057 [US3] Commit US3. Use the template in `quickstart.md` §"US3 verification → 5. Commit".
 
 ---
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T058 Final-stage docs sweep: confirm CLAUDE.md, README.md, and `docs/reproducibility-vision.md` each reference the new `ohbm2026.{enrich,layout,ui}` packages and that the SPECKIT block in CLAUDE.md (already updated by `/speckit-plan` to point at Stage 5) still resolves to `specs/007-package-reorg/plan.md`.
-- [ ] T059 [P] Run the full constitution check:
+- [X] T058 Final-stage docs sweep: confirm CLAUDE.md, README.md, and `docs/reproducibility-vision.md` each reference the new `ohbm2026.{enrich,layout,ui}` packages and that the SPECKIT block in CLAUDE.md (already updated by `/speckit-plan` to point at Stage 5) still resolves to `specs/007-package-reorg/plan.md`.
+- [X] T059 [P] Run the full constitution check:
   ```bash
   .specify/scripts/bash/constitution-check.sh --full
   ```
   Expect exit code 0.
-- [ ] T060 [P] Run the full success-criteria sweep from `quickstart.md` §"Full-stage final verification (SC-001..SC-007)"; record the seven results in the final commit message.
-- [ ] T061 Mark all of T001–T060 in this `tasks.md` as `[X]` and commit the tasks-list update. Final stage state: `git status --short` is clean apart from the tasks.md update.
-- [ ] T062 Push the branch and open the PR to `main` (if Stage 4 / PR #7 has merged) or to `006-analysis-annotation` (if PR #7 is still in review). PR title: `refactor(stage5): package reorg + enrichment cleanup`. Body: summary of US1 / US2 / US3 + the seven SC results from T060.
+- [X] T060 [P] Run the full success-criteria sweep from `quickstart.md` §"Full-stage final verification (SC-001..SC-007)"; record the seven results in the final commit message.
+- [X] T061 Mark all of T001–T060 in this `tasks.md` as `[X]` and commit the tasks-list update. Final stage state: `git status --short` is clean apart from the tasks.md update.
+- [X] T062 Push the branch and open the PR to `main` (if Stage 4 / PR #7 has merged) or to `006-analysis-annotation` (if PR #7 is still in review). PR title: `refactor(stage5): package reorg + enrichment cleanup`. Body: summary of US1 / US2 / US3 + the seven SC results from T060.
 
 ---
 
