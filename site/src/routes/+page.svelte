@@ -213,9 +213,10 @@
 				<button
 					type="button"
 					class="control-toggle"
-					class:active={$semanticEnabled && $semanticStatus.state === 'ready'}
-					class:loading={$semanticStatus.state === 'loading-vectors' || $semanticStatus.state === 'loading-model'}
-					disabled={$semanticStatus.state !== 'ready' && $semanticStatus.state !== 'idle' && $semanticStatus.state !== 'error'}
+					class:active={$semanticEnabled}
+					class:loading={$semanticEnabled &&
+						($semanticStatus.state === 'loading-vectors' || $semanticStatus.state === 'loading-model')}
+					class:errored={$semanticEnabled && $semanticStatus.state === 'error'}
 					on:click={() => semanticEnabled.toggle()}
 					aria-pressed={$semanticEnabled}
 					title={$semanticStatus.state === 'ready'
@@ -228,10 +229,12 @@
 								? 'Loading semantic vectors…'
 								: $semanticStatus.state === 'error'
 									? `Semantic search unavailable: ${$semanticStatus.message}`
-									: 'Semantic search idle — click to engage'}
+									: $semanticEnabled
+										? 'Semantic search ON — engaging on first query'
+										: 'Semantic search OFF — click to enable'}
 					data-testid="toggle-semantic"
 				>
-					{#if $semanticStatus.state === 'loading-vectors' || $semanticStatus.state === 'loading-model'}
+					{#if $semanticEnabled && ($semanticStatus.state === 'loading-vectors' || $semanticStatus.state === 'loading-model')}
 						⏳
 					{:else}
 						✨
@@ -363,8 +366,14 @@
 		border-color: var(--accent);
 	}
 	.control-toggle.loading {
-		opacity: 0.7;
+		/* still highlighted (active + loading); add a subtle pulsing tint */
+		opacity: 0.85;
 		cursor: progress;
+	}
+	.control-toggle.errored {
+		background: var(--warning-bg);
+		color: var(--text);
+		border-color: var(--warning-border);
 	}
 	.control-toggle:disabled {
 		cursor: progress;
