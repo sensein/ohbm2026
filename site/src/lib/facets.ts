@@ -31,13 +31,13 @@ const FACETS_FROM_BLOCK = [
 
 export type FacetKey =
 	| 'accepted_for'
-	| 'primary_topic'
-	| 'secondary_topic'
+	| 'topic'
+	| 'subcategory'
 	| (typeof FACETS_FROM_BLOCK)[number];
 
 export const FACET_KEYS_ORDERED: FacetKey[] = [
-	'primary_topic',
-	'secondary_topic',
+	'topic',
+	'subcategory',
 	'methods',
 	'study_type',
 	'population',
@@ -53,8 +53,8 @@ export const FACET_KEYS_ORDERED: FacetKey[] = [
 
 export const FACET_LABELS: Record<FacetKey, string> = {
 	accepted_for: 'Accepted for',
-	primary_topic: 'Primary topic',
-	secondary_topic: 'Secondary topic',
+	topic: 'Topic',
+	subcategory: 'Subcategory',
 	keywords: 'Keywords',
 	methods: 'Methods',
 	study_type: 'Study type',
@@ -67,10 +67,26 @@ export const FACET_LABELS: Record<FacetKey, string> = {
 	brain_networks: 'Brain networks'
 };
 
+function dedupe(values: string[]): string[] {
+	const out: string[] = [];
+	const seen = new Set<string>();
+	for (const v of values) {
+		if (!v || seen.has(v)) continue;
+		seen.add(v);
+		out.push(v);
+	}
+	return out;
+}
+
 function valuesFor(record: AbstractRecord, key: FacetKey): string[] {
 	if (key === 'accepted_for') return record.accepted_for ? [record.accepted_for] : [];
-	if (key === 'primary_topic') return record.topics.primary ? [record.topics.primary] : [];
-	if (key === 'secondary_topic') return record.topics.secondary ? [record.topics.secondary] : [];
+	// The Topic facet is the UNION of primary + secondary topic values per
+	// abstract (deduped). A selected Topic option matches if EITHER position
+	// equals it — the previous split into primary_topic / secondary_topic
+	// made users pick the same term twice for the same conceptual filter.
+	if (key === 'topic') return dedupe([record.topics.primary, record.topics.secondary]);
+	if (key === 'subcategory')
+		return dedupe([record.topics.primary_subcategory, record.topics.secondary_subcategory]);
 	const v = record.facets[key];
 	if (Array.isArray(v)) return v.map((x) => String(x)).filter(Boolean);
 	if (typeof v === 'string' && v) return [v];
