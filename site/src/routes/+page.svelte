@@ -11,7 +11,7 @@
 		type Manifest
 	} from '$lib/shards';
 	import { focusedAbstract, lassoSelection, searchQuery } from '$lib/stores/selection';
-	import { searchAbstracts } from '$lib/filter';
+	import { lexicalSearch } from '$lib/filter';
 	import SearchBar from '$lib/components/SearchBar.svelte';
 	import ResultList from '$lib/components/ResultList.svelte';
 	import DetailPanel from '$lib/components/DetailPanel.svelte';
@@ -48,7 +48,7 @@
 		loaded = true;
 	});
 
-	$: searchIds = searchAbstracts(abstracts, authorsById, $searchQuery);
+	$: searchIds = lexicalSearch(abstracts, authorsById, $searchQuery);
 	$: filteredIds = intersect(searchIds, $lassoSelection);
 	$: focused = $focusedAbstract ? (abstractsByPosterId.get($focusedAbstract) ?? null) : null;
 

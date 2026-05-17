@@ -15,7 +15,7 @@
 		id="search-input"
 		type="search"
 		bind:value
-		placeholder="Search by keyword, author, topic, or poster id…"
+		placeholder="Search keyword, author, topic, poster id… (typos OK)"
 		autocomplete="off"
 		spellcheck="false"
 		data-testid="search-input"
