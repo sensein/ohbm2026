@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def _load_compare_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "compare_poster_layout_proposals.py"
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "layout" / "compare_poster_layout_proposals.py"
     spec = importlib.util.spec_from_file_location("compare_poster_layout_proposals", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load compare_poster_layout_proposals module")

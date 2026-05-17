@@ -6,7 +6,7 @@ from pathlib import Path
 import csv
 import numpy as np
 
-from ohbm2026 import poster_layout
+from ohbm2026.layout import poster_layout
 
 
 def _response(parent: str, subcategory: str) -> dict[str, str]:

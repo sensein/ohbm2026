@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def _load_verify_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "verify_proposed_listings.py"
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "layout" / "verify_proposed_listings.py"
     spec = importlib.util.spec_from_file_location("verify_proposed_listings", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load verify_proposed_listings module")

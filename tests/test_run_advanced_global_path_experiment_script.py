@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def _load_runner_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "run_advanced_global_path_experiment.py"
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "layout" / "run_advanced_global_path_experiment.py"
     spec = importlib.util.spec_from_file_location("run_advanced_global_path_experiment", module_path)
     assert spec is not None
     assert spec.loader is not None

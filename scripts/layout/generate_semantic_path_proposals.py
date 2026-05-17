@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ohbm2026.poster_layout import (
+from ohbm2026.layout.poster_layout import (
     PathProposalConfig,
     analyze_layout_proposal,
     build_semantic_path_proposal,

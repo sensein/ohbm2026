@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def _load_hub_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "build_layout_review_hub.py"
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "layout" / "build_layout_review_hub.py"
     spec = importlib.util.spec_from_file_location("build_layout_review_hub", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load build_layout_review_hub module")

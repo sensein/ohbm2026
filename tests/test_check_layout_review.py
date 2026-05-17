@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def _load_check_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "check_layout_review.py"
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "layout" / "check_layout_review.py"
     spec = importlib.util.spec_from_file_location("check_layout_review", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load check_layout_review module")

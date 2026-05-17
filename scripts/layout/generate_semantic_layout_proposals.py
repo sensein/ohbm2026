@@ -4,7 +4,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
-from ohbm2026.poster_layout import (
+from ohbm2026.layout.poster_layout import (
     OptimizationWeights,
     analyze_layout_proposal,
     build_layout_proposal,

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def _load_module():
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / "write_layout_category_summaries.py"
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "layout" / "write_layout_category_summaries.py"
     spec = importlib.util.spec_from_file_location("write_layout_category_summaries", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load write_layout_category_summaries module")

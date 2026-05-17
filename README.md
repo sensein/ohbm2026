@@ -242,12 +242,14 @@ Use this when you already have the corpora and want a new cluster output:
 
 ### Generate Or Refresh A Layout Proposal
 
+> **The `layout/` package is parked as of Stage 5** (specs/007-package-reorg/) — poster-layout / sequencing / NOCD code is preserved verbatim under `src/ohbm2026/layout/` and `scripts/layout/`, but is not actively maintained. The instructions below remain accurate; only the script paths have moved (`scripts/optimize_poster_layout.py` → `scripts/layout/optimize_poster_layout.py`, etc.). Revive when a new organizer cycle needs poster work.
+
 Use this when you want a new organizer-facing proposal:
 
 1. confirm `data/primary/abstracts.json`, `data/inputs/authors.json`, and `data/inputs/poster_layout/layout_assets/layout_geometry.json` exist
 2. choose the embedding bundle and any claims/layout cluster inputs you want to drive the proposal
-3. run `scripts/optimize_poster_layout.py` into a fresh proposal directory under `data/outputs/proposals/`
-4. run `scripts/analyze_poster_layout.py` on that proposal
+3. run `scripts/layout/optimize_poster_layout.py` into a fresh proposal directory under `data/outputs/proposals/`
+4. run `scripts/layout/analyze_poster_layout.py` on that proposal
 5. optionally run comparison or review scripts against multiple proposal directories
 
 ### Run A Poster Sequencing Experiment

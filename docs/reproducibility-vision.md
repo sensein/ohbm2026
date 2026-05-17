@@ -58,13 +58,19 @@ This track uses the canonical corpus and embedding products to explore poster
 sequencing, layout proposals, NOCD community detection, and related organizer
 tooling.
 
+**As of Stage 5 (specs/007-package-reorg/) this track is parked.** The
+poster-layout / sequencing / NOCD source code moved to the parked
+`src/ohbm2026/layout/` package; the 15 companion scripts moved to
+`scripts/layout/`. Code is preserved verbatim for future revival —
+expect to revive when a new organizer cycle needs poster work.
+
 These workflows are intentionally more experimental. They are expected to
 produce comparative evidence, not silent replacements for canonical outputs.
 That is why they are concentrated under:
 
 - `experiments/`
 - `data/outputs/proposals/`
-- `scripts/`
+- `scripts/layout/` (parked as of Stage 5)
 
 The strongest outputs from this track can later be promoted into organizer
 defaults, but only after they are documented and auditable.

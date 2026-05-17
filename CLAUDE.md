@@ -99,7 +99,7 @@ Subcommands group into stages (see README for full options):
 - analysis: `semantic-analysis`, `cluster-benchmark`, `umap-plot`, `compare-projections`, `optimize-projections`
 - UI: `export-ui`, `build-ui`
 
-Poster layout/sequencing is **not** in `ohbmcli` — use `scripts/optimize_poster_layout.py`, `scripts/analyze_poster_layout.py`, `scripts/benchmark_poster_sequencing.py`, `scripts/run_advanced_global_path_experiment.py`, and the `sweep_*` scripts. Always pass explicit input paths and a fresh `--output-root`/`--output-dir`; do not rely on stale baked-in defaults.
+Poster layout/sequencing is **not** in `ohbmcli` AND is **parked** as of Stage 5 (see `ohbm2026.layout` parked package and `scripts/layout/` for the 15 companion scripts: `scripts/layout/optimize_poster_layout.py`, `scripts/layout/analyze_poster_layout.py`, `scripts/layout/benchmark_poster_sequencing.py`, etc.). Always pass explicit input paths and a fresh `--output-root`/`--output-dir`; do not rely on stale baked-in defaults.
 
 ## Code architecture
 
@@ -122,7 +122,7 @@ All library code lives in `src/ohbm2026/`:
 - `titles.py` — title normalization rules (used by `title-audit`).
 - `artifacts.py` — shared artifact-naming/state-key helpers used across stages.
 - `category_evaluation.py`, `category_rollup.py` — compare learned cluster families against submitter taxonomies.
-- `poster_layout.py`, `poster_sequencing.py`, `nocd_experiments.py` — exploratory organizer-facing analyses, called by `scripts/`.
+- `layout/` (**parked** as of Stage 5 — specs/007-package-reorg/) — poster_layout, poster_sequencing, nocd_experiments. Preserved verbatim for future revival; not actively maintained. Tests under `tests/test_poster_*.py` + `tests/test_nocd_experiments.py` still run with import-paths updated to `ohbm2026.layout.*`. The 15 companion scripts live under `scripts/layout/`. Revive when a new organizer cycle needs poster-layout work.
 - `ui.py` — static UI export (`export-ui` writes a fresh bundle; `build-ui` also mirrors to `export/ui-site/`).
 - `cli.py` — single dispatch entrypoint that wires the above into subcommands.
 

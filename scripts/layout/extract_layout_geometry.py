@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from ohbm2026.poster_layout import _default_layout_geometry_payload
+from ohbm2026.layout.poster_layout import _default_layout_geometry_payload
 
 
 def build_parser() -> argparse.ArgumentParser:

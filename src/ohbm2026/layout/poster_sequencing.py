@@ -18,7 +18,7 @@ from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
 
-from ohbm2026.poster_layout import (
+from ohbm2026.layout.poster_layout import (
     BLOCK_TO_SESSIONS,
     BLOCK_LABELS,
     SESSION_LABELS,

@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from ohbm2026.poster_layout import (
+from ohbm2026.layout.poster_layout import (
     analyze_layout_proposal,
     build_global_numeric_order,
     build_layout_proposal,
@@ -19,7 +19,7 @@ from ohbm2026.poster_layout import (
     write_layout_csv,
     write_listing_csv,
 )
-from ohbm2026.poster_sequencing import build_global_path_split_proposal
+from ohbm2026.layout.poster_sequencing import build_global_path_split_proposal
 
 
 @dataclass(frozen=True)

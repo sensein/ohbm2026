@@ -6,11 +6,12 @@ from pathlib import Path
 
 import numpy as np
 
-from ohbm2026 import nocd_experiments
+from ohbm2026.layout import nocd_experiments
 
 
 def _load_script_module(name: str):
-    module_path = Path(__file__).resolve().parents[1] / "scripts" / name
+    # Stage 5 (specs/007-package-reorg/): scripts moved under scripts/layout/.
+    module_path = Path(__file__).resolve().parents[1] / "scripts" / "layout" / name
     spec = importlib.util.spec_from_file_location(name.replace(".py", ""), module_path)
     assert spec is not None
     assert spec.loader is not None
