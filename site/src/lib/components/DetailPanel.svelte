@@ -327,29 +327,58 @@
 			{/if}
 		</section>
 
+
 		<!--
-			Two-zone layout for the permalink (non-compact) view: submitter
-			content on the left, computed + AI insights on the right. CSS
-			Grid places each section into its column via `data-zone`. On
-			mobile (< 980 px) the grid collapses to a single column and
-			sections render in source order. Compact mode (home pane) keeps
-			everything stacked linearly — the grid still applies but with
-			one column.
+			Two-zone layout for the permalink view: submitter content on
+			the left, computed + AI insights on the right. The DOM has two
+			INDEPENDENT flex-column containers inside a 2-column CSS grid
+			so each column's items stack tightly without their row heights
+			being yoked to the other column's items. Compact mode (home
+			pane) renders a flat linear flow with no zones.
 		-->
 		<div class="detail-content" class:zoned={!compact}>
 			{#if !compact}
-				<div class="zone-header zone-header-submitter" data-zone="submitter">
-					<span class="zone-title">From the submitter</span>
-					<span class="zone-sub">verbatim from the submission</span>
+				<!-- LEFT zone — submitter-authored content (verbatim) -->
+				<div class="zone zone-submitter" data-zone="submitter">
+					<div class="zone-header">
+						<span class="zone-title">From the submitter</span>
+						<span class="zone-sub">verbatim from the submission</span>
+					</div>
+					{@render bodyBlock()}
+								FR-011: only Topics + Methods of the submission-form extras render.
+			Other extra-question fields (study_type, population, field_strength,
+			processing_packages, …) are stored in `facets` for filtering but MUST
+			NOT surface in the detail panel.
+			Hidden in `compact` mode — the home pane focuses on cross-cell
+			cluster context + related abstracts; full topic / methods detail
+			lives behind the permalink.
+		-->
+					{@render topicsBlock()}
+					{@render methodsBlock()}
+					{@render referencesBlock()}
 				</div>
-				<div class="zone-header zone-header-computed" data-zone="computed">
-					<span class="zone-title">Computed insights</span>
-					<span class="zone-sub">
-						algorithmic; <span class="ai-pill-inline">✨ AI</span> sections labelled
-					</span>
+				<!-- RIGHT zone — algorithmic + AI-derived -->
+				<div class="zone zone-computed" data-zone="computed">
+					<div class="zone-header">
+						<span class="zone-title">Computed insights</span>
+						<span class="zone-sub">
+							algorithmic; <span class="ai-pill-inline">✨ AI</span> sections labelled
+						</span>
+					</div>
+					{@render clusterBlock()}
+					{@render relatedBlock()}
+					{@render claimsBlock()}
+					{@render figuresBlock()}
 				</div>
+			{:else}
+				<!-- Compact mode: linear flow, only the home-pane essentials. -->
+				{@render claimsBlock()}
+				{@render clusterBlock()}
+				{@render relatedBlock()}
 			{/if}
+		</div><!-- /.detail-content -->
 
+		{#snippet bodyBlock()}
 		{#if !compact}
 			{#each [ ['introduction','Introduction'], ['methods','Methods'], ['results','Results'], ['conclusion','Conclusion'] ] as [skey, slabel] (skey)}
 				{@const sbody = abstract.sections[skey]}
@@ -371,7 +400,9 @@
 				{/if}
 			{/each}
 		{/if}
+		{/snippet}
 
+		{#snippet claimsBlock()}
 		{#if enrichment && enrichment.claims.length}
 			<section class="section collapsible" data-testid="section-claims" data-zone="computed">
 				<button
@@ -438,7 +469,9 @@
 				{/if}
 			</section>
 		{/if}
+		{/snippet}
 
+		{#snippet figuresBlock()}
 		{#if !compact && enrichment && enrichment.figures.length}
 			<section class="section collapsible" data-testid="section-figures" data-zone="computed">
 				<button
@@ -502,16 +535,9 @@
 				{/if}
 			</section>
 		{/if}
+		{/snippet}
 
-		<!--
-			FR-011: only Topics + Methods of the submission-form extras render.
-			Other extra-question fields (study_type, population, field_strength,
-			processing_packages, …) are stored in `facets` for filtering but MUST
-			NOT surface in the detail panel.
-			Hidden in `compact` mode — the home pane focuses on cross-cell
-			cluster context + related abstracts; full topic / methods detail
-			lives behind the permalink.
-		-->
+		{#snippet topicsBlock()}
 		{#if !compact && (abstract.topics.primary || abstract.topics.secondary)}
 			<section class="extra topics" data-testid="extra-topics" data-zone="submitter">
 				<h2>Topics</h2>
@@ -535,7 +561,9 @@
 				</dl>
 			</section>
 		{/if}
+		{/snippet}
 
+		{#snippet methodsBlock()}
 		{#if !compact && abstract.methods_checklist.length}
 			<section class="extra methods-checklist" data-testid="extra-methods" data-zone="submitter">
 				<h2>Methods</h2>
@@ -546,7 +574,9 @@
 				</ul>
 			</section>
 		{/if}
+		{/snippet}
 
+		{#snippet clusterBlock()}
 		{#if clusterMemberships.length}
 			<section class="extra clusters" data-testid="extra-clusters" data-zone="computed">
 				<h2>Cluster membership <span class="muted">— per (model × input)</span></h2>
@@ -561,7 +591,9 @@
 				</ul>
 			</section>
 		{/if}
+		{/snippet}
 
+		{#snippet relatedBlock()}
 		{#if allNeighbors && (nearest.length || farthest.length)}
 			<section class="related" data-testid="detail-related" data-zone="computed">
 				<h2>
@@ -751,7 +783,9 @@
 				<p class="muted">Loading neighbors…</p>
 			</section>
 		{/if}
+		{/snippet}
 
+		{#snippet referencesBlock()}
 		{#if !compact && (abstract.reference_urls.some(Boolean) || abstract.reference_dois.some(Boolean) || (abstract.reference_titles ?? []).some(Boolean))}
 			<section class="references" data-testid="detail-references" data-zone="submitter">
 				<h2>References</h2>
@@ -776,7 +810,7 @@
 				</ol>
 			</section>
 		{/if}
-		</div><!-- /.detail-content -->
+		{/snippet}
 
 		<footer class="detail-footer">
 			{#if inCart(abstract.poster_id)}
@@ -808,55 +842,49 @@
 {/if}
 
 <style>
-	/* Two-zone layout. `.detail-content` is the post-header container that
-	   wraps every section. On mobile + compact, it's a simple flex column;
-	   on landscape desktop (>= 980 px) it becomes a 2-column CSS grid with
-	   sections placed via `data-zone`. Zone headers (one per column) are
-	   only rendered in non-compact mode. */
+	/* Two-zone layout. `.detail-content` is the post-header container. In
+	   compact (home pane) mode + on mobile (< 980 px), sections stack
+	   linearly. On landscape desktop the wrapper becomes a 2-column CSS
+	   grid containing TWO independent flex-column zones (`.zone`); each
+	   zone packs its own sections tightly, so the columns don't yoke
+	   each other's row heights. */
 	.detail-content {
 		display: flex;
 		flex-direction: column;
 		gap: 0.6rem;
 	}
+	.zone {
+		display: contents; /* mobile / compact: don't introduce extra boxes */
+	}
 	.zone-header {
-		display: none; /* mobile / compact: hide */
+		display: none; /* hidden on mobile / compact */
 	}
 	@media (min-width: 980px) {
 		.detail-content.zoned {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 			column-gap: 1.5rem;
-			row-gap: 0.5rem;
 			align-items: start;
-			/* `dense` lets each section back-fill the first empty cell in its
-			   forced column — without it, DOM-order interleaving leaves vast
-			   gaps because each row only fills one column before advancing. */
-			grid-auto-flow: dense;
 		}
-		.detail-content.zoned > [data-zone='submitter'] {
-			grid-column: 1;
+		.detail-content.zoned > .zone {
+			display: flex;
+			flex-direction: column;
+			gap: 0.55rem;
+			min-width: 0;
+			align-self: start;
 		}
-		.detail-content.zoned > [data-zone='computed'] {
-			grid-column: 2;
+		.detail-content.zoned > .zone-computed {
+			padding-left: 0.5rem;
+			border-left: 1px solid var(--border);
+			margin-left: -0.5rem;
 		}
-		.detail-content.zoned > .zone-header {
+		.detail-content.zoned > .zone > .zone-header {
 			display: flex;
 			flex-direction: column;
 			gap: 0.1rem;
-			grid-row: 1;
-			margin-bottom: 0.4rem;
+			margin-bottom: 0.2rem;
 			padding-bottom: 0.4rem;
 			border-bottom: 1.5px solid var(--border-strong);
-		}
-		.detail-content.zoned > .zone-header.zone-header-computed {
-			padding-left: 0.5rem;
-			border-left: 1px solid var(--border);
-			margin-left: -0.5rem;
-		}
-		.detail-content.zoned > [data-zone='computed']:not(.zone-header) {
-			padding-left: 0.5rem;
-			border-left: 1px solid var(--border);
-			margin-left: -0.5rem;
 		}
 	}
 	.zone-title {

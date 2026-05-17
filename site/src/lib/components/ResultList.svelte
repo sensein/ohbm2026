@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { focusedAbstract } from '$lib/stores/selection';
+	import { focusedAbstract, authorChips } from '$lib/stores/selection';
 	import { cartStore } from '$lib/stores/cart';
 	import type { AbstractRecord, AuthorRecord } from '$lib/shards';
 
@@ -73,6 +73,16 @@
 		return authorsById.get(id)?.name ?? '';
 	}
 
+	function addAuthorChip(name: string) {
+		if (!name) return;
+		authorChips.update((s) => {
+			if (s.has(name)) return s;
+			const next = new Set(s);
+			next.add(name);
+			return next;
+		});
+	}
+
 	// Visible poster_ids in the current filter/result state, used by the
 	// bulk add control. The control is ADD-ONLY now — "Remove N from list"
 	// was a foot-gun in Saved-only mode (one click wipes the cart) and
@@ -110,11 +120,23 @@
 	{:else}
 		<ul class="cards">
 			{#each pageItems as record (record.abstract_id)}
+				{@const lead = leadAuthor(record)}
 				<li class="card" class:focused={$focusedAbstract === record.poster_id}>
-					<button
-						type="button"
+					<!-- The card-body used to be a single <button>, which prevented
+						 nesting a real <button> for the author click. Switched to a
+						 role="button" div + keyboard handler so the meta row can host
+						 a separate author button. -->
+					<div
 						class="card-body"
+						role="button"
+						tabindex="0"
 						on:click={() => focus(record.poster_id)}
+						on:keydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								focus(record.poster_id);
+							}
+						}}
 						data-testid="result-card"
 						data-poster-id={record.poster_id}
 					>
@@ -132,12 +154,20 @@
 						</div>
 						<div class="title">{record.title}</div>
 						<div class="lead-author">
-							{leadAuthor(record)}
+							{#if lead}
+								<button
+									type="button"
+									class="lead-author-link"
+									on:click|stopPropagation={() => addAuthorChip(lead)}
+									title={`Filter by ${lead}`}
+									data-testid="card-author-search"
+								>{lead}</button>
+							{/if}
 							{#if record.topics.primary}
 								<span class="sep">·</span><span class="topic">{record.topics.primary}</span>
 							{/if}
 						</div>
-					</button>
+					</div>
 					<div class="card-actions">
 						{#if $cartStore.has(record.poster_id)}
 							<button
@@ -249,7 +279,6 @@
 		box-shadow: 0 0 0 1px var(--accent);
 	}
 	.card-body {
-		all: unset;
 		flex: 1;
 		cursor: pointer;
 		padding: 0.6rem 0.75rem;
@@ -260,6 +289,20 @@
 	}
 	.card-body:hover {
 		background: var(--bg-sunken);
+	}
+	.card-body:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: -2px;
+	}
+	.lead-author-link {
+		all: unset;
+		cursor: pointer;
+		color: var(--text-muted);
+		border-bottom: 1px dotted transparent;
+	}
+	.lead-author-link:hover {
+		color: var(--accent);
+		border-bottom-color: var(--accent);
 	}
 	.card-top {
 		display: flex;
