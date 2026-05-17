@@ -2,6 +2,7 @@
 	import '../app.css';
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { buildInfoFromEnv, loadManifest, type BuildInfo, type Manifest } from '$lib/shards';
 	import BuildInfoFooter from '$lib/components/BuildInfo.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
@@ -10,11 +11,37 @@
 	const envBuildInfo: BuildInfo | null = buildInfoFromEnv();
 	$: dataBuildInfo = manifest?.build_info ?? null;
 
+	const SPA_REDIRECT_KEY = 'ohbm2026.spa.redirect';
+
 	onMount(async () => {
 		// Importing the theme store side-effect-initialises the data-theme
-		// attribute + the system-pref watcher. Static import is fine in
-		// browser-only context; for SSR-safety it just exports the store.
+		// attribute + the system-pref watcher.
 		await import('$lib/stores/theme');
+
+		// Deep-link restore: when a user direct-loads e.g.
+		// `/pr-9/abstract/M-AM-101/`, gh-pages serves the root `404.html`
+		// which redirects to the SPA shell with the original path stashed
+		// in sessionStorage. Replay that path via SvelteKit's client router
+		// so the home page doesn't paint first.
+		try {
+			const stash = sessionStorage.getItem(SPA_REDIRECT_KEY);
+			if (stash) {
+				sessionStorage.removeItem(SPA_REDIRECT_KEY);
+				// Only honour same-origin paths — the stash is always an
+				// absolute path from our 404 redirect, never an arbitrary URL.
+				if (stash.startsWith('/') && !stash.startsWith('//')) {
+					// Strip the SvelteKit base path from the front; goto()
+					// expects a route-relative URL.
+					const stripped = base && stash.startsWith(base) ? stash.slice(base.length) : stash;
+					if (stripped && stripped !== '/' && stripped !== window.location.pathname) {
+						void goto(stripped, { replaceState: true });
+					}
+				}
+			}
+		} catch {
+			/* sessionStorage may be blocked; falling through is fine */
+		}
+
 		manifest = await loadManifest();
 	});
 </script>

@@ -39,8 +39,17 @@
 			title: 'OpenAlex — open catalog of scholarly works',
 			url: 'https://openalex.org/'
 		},
-		neuroscape: {
-			title: 'NeuroScape — embeddings + semantic communities for neuroscience abstracts',
+		neuroscape_repo: {
+			title: 'NeuroScape — code repository',
+			url: 'https://github.com/sensein/neuroscape'
+		},
+		neuroscape_paper: {
+			title:
+				'Vali Tehrani et al. (2024) — NeuroScape: a domain-specific embedding for neuroscience abstracts (Aperture Neuro)',
+			url: 'https://apertureneuro.org/article/124574-neuroscape-a-domain-specific-embedding-for-neuroscience-abstracts'
+		},
+		repo: {
+			title: 'OHBM 2026 Atlas — source repository',
 			url: 'https://github.com/sensein/ohbm2026'
 		}
 	};
@@ -139,10 +148,15 @@
 							(<a href={references.minilm.url} target="_blank" rel="noopener noreferrer">
 								MiniLM-L6</a
 							>), a domain-specific biomedical model (PubMedBERT), two commercial APIs
-							(OpenAI, Voyage), and our project-specific
-							<a href={references.neuroscape.url} target="_blank" rel="noopener noreferrer">
-								NeuroScape</a
-							> model. Embeddings are computed per section (title / introduction /
+							(OpenAI, Voyage), and our project-specific NeuroScape model
+							(<a
+								href={references.neuroscape_paper.url}
+								target="_blank"
+								rel="noopener noreferrer">Aperture Neuro paper</a
+							>,
+							<a href={references.neuroscape_repo.url} target="_blank" rel="noopener noreferrer">
+								code</a
+							>). Embeddings are computed per section (title / introduction /
 							methods / results / conclusion / claims) and composed into bundles at
 							read time, so the UI can show the same corpus through different "lenses".
 						</p>
@@ -182,10 +196,8 @@
 							also shipped in the tarball.
 						</p>
 						<p class="muted">
-							Source: <a
-								href={references.neuroscape.url}
-								target="_blank"
-								rel="noopener noreferrer">github.com/sensein/ohbm2026</a
+							Source: <a href={references.repo.url} target="_blank" rel="noopener noreferrer"
+								>github.com/sensein/ohbm2026</a
 							>. Build provenance is in the footer of every page.
 						</p>
 					{/if}

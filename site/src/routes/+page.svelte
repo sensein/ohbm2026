@@ -14,7 +14,7 @@
 		type Manifest,
 		type TopicShard
 	} from '$lib/shards';
-	import { activeFilters, focusedAbstract, lassoSelection, searchQuery, selectedCell } from '$lib/stores/selection';
+	import { activeFilters, cartOnly, focusedAbstract, lassoSelection, searchQuery, selectedCell } from '$lib/stores/selection';
 	import { lexicalSearch } from '$lib/filter';
 	import { filterByFacets, recomputeFacets, type FacetCellContext } from '$lib/facets';
 	import SearchBar from '$lib/components/SearchBar.svelte';
@@ -150,9 +150,22 @@
 	})();
 	$: facetCtx = buildFacetCtx(cellShard, cellTopics);
 	$: facetIds = filterByFacets(abstracts, $activeFilters, facetCtx);
-	$: preFilterForFacetCounts = intersect(searchIds, $lassoSelection);
+	$: cartIds = $cartOnly ? cartIdsFromStore(abstractsByPosterId, $cartStore) : null;
+	$: preFilterForFacetCounts = intersect(intersect(searchIds, $lassoSelection), cartIds);
 	$: facetCounts = recomputeFacets(abstracts, $activeFilters, preFilterForFacetCounts, facetCtx);
-	$: filteredIds = intersect(intersect(searchIds, $lassoSelection), facetIds);
+	$: filteredIds = intersect(intersect(intersect(searchIds, $lassoSelection), facetIds), cartIds);
+
+	function cartIdsFromStore(
+		byPid: Map<string, AbstractRecord>,
+		cart: Set<string>
+	): Set<number> {
+		const out = new Set<number>();
+		for (const pid of cart) {
+			const rec = byPid.get(pid);
+			if (rec) out.add(rec.abstract_id);
+		}
+		return out;
+	}
 
 	function buildFacetCtx(
 		shard: CellShard | null,
@@ -263,6 +276,22 @@
 					data-testid="toggle-map"
 				>
 					{showMap ? '✕ Hide map' : '🗺  Show map'}
+				</button>
+				<button
+					type="button"
+					class="control-toggle"
+					class:active={$cartOnly}
+					disabled={$cartStore.size === 0}
+					on:click={() => cartOnly.update((v) => !v)}
+					aria-pressed={$cartOnly}
+					title={$cartStore.size === 0
+						? 'Saved-only filter — your list is empty'
+						: $cartOnly
+							? 'Showing saved abstracts only — click to show everything'
+							: `Filter to the ${$cartStore.size} saved abstract${$cartStore.size === 1 ? '' : 's'}`}
+					data-testid="toggle-cart-only"
+				>
+					{$cartOnly ? '✓ Saved' : 'Saved only'}
 				</button>
 				<button
 					type="button"

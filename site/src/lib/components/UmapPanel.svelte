@@ -121,8 +121,15 @@
 		}
 		return map;
 	})();
-	$: void renderChart2D(plotly, chart2dEl, cellShard, abstracts, selection, mobile, theme, topicByCluster);
-	$: void renderChart3D(plotly, chart3dEl, cellShard, abstracts, selection, theme, topicByCluster);
+	// abstract_id of the user-focused abstract (the one whose detail panel is
+	// open). Highlighted on both charts with a halo marker.
+	$: focusedAbstractId = (() => {
+		if (!$focusedAbstract) return null;
+		const rec = abstracts.find((a) => a.poster_id === $focusedAbstract);
+		return rec ? rec.abstract_id : null;
+	})();
+	$: void renderChart2D(plotly, chart2dEl, cellShard, abstracts, selection, mobile, theme, topicByCluster, focusedAbstractId);
+	$: void renderChart3D(plotly, chart3dEl, cellShard, abstracts, selection, theme, topicByCluster, focusedAbstractId);
 
 	// Paul Tol's "bright" qualitative palette — high-contrast, deuteranopia /
 	// protanopia / tritanopia safe. Communities are CATEGORICAL (the integer
@@ -228,10 +235,24 @@
 		selected: Set<number> | null,
 		isMobile: boolean,
 		t: 'light' | 'dark',
-		topicMap: Map<number, string>
+		topicMap: Map<number, string>,
+		focusedId: number | null
 	) {
 		if (!api || !el || !shard) return;
 		const s = buildSeries(shard, records, selected, topicMap);
+		// Locate the focused abstract's position in the visible-points arrays.
+		let focusedIdx = -1;
+		if (focusedId !== null) {
+			let visibleIdx = 0;
+			for (const row of shard.rows) {
+				if (row.umap_missing) continue;
+				if (row.abstract_id === focusedId) {
+					focusedIdx = visibleIdx;
+					break;
+				}
+				visibleIdx += 1;
+			}
+		}
 		const t1 = {
 			type: 'scatter' as const,
 			mode: 'markers' as const,
@@ -251,6 +272,27 @@
 			unselected: { marker: { opacity: 0.2 } },
 			selected: { marker: { opacity: 1 } }
 		};
+		// Second trace: a single halo marker for the user-focused abstract so
+		// it pops above the colour-cluster carpet. Drawn last (on top).
+		const traces2d: unknown[] = [t1];
+		if (focusedIdx >= 0) {
+			traces2d.push({
+				type: 'scatter' as const,
+				mode: 'markers' as const,
+				x: [s.xs2[focusedIdx]],
+				y: [s.ys2[focusedIdx]],
+				marker: {
+					size: 18,
+					color: 'rgba(0,0,0,0)',
+					line: { color: t === 'dark' ? '#FFFFFF' : '#000000', width: 2.5 },
+					symbol: 'circle-open'
+				},
+				hovertemplate:
+					'<b>FOCUSED · %{customdata[0]}</b><br>%{customdata[1]}<extra></extra>',
+				customdata: [[s.posters[focusedIdx], s.titles[focusedIdx]]] as unknown as number[][],
+				showlegend: false
+			});
+		}
 		const c = themedColors(t);
 		const layout = {
 			margin: { l: 0, r: 0, t: 0, b: 0 },
@@ -275,7 +317,7 @@
 			scrollZoom: true
 		};
 		(api as unknown as { react: (...args: unknown[]) => Promise<unknown> })
-			.react(el, [t1], layout, config)
+			.react(el, traces2d, layout, config)
 			.then(() => {
 				if (handlers2dAttached) return;
 				handlers2dAttached = true;
@@ -342,10 +384,24 @@
 		records: AbstractRecord[],
 		selected: Set<number> | null,
 		t: 'light' | 'dark',
-		topicMap: Map<number, string>
+		topicMap: Map<number, string>,
+		focusedId: number | null
 	) {
 		if (!api || !el || !shard) return;
 		const s = buildSeries(shard, records, selected, topicMap);
+		// Locate focused abstract index in the visible arrays.
+		let focusedIdx3 = -1;
+		if (focusedId !== null) {
+			let visIdx = 0;
+			for (const row of shard.rows) {
+				if (row.umap_missing) continue;
+				if (row.abstract_id === focusedId) {
+					focusedIdx3 = visIdx;
+					break;
+				}
+				visIdx += 1;
+			}
+		}
 		// scatter3d only accepts a SCALAR marker.opacity; per-point arrays are
 		// silently ignored. Split the data into two traces (selected +
 		// unselected), each with its own scalar opacity, so the selection
@@ -396,6 +452,27 @@
 			if (tUnsel) traces.push(tUnsel);
 			const tSel = buildTrace('selected', selIdx, 1, false);
 			if (tSel) traces.push(tSel);
+		}
+		// Focused-abstract halo: oversized open marker drawn last (on top).
+		if (focusedIdx3 >= 0) {
+			traces.push({
+				type: 'scatter3d' as const,
+				mode: 'markers' as const,
+				name: 'focused',
+				x: [s.xs3[focusedIdx3]],
+				y: [s.ys3[focusedIdx3]],
+				z: [s.zs3[focusedIdx3]],
+				marker: {
+					size: 9,
+					color: t === 'dark' ? '#FFFFFF' : '#000000',
+					symbol: 'circle-open',
+					line: { color: t === 'dark' ? '#FFFFFF' : '#000000', width: 3 }
+				},
+				hovertemplate:
+					'<b>FOCUSED · %{customdata[0]}</b><br>%{customdata[1]}<extra></extra>',
+				customdata: [[s.posters[focusedIdx3], s.titles[focusedIdx3]]] as unknown as number[][],
+				showlegend: false
+			});
 		}
 		const c = themedColors(t);
 		const axisCfg = { visible: false, showbackground: false };
