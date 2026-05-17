@@ -135,7 +135,7 @@ class BuildUIPayloadFromStage4Tests(unittest.TestCase):
     def test_consumes_stage4_rollup(self) -> None:
         """End-to-end SC-004: the new payload surfaces UMAP coords +
         community labels + NeuroScape cluster labels + topic keywords."""
-        from ohbm2026.ui import build_ui_payload_from_stage4
+        from ohbm2026.ui.payload import build_ui_payload_from_stage4
 
         with _isolated_cwd() as tmp:
             sqlite_path = tmp / "data/outputs/analysis/annotations__test.sqlite"
@@ -195,7 +195,8 @@ class BuildUIPayloadFromStage4Tests(unittest.TestCase):
             self.assertEqual(community_assignments[0]["id"], 1)
 
     def test_missing_rollup_raises_uibuilderror(self) -> None:
-        from ohbm2026.ui import UIBuildError, build_ui_payload_from_stage4
+        from ohbm2026.exceptions import UIBuildError
+        from ohbm2026.ui.payload import build_ui_payload_from_stage4
 
         with _isolated_cwd() as tmp:
             raw_path = tmp / "data/primary/abstracts.json"
@@ -212,7 +213,7 @@ class BuildUIPayloadFromStage4Tests(unittest.TestCase):
         """`ohbmcli export-ui --analysis-rollup ...` writes the Stage 4 payload."""
         import io
         from contextlib import redirect_stdout
-        from ohbm2026.ui import export_ui_main
+        from ohbm2026.ui.cli import export_ui_main
 
         with _isolated_cwd() as tmp:
             sqlite_path = tmp / "data/outputs/analysis/annotations__test.sqlite"

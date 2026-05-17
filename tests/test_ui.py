@@ -6,9 +6,8 @@ from tempfile import TemporaryDirectory
 import numpy as np
 
 from ohbm2026 import artifacts
-from ohbm2026.ui import (
-    build_export_parser,
-    build_ui_main,
+from ohbm2026.ui.cli import build_export_parser, build_ui_main
+from ohbm2026.ui.payload import (
     build_ui_payload,
     default_export_output_dir,
     default_site_output_dir,
