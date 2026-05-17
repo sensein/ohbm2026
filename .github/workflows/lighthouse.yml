@@ -1,0 +1,107 @@
+name: lighthouse-ci
+
+# T090 — Lighthouse CI gate.
+#
+# Runs Lighthouse against the live PR preview URL (surfaced in the PR's
+# Deployments box by pr-preview.yml) and uploads the report as an artifact.
+# Currently WARN-ONLY: assertions log to the run summary but don't fail the
+# check. After we accumulate one production baseline this will flip to a
+# hard gate on SC-001 (first interactive paint ≤ 3 s) + total transferred
+# size for SC-006.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'site/**'
+      - '.github/workflows/lighthouse.yml'
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Full URL to audit (overrides PR preview detection).'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: lighthouse-pr-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve target URL
+        id: target
+        run: |
+          if [ -n "${{ inputs.target_url }}" ]; then
+            echo "url=${{ inputs.target_url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=https://abstractatlas.brainkb.org/pr-${{ github.event.pull_request.number }}/" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for PR-preview deploy to settle
+        if: github.event_name == 'pull_request'
+        # The pr-preview workflow runs in parallel; give it a head start so
+        # we don't audit a stale build. Capped at 10 min — if the deploy
+        # hasn't surfaced by then, we audit whatever's there. Each curl /
+        # grep is run with `|| true` so an early-iteration miss (preview
+        # not yet uploaded → 404 → empty grep) doesn't kill the loop under
+        # `bash -e`.
+        run: |
+          set +e
+          head=$(echo "${{ github.event.pull_request.head.sha }}" | head -c 7)
+          for i in $(seq 1 30); do
+            sha=$(curl -sf "${{ steps.target.outputs.url }}" 2>/dev/null \
+                  | grep -oE 'build-info-short-sha"[^>]*>([a-f0-9]+)' \
+                  | head -1 \
+                  | grep -oE '[a-f0-9]+$')
+            echo "iter $i: preview SHA=${sha:-(none)} expected=$head"
+            if [ "$sha" = "$head" ]; then echo "preview ready"; exit 0; fi
+            sleep 20
+          done
+          echo "::warning::Preview SHA did not match head after 10 min; auditing whatever's deployed."
+          exit 0
+
+      - name: Run Lighthouse
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          urls: |
+            ${{ steps.target.outputs.url }}
+            ${{ steps.target.outputs.url }}about/
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+          configPath: ./site/lighthouse.config.json
+
+      - name: Summarise scores
+        if: always()
+        run: |
+          # Lighthouse uploads a JSON manifest; print the headline numbers
+          # into the GitHub job summary so reviewers don't have to dig.
+          if [ -d .lighthouseci ]; then
+            for f in .lighthouseci/manifest.json; do
+              [ -f "$f" ] || continue
+              echo "## Lighthouse summary" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, sys
+          for entry in json.load(open(".lighthouseci/manifest.json")):
+              s = entry["summary"]
+              print(f'### `{entry["url"]}`')
+              print()
+              print('| metric | score |')
+              print('|---|---|')
+              for k in ("performance","accessibility","best-practices","seo"):
+                  if k in s:
+                      print(f'| {k} | {s[k]:.2f} |')
+              print()
+          PY
+            done
+          fi
