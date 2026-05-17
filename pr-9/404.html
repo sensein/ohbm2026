@@ -3,25 +3,53 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<link href="/pr-9/_app/immutable/entry/start.ldgpulBC.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/Bkx7bf4_.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/DpryqThi.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/C3sCb5i3.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/entry/app.ivWWBPRR.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/D3JBhC9g.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/B_sguhIy.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/CeqvnFbT.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/nodes/0.CW6Z88Hg.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/Bv2OXI_k.js" rel="modulepreload">
-		<link href="/pr-9/_app/immutable/chunks/DkVZhOqx.js" rel="modulepreload">
+		<script>
+			// Theme boot — runs before any rendering to avoid FOUC.
+			// Resolves `light` | `dark` | `auto` from localStorage and sets
+			// data-theme on <html> + the CSS color-scheme so native form
+			// controls + scrollbars adopt the right palette immediately.
+			(function () {
+				try {
+					var raw = localStorage.getItem('ohbm2026.ui.theme.v1');
+					var choice = raw === 'light' || raw === 'dark' || raw === 'auto' ? raw : 'auto';
+					var effective =
+						choice === 'auto'
+							? window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+							: choice;
+					document.documentElement.setAttribute('data-theme', effective);
+					document.documentElement.style.colorScheme = effective;
+				} catch (e) {
+					// localStorage might be unavailable; default to system pref.
+					document.documentElement.setAttribute(
+						'data-theme',
+						window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+					);
+				}
+			})();
+		</script>
+		<link href="/pr-9/_app/immutable/entry/start.Mk4fOD9b.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/B33A69va.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/CpRWkF41.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/Dw_hGBLB.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/entry/app.DELBVDb3.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/Dp1pzeXC.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/DSTGOoej.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/_TlokH52.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/Cv1ki8-b.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/nodes/0.DSL_tzcF.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/DKwcoXV8.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/DPlhOYsy.js" rel="modulepreload">
+		<link href="/pr-9/_app/immutable/chunks/Dup9MaPP.js" rel="modulepreload">
 		
-		<link href="/pr-9/_app/immutable/assets/0.Bd7LeJIP.css" rel="stylesheet">
+		<link href="/pr-9/_app/immutable/assets/0.BfpwVC0t.css" rel="stylesheet">
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_1j14am = {
+					__sveltekit_bv8xx1 = {
 						base: "/pr-9",
 						assets: "/pr-9"
 					};
@@ -29,8 +57,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/pr-9/_app/immutable/entry/start.ldgpulBC.js"),
-						import("/pr-9/_app/immutable/entry/app.ivWWBPRR.js")
+						import("/pr-9/_app/immutable/entry/start.Mk4fOD9b.js"),
+						import("/pr-9/_app/immutable/entry/app.DELBVDb3.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});
