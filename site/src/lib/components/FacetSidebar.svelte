@@ -85,7 +85,12 @@
 					<span class="facet-count">{options.length}</span>
 				</button>
 				{#if isOpen}
-					<ul class="options" class:scroll={useScroll}>
+					<ul
+						class="options"
+						class:scroll={useScroll}
+						tabindex={useScroll ? 0 : -1}
+						aria-label={useScroll ? `Scrollable list of options for ${FACET_LABELS[key]}` : undefined}
+					>
 						{#each options as opt (opt.value)}
 							<li>
 								<label

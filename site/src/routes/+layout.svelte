@@ -72,11 +72,11 @@
 
 <svelte:head>
 	{#if envBuildInfo}
-		<title>OHBM 2026 Atlas · {envBuildInfo.code_revision_short}</title>
+		<title>OHBM 2026 Atlas (beta) · {envBuildInfo.code_revision_short}</title>
 	{:else if dataBuildInfo}
-		<title>OHBM 2026 Atlas · {dataBuildInfo.code_revision_short}</title>
+		<title>OHBM 2026 Atlas (beta) · {dataBuildInfo.code_revision_short}</title>
 	{:else}
-		<title>OHBM 2026 Atlas</title>
+		<title>OHBM 2026 Atlas (beta)</title>
 	{/if}
 </svelte:head>
 
@@ -84,7 +84,7 @@
 	<header>
 		<div class="header-row">
 			<div class="header-text">
-				<h1>OHBM 2026 Atlas</h1>
+				<h1>OHBM 2026 Atlas <span class="beta-tag">beta</span></h1>
 				<p class="subtitle">
 					Browse, search, and explore the 2026 accepted abstracts
 				</p>
@@ -173,6 +173,20 @@
 		font-size: 1.5rem;
 		font-weight: 600;
 		color: var(--text);
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.beta-tag {
+		font-size: 0.6rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--accent-text, white);
+		background: var(--accent);
+		padding: 0.1rem 0.4rem;
+		border-radius: 4px;
+		vertical-align: middle;
 	}
 	.subtitle {
 		margin: 0;

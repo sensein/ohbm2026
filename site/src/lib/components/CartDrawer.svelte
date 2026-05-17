@@ -69,7 +69,7 @@
 				No saved abstracts yet. Click the cart icon on any result to save it for later.
 			</p>
 		{:else}
-			<ul class="items">
+			<ul class="items" tabindex="0" aria-label="Your saved abstracts">
 				{#each items as record (record.abstract_id)}
 					<li class="item">
 						<button

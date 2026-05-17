@@ -613,7 +613,15 @@
 		{#if clusterMemberships.length}
 			<section class="extra clusters" data-testid="extra-clusters" data-zone="computed">
 				<h2>Cluster membership <span class="muted">— per (model × input)</span></h2>
-				<ul class="cluster-grid">
+				<!-- tabindex=0 + role="region" + aria-label so the
+					 overflow:auto scroll container is reachable by keyboard
+					 users (axe scrollable-region-focusable / WCAG 2.1.1). -->
+				<ul
+					class="cluster-grid"
+					tabindex="0"
+					role="region"
+					aria-label="Cluster membership across all (model × input) cells"
+				>
 					{#each clusterMemberships as row (row.cellKey)}
 						<li class="cluster-row">
 							<code class="cluster-cell">{row.cellKey}</code>
@@ -639,7 +647,7 @@
 							Most similar
 							<span class="hint">closest 5 shown; scroll for more</span>
 						</h3>
-						<ul class="related-list related-scroll" data-testid="related-nearest-list">
+						<ul class="related-list related-scroll" data-testid="related-nearest-list" tabindex="0" role="region" aria-label="Most-similar abstracts list">
 							{#each nearest as entry, i (entry.abstract.abstract_id)}
 								{@const inCartNow = $cartStore.has(entry.abstract.poster_id)}
 								<li>
@@ -727,7 +735,7 @@
 							Most different
 							<span class="hint">farthest 5 shown; scroll for more</span>
 						</h3>
-						<ul class="related-list related-scroll" data-testid="related-farthest-list">
+						<ul class="related-list related-scroll" data-testid="related-farthest-list" tabindex="0" role="region" aria-label="Most-different abstracts list">
 							{#each farthest as entry, i (entry.abstract.abstract_id)}
 								{@const inCartFar = $cartStore.has(entry.abstract.poster_id)}
 								<li>

@@ -443,10 +443,6 @@
 							<dl class="manifest-stats">
 								<dt>Accepted abstracts</dt>
 								<dd data-testid="abstract-count">{manifest.corpus_count}</dd>
-								<dt>Models × inputs</dt>
-								<dd>{manifest.models.length} × {manifest.inputs.length}</dd>
-								<dt>Cells</dt>
-								<dd>{manifest.cells.length}</dd>
 							</dl>
 						{/if}
 					</aside>

@@ -44,12 +44,12 @@
 			url: 'https://openalex.org/'
 		},
 		neuroscape_repo: {
-			title: 'NeuroScape — code repository (ccnmaastricht)',
+			title: 'Senden (2026) — NeuroScape code repository (CCN Maastricht)',
 			url: 'https://github.com/ccnmaastricht/NeuroScape'
 		},
 		neuroscape_paper: {
 			title:
-				'The evolving landscape of neuroscience — Aperture Neuro',
+				'Senden (2026) — The evolving landscape of neuroscience (Aperture Neuro)',
 			url: 'https://apertureneuro.org/article/156380-the-evolving-landscape-of-neuroscience'
 		},
 		repo: {
@@ -639,6 +639,20 @@
 										/ NeighborsShard) — currently 68/68 pass. A re-generated data
 										package whose shards validate against the same schema can be
 										loaded by the site with zero code changes.
+									</li>
+									<li>
+										<strong>Accessibility.</strong> Targeting WCAG 2.1 AA.
+										<code>@axe-core/playwright</code> audits the home / about /
+										abstract-permalink routes against the live production URL
+										(<code>site/src/tests/e2e/a11y.spec.ts</code>) — critical +
+										serious violations fail the test. Every
+										<code>overflow-y: auto</code> scroll container carries
+										<code>tabindex="0"</code> + a labelled
+										<code>role="region"</code> so keyboard users can reach and
+										scroll the cluster-membership grid, the related-abstracts
+										rails, the facet option lists, and the cart drawer items.
+										Theme + colour-vision-safe palette choices are documented in
+										the Stage 4 deep-dive.
 									</li>
 								</ul>
 							</aside>

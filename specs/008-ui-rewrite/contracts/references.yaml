@@ -62,14 +62,14 @@ references:
     year: 2024
     url: https://docs.voyageai.com/docs/embeddings
   - section: stage3
-    title: 'NeuroScape — code repository (ccnmaastricht / Cognitive Computational Neuroscience Maastricht)'
-    authors: ccnmaastricht
-    year: 2024
+    title: 'Senden — NeuroScape code repository (Cognitive Computational Neuroscience Maastricht)'
+    authors: Mario Senden
+    year: 2026
     url: https://github.com/ccnmaastricht/NeuroScape
   - section: stage3
-    title: 'The evolving landscape of neuroscience (Aperture Neuro)'
-    authors: Cognitive Computational Neuroscience Maastricht et al.
-    year: 2024
+    title: 'Senden — The evolving landscape of neuroscience (Aperture Neuro)'
+    authors: Mario Senden
+    year: 2026
     url: https://apertureneuro.org/article/156380-the-evolving-landscape-of-neuroscience
 
   # ---- Stage 4 — analysis ----

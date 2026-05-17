@@ -57,10 +57,13 @@ def discover_corpus_state_key(corpus_path: Path) -> str:
 def discover_rollup_state_key(analysis_root: Path) -> str:
     """Return the active Stage 4 rollup state-key under *analysis_root*.
 
-    Globs ``annotations__*.sqlite`` and picks the most recent by mtime.
-    Raises :class:`Stage6BuildError` when zero matches are found OR when
-    multiple matches exist and the operator hasn't disambiguated (forcing
-    explicit selection in production builds).
+    Globs ``annotations__*.sqlite``; expects EXACTLY one match. Raises
+    :class:`Stage6BuildError` when zero matches are found, OR when more
+    than one rollup exists — the operator must disambiguate explicitly
+    (no implicit "newest wins" rule, by design, to prevent silent
+    state-key drift across builds). The per-candidate mtime is captured
+    only so the "multiple rollups" error message can list them sorted by
+    last-modified.
     """
 
     analysis_root = Path(analysis_root)
