@@ -29,6 +29,7 @@ from ohbm2026.ui_data.state_key import (
     discover_rollup_state_key,
 )
 from ohbm2026.ui_data.topics import build_topics
+from ohbm2026.ui_data.vectors import build_minilm_vectors
 
 
 __all__ = ["build_ui_data_package", "Stage6BuildError"]
@@ -81,6 +82,7 @@ def build_ui_data_package(
     discover_rollup: bool,
     output_dir: Path,
     build_info: Mapping[str, str] | None = None,
+    minilm_root: Path | None = None,
 ) -> int:
     """Run the full Stage 6 build.
 
@@ -186,20 +188,53 @@ def build_ui_data_package(
         _emit(f"topics/{model}_{inp}_{kind}.json", envelope)
     for cell_key, envelope in neighbors_envelopes.items():
         _emit(f"neighbors/{cell_key}.json", envelope)
-    _emit(
-        "search/minilm_vectors.build_info.json",
-        {
-            "schema_version": "minilm_vectors.v1",
-            "build_info": dict(build_info),
-            "shape": [len(abstract_ids), 384],
-            "dtype": "int8",
-            "byte_offset_url": "data/search/minilm_vectors.bin",
-        },
-    )
+    # MiniLM semantic-search vectors — quantized int8 buffer + sidecar.
+    # When the MiniLM bundle isn't available the builder emits just a sidecar
+    # placeholder so the manifest's pointed-at URL still 200s.
+    if minilm_root is not None and Path(minilm_root).exists():
+        try:
+            bin_bytes, sidecar = build_minilm_vectors(
+                embeddings_root=Path(minilm_root),
+                abstract_ids=abstract_ids,
+                build_info=build_info,
+            )
+            bin_path = output / "search" / "minilm_vectors.bin"
+            bin_path.parent.mkdir(parents=True, exist_ok=True)
+            with bin_path.open("wb") as fh:
+                fh.write(bin_bytes)
+            # Pin mtime same as JSON shards for tarball reproducibility.
+            os.utime(bin_path, (DETERMINISTIC_MTIME, DETERMINISTIC_MTIME))
+            expected.add(bin_path)
+            _emit("search/minilm_vectors.build_info.json", sidecar)
+        except FileNotFoundError as exc:
+            print(f"WARNING: MiniLM vectors skipped: {exc}")
+            _emit(
+                "search/minilm_vectors.build_info.json",
+                {
+                    "schema_version": "minilm_vectors.v1",
+                    "build_info": dict(build_info),
+                    "shape": [len(abstract_ids), 384],
+                    "dtype": "int8",
+                    "byte_offset_url": "data/search/minilm_vectors.bin",
+                    "note": "vectors not built (MiniLM bundle missing)",
+                },
+            )
+    else:
+        _emit(
+            "search/minilm_vectors.build_info.json",
+            {
+                "schema_version": "minilm_vectors.v1",
+                "build_info": dict(build_info),
+                "shape": [len(abstract_ids), 384],
+                "dtype": "int8",
+                "byte_offset_url": "data/search/minilm_vectors.bin",
+                "note": "vectors not built (no --minilm-root)",
+            },
+        )
 
     # Drop stale shards from prior runs that weren't re-emitted this build.
     # Keep the `.fetched-from-package` marker that fetch_ui_inputs.sh drops.
-    for path in output.rglob("*.json"):
+    for path in list(output.rglob("*.json")) + list(output.rglob("*.bin")):
         if path in expected:
             continue
         path.unlink()

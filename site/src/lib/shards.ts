@@ -189,6 +189,35 @@ export function loadNeighbors(cellKey: string): Promise<NeighborsShard | null> {
 	return getFromPackage<NeighborsShard>(`data/neighbors/${cellKey}.json`);
 }
 
+export interface MinilmVectorsSidecar {
+	schema_version: string;
+	build_info: BuildInfo;
+	shape: [number, number];
+	dtype: string;
+	scale: number;
+	max_abs_original: number;
+	components: string[];
+	component_state_keys: string[];
+	missing_abstract_ids: number[];
+	cosine_recovery_mae: number;
+	byte_offset_url: string;
+	note?: string;
+}
+
+export async function loadMinilmVectors(): Promise<{
+	sidecar: MinilmVectorsSidecar;
+	bytes: Uint8Array;
+} | null> {
+	const sidecar = await getFromPackage<MinilmVectorsSidecar>(
+		'data/search/minilm_vectors.build_info.json'
+	);
+	if (!sidecar) return null;
+	const pkg = await loadDataPackage();
+	const bytes = pkg?.get('data/search/minilm_vectors.bin') as Uint8Array | undefined;
+	if (!bytes) return null;
+	return { sidecar, bytes };
+}
+
 export function resetCachesForTests(): void {
 	// Caches now live on the data_package module; reset there.
 }

@@ -26,6 +26,8 @@
 	let loaded = false;
 	let dataMissing = false;
 	let showMap = false;
+	let semanticIds: Set<number> | null = null;
+	let semanticQuerySerial = 0;
 	const envBuildInfo: BuildInfo | null = buildInfoFromEnv();
 
 	onMount(async () => {
@@ -46,10 +48,65 @@
 			dataMissing = true;
 		}
 		loaded = true;
+		// Warm the semantic worker in the background so the model is ready
+		// when the user types. No explicit toggle — semantic search is
+		// always on, merged with lexical via union below.
+		if (!dataMissing) {
+			void (async () => {
+				try {
+					const mod = await import('$lib/search/semantic');
+					await mod.warmSemantic();
+				} catch (err) {
+					console.warn('semantic search unavailable:', err);
+				}
+			})();
+		}
 	});
 
-	$: searchIds = lexicalSearch(abstracts, authorsById, $searchQuery);
+	// Re-run semantic search on query change, with serial-number guard so
+	// out-of-order completions don't overwrite a newer result.
+	$: void (async (q: string) => {
+		const trimmed = q.trim();
+		if (!trimmed) {
+			semanticIds = null;
+			return;
+		}
+		const my = ++semanticQuerySerial;
+		try {
+			const mod = await import('$lib/search/semantic');
+			const hits = await mod.semanticSearch(trimmed, 50);
+			if (my !== semanticQuerySerial) return; // newer query in flight
+			// Translate worker indices (positional in abstracts.json) → abstract_ids
+			const ids = new Set<number>();
+			for (const h of hits) {
+				const rec = abstracts[h.index];
+				if (rec) ids.add(rec.abstract_id);
+			}
+			semanticIds = ids;
+		} catch {
+			if (my === semanticQuerySerial) semanticIds = null;
+		}
+	})($searchQuery);
+
+	$: lexicalIds = lexicalSearch(abstracts, authorsById, $searchQuery);
+	$: searchIds = mergeSearch(lexicalIds, semanticIds, $searchQuery);
 	$: filteredIds = intersect(searchIds, $lassoSelection);
+
+	function mergeSearch(
+		lex: Set<number> | null,
+		sem: Set<number> | null,
+		query: string
+	): Set<number> | null {
+		// No query → no filter (let the lasso decide).
+		if (!query.trim()) return null;
+		if (lex === null && sem === null) return null;
+		if (lex === null) return sem;
+		if (sem === null) return lex;
+		// Union: surfacing every hit from either source preserves recall.
+		const union = new Set<number>(lex);
+		for (const id of sem) union.add(id);
+		return union;
+	}
 	$: focused = $focusedAbstract ? (abstractsByPosterId.get($focusedAbstract) ?? null) : null;
 
 	function intersect(a: Set<number> | null, b: Set<number> | null): Set<number> | null {

@@ -86,6 +86,14 @@ function parseTar(bytes: Uint8Array): Map<string, unknown> {
 				} catch {
 					// skip malformed json
 				}
+			} else if (fullName && fullName.endsWith('.bin')) {
+				// Copy out the raw bytes so the underlying ArrayBuffer can be
+				// GC'd once the parser returns; sharing the original buffer
+				// would pin the whole 50 MB decompressed package in memory.
+				const slice = bytes.subarray(offset, offset + size);
+				const copy = new Uint8Array(size);
+				copy.set(slice);
+				out.set(fullName, copy);
 			}
 			// Skip past content padded to 512-byte boundary.
 			offset += Math.ceil(size / 512) * 512;

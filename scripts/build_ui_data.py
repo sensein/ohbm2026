@@ -35,7 +35,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Discover the active rollup state-key under --analysis-root.",
     )
-    parser.add_argument("--minilm-bundle", dest="minilm_bundle", type=Path, default=None)
+    parser.add_argument(
+        "--minilm-root",
+        dest="minilm_root",
+        type=Path,
+        default=Path("data/outputs/embeddings/minilm"),
+        help="Root of MiniLM component bundles (introduction__*/, methods__*/, …) for the int8 vector buffer.",
+    )
+    parser.add_argument("--minilm-bundle", dest="minilm_bundle", type=Path, default=None,
+                        help="Deprecated single-bundle alias; use --minilm-root.")
     parser.add_argument("--references-yaml", dest="references_yaml", type=Path, default=None)
     parser.add_argument("--output", required=True, type=Path)
     return parser.parse_args(argv)
@@ -56,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             rollup=args.rollup,
             discover_rollup=args.discover_rollup,
             output_dir=args.output,
+            minilm_root=args.minilm_root,
         )
     except Stage6BuildError as exc:
         print(f"build_ui_data.py: {exc}", file=sys.stderr)
