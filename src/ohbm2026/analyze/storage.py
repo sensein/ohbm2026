@@ -42,6 +42,7 @@ import numpy as np
 
 from ohbm2026.fetch.graphql_api import chunked, load_dotenv
 from ohbm2026.titles import cleaned_abstract_title
+from ohbm2026.util.json_io import write_json
 
 DEFAULT_VOYAGE_MODEL = "voyage-large-2-instruct"
 DEFAULT_MINILM_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -85,9 +86,6 @@ class NeuroScapeError(RuntimeError):
     """Raised when embedding or relationship generation fails."""
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def parse_string_list_value(raw_value: str | None) -> list[str]:

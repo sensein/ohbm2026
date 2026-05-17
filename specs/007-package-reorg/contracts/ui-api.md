@@ -2,18 +2,22 @@
 
 The static-UI export surface lives in `ohbm2026.ui`. Every consumer imports from the explicit submodule that owns the symbol; `__init__.py` carries no package-level re-export shell.
 
-## Stable public imports
+## Stable public imports (as implemented)
+
+The Stage 5 implementation used a pragmatic 2-submodule split (`ui/payload.py` + `ui/cli.py`) rather than the originally planned 7-submodule layout (which is preserved as documentation under `data-model.md §3` for a future finer-grained split). FR-005's literal contract — "split into a `ui/` package, minimal `__init__.py`, no re-export shell, consumers import from explicit submodules" — is fully satisfied.
 
 ```python
 # CLI front-ends
-from ohbm2026.ui.cli import export_ui_main, build_ui_main
+from ohbm2026.ui.cli import export_ui_main, build_ui_main, build_export_parser, build_ui_parser
 
-# Payload builders
-from ohbm2026.ui.payload_stage4 import build_ui_payload_from_stage4
-from ohbm2026.ui.payload_legacy import build_ui_payload   # legacy embedding-bundle-driven
+# Payload builders (both legacy + Stage-4 paths live alongside each other in payload.py)
+from ohbm2026.ui.payload import (
+    build_ui_payload,                  # legacy embedding-bundle-driven
+    build_ui_payload_from_stage4,      # Stage 4 rollup-driven
+)
 
-# Lower-level helpers (rarely imported from outside the package, but exported)
-from ohbm2026.ui.text import (
+# Lower-level helpers (markdown / figures / references / manifest)
+from ohbm2026.ui.payload import (
     markdown_to_plain_text,
     markdown_to_html,
     render_additional_content_markdown,
@@ -21,27 +25,24 @@ from ohbm2026.ui.text import (
     primary_topic_from_questions,
     secondary_topic_from_questions,
     topic_subcategories_from_questions,
-)
-from ohbm2026.ui.figures import (
     simplify_image_analysis,
     figure_note_sort_key,
     order_figure_notes,
     build_figure_text_blob,
     load_image_analysis_lookup,
-)
-from ohbm2026.ui.references import (
     load_reference_lookup,
     load_neighbors,
     load_distant,
-)
-from ohbm2026.ui.manifest import (
     default_site_output_dir,
     default_export_output_dir,
     ClusterLayerSpec,
+    export_ui_bundle,
+    copy_ui_assets,
+    publish_ui_bundle,
 )
 
 # Exception
-from ohbm2026.exceptions import UIBuildError   # moved out of ui.py
+from ohbm2026.exceptions import UIBuildError   # moved out of ui.py in T004
 ```
 
 ## Banned imports (post-stage)

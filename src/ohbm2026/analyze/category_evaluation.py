@@ -20,6 +20,7 @@ from ohbm2026.analyze.storage import (
     load_embedding_bundle,
     parse_string_list_value,
 )
+from ohbm2026.util.json_io import write_json
 
 
 class CategoryEvaluationError(Exception):
@@ -49,9 +50,6 @@ class LabelCountBand:
     max_count: int
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 DEFAULT_LABEL_COUNT_BANDS = (

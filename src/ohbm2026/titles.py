@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ohbm2026 import artifacts
+from ohbm2026.util.json_io import load_json, write_json
 
 DEFAULT_TITLE_MODIFICATIONS_OUTPUT = str(artifacts.TITLE_MODIFICATIONS_PATH)
 
@@ -21,13 +22,8 @@ WRAPPING_QUOTE_PAIRS = (
 )
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def normalize_abstract_title(title: str | None) -> tuple[str, list[str]]:

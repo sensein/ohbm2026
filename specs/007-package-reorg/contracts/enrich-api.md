@@ -34,15 +34,6 @@ from ohbm2026.enrich.markdown_render import (
     parse_list_value,
 )
 
-# Legacy OpenAI / multimodal compatibility helpers
-from ohbm2026.enrich.openai_compat import (
-    openai_chat_multimodal,
-    openai_chat_multimodal_batch,
-    resolve_openai_api_key,
-    parse_jsonish_content,
-    image_to_data_url,
-)
-
 # Stage 2.1 production runners (unchanged by this stage)
 from ohbm2026.enrich.figures import run_figure_analysis
 from ohbm2026.enrich.claims import run_claim_extraction
@@ -71,6 +62,10 @@ A grep-based assertion runs as part of US1 verification:
 ```bash
 grep -rE "from ohbm2026 import enrichment|from ohbm2026\.enrichment" src/ tests/ scripts/ && exit 1 || true
 ```
+
+## Stage 5 implementation note
+
+The originally planned fourth submodule `ohbm2026.enrich.openai_compat` was NOT created. The five legacy multimodal helpers it would have hosted (`openai_chat_multimodal`, `openai_chat_multimodal_batch`, `resolve_openai_api_key`, `parse_jsonish_content`, `image_to_data_url`) had zero real importers across `src/`, `tests/`, and `scripts/` at implementation time — Stage 2.1's production figure path uses `enrich/flex_tier.py` + `enrich/figures.py` directly via the OpenAI Responses API. Per FR-002, those symbols were deleted with `enrichment.py` rather than relocated. Imports from `ohbm2026.enrich.openai_compat` MUST raise `ModuleNotFoundError`.
 
 ## Re-export policy
 

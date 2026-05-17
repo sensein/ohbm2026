@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ohbm2026 import category_rollup
+from ohbm2026.analyze import category_rollup
 
 
 def _band_row(

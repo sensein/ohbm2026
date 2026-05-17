@@ -15,7 +15,6 @@ from typing import Any
 import numpy as np
 
 from ohbm2026 import artifacts
-from ohbm2026.enrich.cache_paths import default_image_analysis_cache_path
 from ohbm2026.analyze.storage import parse_string_list_value
 from ohbm2026.titles import cleaned_abstract_title
 
@@ -148,6 +147,7 @@ BRAIN_NETWORK_PATTERNS = {
 
 
 from ohbm2026.exceptions import UIBuildError
+from ohbm2026.util.json_io import load_json, write_json
 
 
 
@@ -156,7 +156,7 @@ def default_site_output_dir(
     raw_input: Path = Path(DEFAULT_RAW_INPUT),
     enriched_input: Path = Path(DEFAULT_ENRICHED_INPUT),
     references_input: Path = Path(DEFAULT_REFERENCES_INPUT),
-    image_analyses_input: Path = Path(str(default_image_analysis_cache_path(backend="openai"))),
+    image_analyses_input: Path = Path(DEFAULT_IMAGE_ANALYSES_INPUT),
     neighbors_input: Path = Path(DEFAULT_NEIGHBORS_INPUT),
     semantic_metadata_input: Path = Path(DEFAULT_SEMANTIC_METADATA_INPUT),
     umap_input: Path = Path(DEFAULT_UMAP_INPUT),
@@ -181,7 +181,6 @@ def default_export_output_dir(**kwargs: Any) -> Path:
     return default_site_output_dir(**kwargs) / "data"
 
 
-DEFAULT_IMAGE_ANALYSES_INPUT = str(default_image_analysis_cache_path(backend="openai"))
 DEFAULT_EXPORT_OUTPUT = str(default_export_output_dir())
 DEFAULT_SITE_OUTPUT = str(default_site_output_dir())
 DEFAULT_PUBLISH_OUTPUT = str(artifacts.build_publish_path("ui-site"))
@@ -197,13 +196,8 @@ class ClusterLayerSpec:
     description: str
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def question_lookup(abstract: dict[str, Any]) -> dict[str, Any]:

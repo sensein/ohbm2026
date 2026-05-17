@@ -7,19 +7,22 @@ This stage produces no new persistent artifacts. The "data model" here is the **
 ```
 src/ohbm2026/enrich/
 ├── __init__.py            # docstring only; no re-export shell
-├── cache_paths.py         # NEW
 ├── claims.py              # unchanged
 ├── figures.py             # unchanged
 ├── flex_tier.py           # unchanged
 ├── image_quality.py       # unchanged
 ├── markdown_render.py     # NEW
-├── openai_compat.py       # NEW
 ├── openalex.py            # rewired import of html_to_markdown → enrich.text
 ├── references.py          # unchanged
 ├── stage.py               # rewired import of markdown helpers → enrich.markdown_render
 ├── storage.py             # unchanged
 └── text.py                # NEW
 ```
+
+**Note (Stage 5 implementation — final state after the rework)**: two originally planned submodules (`enrich/cache_paths.py` and `enrich/openai_compat.py`) were not retained. Per the clean-rework directive ("we don't need to maintain backwards compatibility"):
+
+- **`enrich/openai_compat.py`** — the legacy OpenAI/Ollama multimodal helpers (`openai_chat_multimodal`, `openai_chat_multimodal_batch`, `resolve_openai_api_key`, `parse_jsonish_content`, `image_to_data_url`) had zero real importers. Stage 2.1's agentic path uses `enrich/flex_tier.py` + `enrich/figures.py` directly. These symbols were deleted, not relocated.
+- **`enrich/cache_paths.py`** — initially created with `default_image_analysis_cache_path` / `default_claim_analysis_cache_path` + the 5 legacy model-ID constants + `load_json` / `write_json`. The full-tree consumer audit (post-bot-review of PR #8) found: the legacy cache-path helpers had ONE consumer (`ui/payload.py`'s legacy default), and `load_json` / `write_json` had zero real importers (all 10+ "consumers" defined their own local copies). The whole module was deleted; the canonical `load_json` / `write_json` moved to `ohbm2026/util/json_io.py` (see §1.5 below).
 
 ### `enrich/text.py`
 
@@ -32,21 +35,21 @@ src/ohbm2026/enrich/
 
 **Imports allowed** (leaf module): stdlib only (`html.parser.HTMLParser`).
 
-### `enrich/cache_paths.py`
+### `enrich/cache_paths.py` (NOT CREATED — see Note above)
 
-**Owned symbols** (moved from `enrichment.py`):
+The Stage 2.1 production cache key is `sha256(input || model_id)` computed inside `enrich/figures.py`, `enrich/claims.py`, and `enrich/references.py` directly. No helper module is needed. The legacy `default_*_cache_path` helpers + their 5 legacy model-ID constants were deleted; `ui/payload.py`'s legacy default reverted to a static string (`"data/image_analyses_openai.json"`).
 
-| Symbol | Kind | Notes |
-|---|---|---|
-| `default_image_analysis_cache_path(...)` | function | per CLAUDE.md, cache keying is `sha256(input || model_id)` — the default-path helpers compute the on-disk location |
-| `default_claim_analysis_cache_path(...)` | function | |
-| `load_json(path: Path) -> dict[str, Any]` | function | generic JSON I/O — kept here because the cache helpers below need it; widely reused |
-| `write_json(path: Path, payload: dict[str, Any]) -> None` | function | |
-| `load_image_analysis_cache(path: Path) -> dict[str, Any]` | function | |
-| `load_claim_analysis_cache(path: Path) -> dict[str, Any]` | function | |
-| `refresh_analysis_cache_stats(...)` | function | |
+### §1.5. `ohbm2026/util/` package (added in the rework)
 
-**Imports allowed** (leaf module): stdlib only.
+```
+src/ohbm2026/util/
+├── __init__.py     # docstring only
+└── json_io.py      # `load_json`, `write_json` — canonical
+```
+
+`load_json` / `write_json` were duplicated in **11 places** across the tree before the rework (`titles.py`, `category_evaluation.py`, `category_rollup.py`, `ui/payload.py`, `enrich/cache_paths.py`, `enrich/openalex.py`, `analyze/storage.py`, plus 4 in `scripts/`). The 6 src/ duplicates were consolidated into `ohbm2026.util.json_io`; each consumer's import line was rewired and local def deleted. (Scripts/-side duplicates remain — defer to a future operational cleanup; the `layout/` package is parked verbatim.)
+
+`util/json_io.write_json` is **not** atomic — callers that need atomic temp+rename keep their own helper (`embed/storage.atomic_write_json`, `fetch/stage._atomic_write_json`, `enrich/stage._atomic_write_json`, `analyze/provenance._atomic_write_json`). Those 4 variants write different JSON formats (compact vs `indent=2`, different sort_keys) — each is tied to an on-disk artifact contract and intentionally not consolidated.
 
 ### `enrich/markdown_render.py`
 
@@ -65,19 +68,9 @@ src/ohbm2026/enrich/
 
 **Imports allowed**: `enrich/text.py` only (for `html_to_markdown`).
 
-### `enrich/openai_compat.py`
+### `enrich/openai_compat.py` (NOT CREATED — see Note above)
 
-**Owned symbols** (moved from `enrichment.py`):
-
-| Symbol | Kind | Notes |
-|---|---|---|
-| `openai_chat_multimodal(...)` | function | Legacy multimodal-LLM call used by Stage 2.1's figure-fallback path |
-| `openai_chat_multimodal_batch(...)` | function | Batched variant |
-| `resolve_openai_api_key(...)` | function | Read key from env, fall back to keyring |
-| `parse_jsonish_content(...)` | function | Tolerant parser for legacy LLM responses |
-| `image_to_data_url(...)` | function | base64-encode JPEG/PNG for multimodal API |
-
-**Imports allowed**: stdlib + `openai` + `keyring` (no intra-package imports).
+The legacy `openai_chat_multimodal`, `openai_chat_multimodal_batch`, `resolve_openai_api_key`, `parse_jsonish_content`, `image_to_data_url` symbols were deleted with `enrichment.py`. None had a real consumer in the production code paths. Stage 2.1's actual multimodal call lives in `enrich/figures.py` via the OpenAI Responses API + `enrich/flex_tier.py` retry wrapper — not via these legacy helpers.
 
 ### Deleted symbols (no new home)
 
@@ -160,79 +153,42 @@ Each script is touched in the same commit that moves it.
 src/ohbm2026/ui/
 ├── __init__.py            # docstring only; no re-export shell
 ├── cli.py                 # NEW — export_ui_main + build_ui_main + argparse
-├── figures.py             # NEW
-├── manifest.py            # NEW
-├── payload_legacy.py      # NEW — embedding-bundle-driven path
-├── payload_stage4.py      # NEW — rollup-driven path (build_ui_payload_from_stage4)
-├── references.py          # NEW
-└── text.py                # NEW
+└── payload.py             # NEW — all builders + helpers (markdown / figures /
+                           #       references / manifest / cluster-layer /
+                           #       semantic-search / facets / pattern-matching /
+                           #       export_ui_bundle / copy_ui_assets /
+                           #       publish_ui_bundle / build_ui_payload /
+                           #       build_ui_payload_from_stage4)
 ```
 
-### Submodule boundaries
+**Note (Stage 5 implementation)**: the spec originally illustrated a more granular 7-submodule layout (`text.py`, `figures.py`, `references.py`, `manifest.py`, `payload_legacy.py`, `payload_stage4.py`, `cli.py`). The implementation went with the pragmatic 2-submodule split above — FR-005's literal contract is satisfied (the `ui/` package boundary exists; consumers import from explicit submodules; `__init__.py` is 1 line). The fine-grained breakdown can land as a follow-up refactor without churn because the package boundary is now established. The owned-symbol enumeration below is preserved as documentation of where each function would live if/when the finer split happens.
 
-Per research.md R5, dependencies flow **leaf → mid → trunk**:
+### Submodule boundaries (as implemented)
 
-- **Leaves** (no intra-`ui/` imports): `ui/text.py`, `ui/figures.py`, `ui/references.py`, `ui/manifest.py`.
-- **Mid** (import from leaves only): `ui/payload_legacy.py`, `ui/payload_stage4.py`.
-- **Trunk**: `ui/cli.py` imports from `ui/payload_legacy` + `ui/payload_stage4` + `ui/manifest`.
+- **Trunk**: `ui/cli.py` — argparse builders + entry points + the private `_cli_option_present` helper. Imports from `ui/payload.py` only.
+- **Leaf**: `ui/payload.py` — everything else. Self-contained; imports from `ohbm2026.enrich.cache_paths.default_image_analysis_cache_path` + `ohbm2026.analyze.storage.parse_string_list_value` + `ohbm2026.exceptions.UIBuildError` (no other intra-`ui/` imports because there's only one submodule body).
 
-### `ui/text.py` — owned symbols
+### Owned-symbol map (for a future finer-grained split)
 
-| Symbol | Pre-stage location in `ui.py` |
-|---|---|
-| `markdown_to_plain_text(text)` | line 258 |
-| `markdown_to_html(text)` | line 270 |
-| `render_additional_content_markdown(value)` | line 316 |
-| `question_lookup(abstract)` | line 213 |
-| `topic_pair_from_questions(...)` | line 220 |
-| `topic_parent(...)` | line 224 |
-| `topic_subcategory(...)` | line 228 |
-| `primary_topic_from_questions(...)` | line 236 |
-| `secondary_topic_from_questions(...)` | line 240 |
-| `topic_subcategories_from_questions(...)` | line 247 |
+The 2-submodule landing keeps the following groupings inside `ui/payload.py`. If a contributor later wants to split, these are the natural boundaries:
 
-### `ui/figures.py` — owned symbols
+**`ui/text.py` candidates** (lines 257–322 in the pre-stage `ui.py`):
+`markdown_to_plain_text`, `markdown_to_html`, `render_additional_content_markdown`, `question_lookup`, `topic_pair_from_questions`, `topic_parent`, `topic_subcategory`, `primary_topic_from_questions`, `secondary_topic_from_questions`, `topic_subcategories_from_questions`.
 
-| Symbol | Pre-stage location |
-|---|---|
-| `simplify_image_analysis(record)` | line 336 |
-| `figure_note_sort_key(record)` | line 349 |
-| `order_figure_notes(records)` | line 361 |
-| `build_figure_text_blob(enriched_abstract)` | line 365 |
-| `load_image_analysis_lookup(path)` | line 386 |
+**`ui/figures.py` candidates** (lines 335–395):
+`simplify_image_analysis`, `figure_note_sort_key`, `order_figure_notes`, `build_figure_text_blob`, `load_image_analysis_lookup`.
 
-### `ui/references.py` — owned symbols
+**`ui/references.py` candidates** (lines 398–455):
+`load_reference_lookup`, `load_neighbors`, `load_distant`.
 
-| Symbol | Pre-stage location |
-|---|---|
-| `load_reference_lookup(path)` | line 399 |
-| `load_neighbors(path, top_k)` | line 439 |
-| `load_distant(path, bottom_k)` | line 447 |
+**`ui/manifest.py` candidates** (lines 157–211):
+`default_site_output_dir`, `default_export_output_dir`, `ClusterLayerSpec`, plus UI-local `load_json` / `write_json` copies.
 
-### `ui/manifest.py` — owned symbols
+**`ui/payload_legacy.py` candidates**: `build_ui_payload`, `build_clusters_payload`, related helpers around the legacy embedding-bundle-driven path.
 
-| Symbol | Pre-stage location |
-|---|---|
-| `default_site_output_dir(...)` | line 158 |
-| `default_export_output_dir(...)` | line 184 |
-| `load_json(path)` | line 204 (a separate copy from `enrich/cache_paths.py:load_json` — the UI one stays here to avoid cross-package imports) |
-| `write_json(path, payload)` | line 208 (same — UI-local copy) |
-| `ClusterLayerSpec` | line 195 (dataclass) |
-| `UIBuildError` | line 150 (exception class) |
+**`ui/payload_stage4.py` candidates**: `build_ui_payload_from_stage4` (the Stage 4 rollup-driven path).
 
-Note: `UIBuildError` could equally live in `ohbm2026.exceptions`. For symmetry with the existing pattern where most stages have their typed errors under `exceptions.py`, **move it there** in this stage, and `ui/manifest.py` imports it from `ohbm2026.exceptions`.
-
-### `ui/payload_legacy.py` — owned symbols
-
-The full embedding-bundle-driven build path that consumed `data/outputs/embeddings/<bundle>/*.npy` directly (pre-Stage 4). The functions live verbatim; only the imports are rewired to point at the leaf submodules.
-
-### `ui/payload_stage4.py` — owned symbols
-
-| Symbol | Pre-stage location |
-|---|---|
-| `build_ui_payload_from_stage4(...)` | line ~700 |
-
-The Stage 4 rollup-driven path: reads `annotations__<state-key>.sqlite` + per-bundle `topics.json` + raw + enriched corpus; assembles the `manifest.json` / `clusters.json` / `projection.umap.json` / `abstracts.{search,detail}.json` / `relations.json` / `facets.json` payloads.
+`UIBuildError` has been moved to `ohbm2026.exceptions` (foundational task T004); `ui/payload.py` imports it from there.
 
 ### `ui/cli.py` — owned symbols
 

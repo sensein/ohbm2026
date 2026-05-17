@@ -23,6 +23,7 @@ from openai import APIStatusError, AsyncOpenAI, RateLimitError
 from ohbm2026 import artifacts
 from ohbm2026.enrich.text import html_to_markdown
 from ohbm2026.fetch.graphql_api import load_dotenv, urlopen_with_retries
+from ohbm2026.util.json_io import load_json, write_json
 
 OPENALEX_API = "https://api.openalex.org/works"
 OPENALEX_RATE_LIMIT_API = "https://api.openalex.org/rate-limit"
@@ -192,13 +193,8 @@ def default_request_counts() -> dict[str, int]:
     }
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def default_reference_collect_checkpoint_path(

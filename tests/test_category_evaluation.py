@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ohbm2026 import category_evaluation
+from ohbm2026.analyze import category_evaluation
 
 
 def _response(parent: str, subcategory: str) -> dict[str, str]:

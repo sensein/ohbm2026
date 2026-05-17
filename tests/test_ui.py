@@ -62,7 +62,7 @@ class UIHelpersTest(unittest.TestCase):
 
         self.assertEqual(args.output_dir, str(default_export_output_dir()))
         self.assertEqual(args.top_neighbors, 8)
-        self.assertIn("data/cache/figure_analysis/", args.image_analyses_input)
+        self.assertEqual(args.image_analyses_input, "data/image_analyses_openai.json")
         self.assertEqual(args.phenomena_theories_input, str(artifacts.INPUT_PHENOMENA_THEORIES_PATH))
         self.assertEqual(args.cluster_25_dir, "data/outputs/experiments/embeddings/voyage_stage2_published/clustering_benchmark")
         self.assertEqual(args.spectral_cluster_dir, "data/outputs/experiments/embeddings/voyage_stage2_published/clustering_benchmark_spectral")

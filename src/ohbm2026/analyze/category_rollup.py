@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ohbm2026 import artifacts
+from ohbm2026.util.json_io import write_json
 
 ROLLUP_BANDS = ("coarse", "mid", "fine")
 DEFAULT_TOP_CANDIDATES = 3
@@ -17,9 +18,6 @@ class CategoryRollupError(RuntimeError):
     """Raised when category rollup inputs are invalid."""
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
