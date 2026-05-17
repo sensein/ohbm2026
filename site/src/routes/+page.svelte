@@ -151,9 +151,20 @@
 	$: facetCtx = buildFacetCtx(cellShard, cellTopics);
 	$: facetIds = filterByFacets(abstracts, $activeFilters, facetCtx);
 	$: cartIds = $cartOnly ? cartIdsFromStore(abstractsByPosterId, $cartStore) : null;
-	$: preFilterForFacetCounts = intersect(intersect(searchIds, $lassoSelection), cartIds);
+	// Saved-only is a DOMINANT filter — when ON, it overrides the search /
+	// facet / lasso state so the user sees their full saved list. Toggling
+	// it off restores the prior filter state (search box text, active
+	// facets, lasso are kept in their stores so they reappear). Facet
+	// counts in Saved-only mode are computed over the saved set, so any
+	// facets the user clicks while in this mode are advisory only — they
+	// don't further narrow the result list until Saved-only is turned off.
+	$: filteredIds = $cartOnly
+		? cartIds
+		: intersect(intersect(searchIds, $lassoSelection), facetIds);
+	$: preFilterForFacetCounts = $cartOnly
+		? cartIds
+		: intersect(searchIds, $lassoSelection);
 	$: facetCounts = recomputeFacets(abstracts, $activeFilters, preFilterForFacetCounts, facetCtx);
-	$: filteredIds = intersect(intersect(intersect(searchIds, $lassoSelection), facetIds), cartIds);
 
 	function cartIdsFromStore(
 		byPid: Map<string, AbstractRecord>,
