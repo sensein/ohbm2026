@@ -7,6 +7,14 @@
 
 	export let abstracts: AbstractRecord[] = [];
 	/**
+	 * Set of abstract_ids the rest of the app considers "currently selected"
+	 * — i.e. the intersection of search ∩ lasso ∩ facets. The UMAP dims
+	 * everything outside this set so picking a cluster or facet visually
+	 * narrows the map alongside the result list. `null` = no narrowing
+	 * (every point at full opacity).
+	 */
+	export let selection: Set<number> | null = null;
+	/**
 	 * Mobile breakpoint — desktop ≥ 1024px renders 2D + 3D side-by-side
 	 * with lasso on the 2D pane. Smaller viewports stack vertically and
 	 * use tap-to-filter-by-community for the 2D pane (FR-005 Edge Case).
@@ -106,8 +114,8 @@
 		}
 		return map;
 	})();
-	$: void renderChart2D(plotly, chart2dEl, cellShard, abstracts, $lassoSelection, mobile, theme, topicByCluster);
-	$: void renderChart3D(plotly, chart3dEl, cellShard, abstracts, $lassoSelection, theme, topicByCluster);
+	$: void renderChart2D(plotly, chart2dEl, cellShard, abstracts, selection, mobile, theme, topicByCluster);
+	$: void renderChart3D(plotly, chart3dEl, cellShard, abstracts, selection, theme, topicByCluster);
 
 	function buildSeries(
 		shard: CellShard,

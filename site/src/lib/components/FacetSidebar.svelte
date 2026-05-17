@@ -19,13 +19,12 @@
 		'accepted_for'
 	];
 
-	/** Default visible option count per facet; clicking "Show all N" reveals
-	 * the rest inside a scroll container. Keeps the sidebar short on first
-	 * impression — most users only care about the top few. */
-	const COLLAPSED_OPTION_COUNT = 5;
+	/** When a facet has more than this many options, the list becomes
+	 * vertically scrollable (capped via `.options.scroll`). Below the
+	 * threshold there's nothing to scroll, so we render the bare list. */
+	const SCROLL_THRESHOLD = 5;
 
 	let expanded: Record<string, boolean> = {};
-	let optionsExpanded: Record<string, boolean> = {};
 	$: for (const key of FACET_KEYS_ORDERED) {
 		if (!(key in expanded)) expanded[key] = !collapsedByDefault.includes(key);
 	}
@@ -40,10 +39,6 @@
 
 	function isActive(key: FacetKey, option: string): boolean {
 		return $activeFilters.get(key)?.has(option) ?? false;
-	}
-
-	function toggleOptions(key: string) {
-		optionsExpanded = { ...optionsExpanded, [key]: !optionsExpanded[key] };
 	}
 
 	$: activeCount = [...$activeFilters.values()].reduce((sum, s) => sum + s.size, 0);
@@ -62,9 +57,7 @@
 	{#each FACET_KEYS_ORDERED as key (key)}
 		{@const options = counts.get(key) ?? []}
 		{@const isOpen = expanded[key]}
-		{@const showAll = optionsExpanded[key]}
-		{@const hasOverflow = options.length > COLLAPSED_OPTION_COUNT}
-		{@const visibleOptions = showAll ? options : options.slice(0, COLLAPSED_OPTION_COUNT)}
+		{@const useScroll = options.length > SCROLL_THRESHOLD}
 		{#if options.length}
 			<section class="facet" data-testid={`facet-${key}`}>
 				<button
@@ -78,8 +71,8 @@
 					<span class="facet-count">{options.length}</span>
 				</button>
 				{#if isOpen}
-					<ul class="options" class:scroll={showAll && hasOverflow}>
-						{#each visibleOptions as opt (opt.value)}
+					<ul class="options" class:scroll={useScroll}>
+						{#each options as opt (opt.value)}
 							<li>
 								<label
 									class="opt"
@@ -91,24 +84,12 @@
 										checked={isActive(key, opt.value)}
 										on:change={() => toggle(key, opt.value)}
 									/>
-									<span class="opt-label">{opt.value}</span>
+									<span class="opt-label" title={opt.value}>{opt.value}</span>
 									<span class="opt-count">{opt.count}</span>
 								</label>
 							</li>
 						{/each}
 					</ul>
-					{#if hasOverflow}
-						<button
-							type="button"
-							class="show-toggle"
-							on:click={() => toggleOptions(key)}
-							data-testid={`facet-show-toggle-${key}`}
-						>
-							{showAll
-								? `Show top ${COLLAPSED_OPTION_COUNT}`
-								: `Show all ${options.length} ▾`}
-						</button>
-					{/if}
 				{/if}
 			</section>
 		{/if}
@@ -188,28 +169,21 @@
 		gap: 0.1rem;
 	}
 	.options.scroll {
-		max-height: 14rem;
+		max-height: 12rem;
 		overflow-y: auto;
 		padding-right: 0.4rem;
 	}
-	.show-toggle {
-		all: unset;
-		cursor: pointer;
-		font-size: 0.72rem;
-		color: var(--accent);
-		padding: 0.15rem 0 0.35rem 1.5rem;
-	}
-	.show-toggle:hover {
-		text-decoration: underline;
-	}
 	.opt {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		gap: 0.4rem;
 		padding: 0.15rem 0.35rem;
 		border-radius: 3px;
 		cursor: pointer;
 		font-size: 0.8rem;
+	}
+	.opt input[type='checkbox'] {
+		margin-top: 0.18rem; /* line up with the wrapped label's first line */
 	}
 	.opt:hover {
 		background: var(--bg-sunken);
@@ -223,9 +197,9 @@
 	}
 	.opt-label {
 		flex: 1;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		min-width: 0;
+		line-height: 1.25;
+		word-break: break-word; /* topic names like "Functional Connectivity (Resting-State)" wrap cleanly */
 	}
 	.opt-count {
 		font-size: 0.72rem;

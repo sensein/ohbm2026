@@ -225,7 +225,7 @@
 	</div>
 
 	{#if showMap && loaded && !dataMissing}
-		<UmapPanel {abstracts} />
+		<UmapPanel {abstracts} selection={filteredIds} />
 	{/if}
 
 	{#if !loaded}
