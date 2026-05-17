@@ -290,34 +290,61 @@
 	) {
 		if (!api || !el || !shard) return;
 		const s = buildSeries(shard, records, selected, topicMap);
-		// 3D doesn't honor `selectedpoints` reliably — encode the selection via
-		// per-point opacity so unselected points dim out without resetting the
-		// camera. When nothing is selected, use a constant 0.85.
-		let opacityArr: number[] | undefined;
-		if (selected !== null && s.selectedIdx.length) {
-			const selSet = new Set(s.selectedIdx);
-			opacityArr = s.xs3.map((_, i) => (selSet.has(i) ? 1 : 0.08));
+		// scatter3d only accepts a SCALAR marker.opacity; per-point arrays are
+		// silently ignored. Split the data into two traces (selected +
+		// unselected), each with its own scalar opacity, so the selection
+		// visually dims the unselected points.
+		const hasSelection = selected !== null && s.selectedIdx.length > 0;
+		const selSet = hasSelection ? new Set(s.selectedIdx) : null;
+		const partition = (i: number) => (!selSet || selSet.has(i) ? 'sel' : 'unsel');
+		// Collect indices for each partition.
+		const traces: unknown[] = [];
+		const customdata = s.posters.map((p, i) => [p, s.titles[i], s.communityLabels[i]]);
+		// Find the global color range so both traces share the same scale.
+		const cmin = Math.min(...s.colors);
+		const cmax = Math.max(...s.colors);
+		function buildTrace(name: string, indices: number[], opacity: number, showColorbar: boolean) {
+			if (indices.length === 0) return null;
+			return {
+				type: 'scatter3d' as const,
+				mode: 'markers' as const,
+				name,
+				x: indices.map((i) => s.xs3[i]),
+				y: indices.map((i) => s.ys3[i]),
+				z: indices.map((i) => s.zs3[i]),
+				marker: {
+					size: 3,
+					color: indices.map((i) => s.colors[i]),
+					colorscale: 'Viridis',
+					cmin,
+					cmax,
+					opacity,
+					showscale: showColorbar,
+					line: { width: 0 }
+				},
+				customdata: indices.map((i) => customdata[i]) as unknown as number[][],
+				hovertemplate:
+					'<b>%{customdata[0]}</b><br>%{customdata[1]}<br><i>%{customdata[2]}</i><extra></extra>',
+				hoverinfo: opacity < 0.3 ? 'skip' : undefined,
+				showlegend: false
+			};
 		}
-		const t1 = {
-			type: 'scatter3d' as const,
-			mode: 'markers' as const,
-			x: s.xs3,
-			y: s.ys3,
-			z: s.zs3,
-			marker: {
-				size: 3,
-				color: s.colors,
-				colorscale: 'Viridis',
-				opacity: opacityArr ? undefined : 0.85,
-				line: { width: 0 }
-			} as Record<string, unknown>,
-			customdata: s.posters.map((p, i) => [p, s.titles[i], s.communityLabels[i]]) as unknown as number[][],
-			hovertemplate:
-				'<b>%{customdata[0]}</b><br>%{customdata[1]}<br><i>%{customdata[2]}</i><extra></extra>'
-		};
-		if (opacityArr) {
-			// scatter3d supports per-point opacity via marker.opacity as an array.
-			(t1.marker as { opacity?: number[] }).opacity = opacityArr;
+		if (!hasSelection) {
+			const all = s.xs3.map((_: number, i: number) => i);
+			const t = buildTrace('all', all, 0.85, false);
+			if (t) traces.push(t);
+		} else {
+			const selIdx: number[] = [];
+			const unselIdx: number[] = [];
+			for (let i = 0; i < s.xs3.length; i++) {
+				if (partition(i) === 'sel') selIdx.push(i);
+				else unselIdx.push(i);
+			}
+			// Draw unselected first so selected layer renders on top.
+			const tUnsel = buildTrace('unselected', unselIdx, 0.05, false);
+			if (tUnsel) traces.push(tUnsel);
+			const tSel = buildTrace('selected', selIdx, 1, false);
+			if (tSel) traces.push(tSel);
 		}
 		const c = themedColors(t);
 		const axisCfg = { visible: false, showbackground: false };
@@ -361,24 +388,22 @@
 			displaylogo: false
 		};
 		(api as unknown as { react: (...args: unknown[]) => Promise<unknown> })
-			.react(el, [t1], layout, config)
+			.react(el, traces, layout, config)
 			.then(() => {
 				chart3dInitialized = true;
 				if (!handlers3dAttached) {
 					handlers3dAttached = true;
 					const node = el as unknown as { on: (e: string, h: (e: unknown) => void) => void };
 					node.on('plotly_click', (e: unknown) => {
-						const ev = e as { points?: Array<{ pointIndex: number }> } | null;
+						const ev = e as {
+							points?: Array<{ customdata?: [string, string, string] }>;
+						} | null;
 						const pt = ev?.points?.[0];
-						if (!pt) return;
-						const shardNow = cellShard;
-						if (!shardNow) return;
-						const visibleRows = shardNow.rows.filter((r) => !r.umap_missing);
-						const row = visibleRows[pt.pointIndex];
-						if (!row) return;
-						const idxInAbstracts = shardNow.rows.indexOf(row);
-						const rec = records[idxInAbstracts];
-						if (rec?.poster_id) $focusedAbstract = rec.poster_id;
+						// 3D may have 1 or 2 traces depending on selection — read
+						// the poster_id straight off customdata so trace
+						// partitioning doesn't affect the click target.
+						const posterId = pt?.customdata?.[0];
+						if (posterId) $focusedAbstract = posterId;
 					});
 				}
 				ensureRotate();

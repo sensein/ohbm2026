@@ -23,6 +23,7 @@ from ohbm2026.ui_data.abstracts import build_abstracts
 from ohbm2026.ui_data.authors import build_authors
 from ohbm2026.ui_data.cells import build_cells
 from ohbm2026.ui_data.manifest import build_manifest, make_build_info
+from ohbm2026.ui_data.neighbors import build_neighbors
 from ohbm2026.ui_data.state_key import (
     Stage6BuildError,
     discover_rollup_state_key,
@@ -140,6 +141,17 @@ def build_ui_data_package(
         build_info=build_info,
     )
 
+    # Neighbors are optional (run `scripts/compute_neighbors.py` first).
+    # When the analysis bundles for some cells are missing, those cells just
+    # don't get a neighbors shard — the UI degrades gracefully.
+    neighbors_envelopes: dict[str, Any] = {}
+    if analysis_root is not None:
+        neighbors_envelopes = build_neighbors(
+            analysis_root=Path(analysis_root),
+            cell_keys=list(cells_envelopes.keys()),
+            build_info=build_info,
+        )
+
     # --- 8 cross-shard invariants (data-model.md §8) ---------------------
     _validate_invariants(
         manifest=manifest,
@@ -172,6 +184,8 @@ def build_ui_data_package(
         _emit(f"cells/{cell_key}.json", envelope)
     for (model, inp, kind), envelope in topics_envelopes.items():
         _emit(f"topics/{model}_{inp}_{kind}.json", envelope)
+    for cell_key, envelope in neighbors_envelopes.items():
+        _emit(f"neighbors/{cell_key}.json", envelope)
     _emit(
         "search/minilm_vectors.build_info.json",
         {
@@ -189,8 +203,8 @@ def build_ui_data_package(
         if path in expected:
             continue
         path.unlink()
-    # Also remove now-empty cells/topics/search subdirs (defensive).
-    for sub in ("cells", "topics", "search"):
+    # Also remove now-empty subdirs (defensive).
+    for sub in ("cells", "topics", "search", "neighbors"):
         d = output / sub
         if d.exists() and not any(d.iterdir()):
             d.rmdir()
