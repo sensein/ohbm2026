@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 	import { buildInfoFromEnv, loadManifest, type BuildInfo, type Manifest } from '$lib/shards';
 	import BuildInfoFooter from '$lib/components/BuildInfo.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
@@ -38,6 +39,9 @@
 				</p>
 			</div>
 			<div class="header-controls">
+				<a class="header-link" href={`${base}/about/`} data-testid="header-about-link">
+					About
+				</a>
 				<ThemeToggle />
 			</div>
 		</div>
@@ -88,7 +92,17 @@
 	.header-controls {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.6rem;
+	}
+	.header-link {
+		color: var(--accent);
+		text-decoration: none;
+		font-size: 0.9rem;
+		padding: 0.25rem 0.5rem;
+		border-radius: 4px;
+	}
+	.header-link:hover {
+		background: var(--accent-soft-bg);
 	}
 	main {
 		flex: 1;

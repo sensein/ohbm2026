@@ -25,6 +25,8 @@
 	import FacetSidebar from '$lib/components/FacetSidebar.svelte';
 	import { semanticEnabled } from '$lib/stores/searchMode';
 	import { semanticStatus } from '$lib/search/semantic';
+	import { cartStore } from '$lib/stores/cart';
+	import CartDrawer from '$lib/components/CartDrawer.svelte';
 
 	let manifest: Manifest | null = null;
 	let abstracts: AbstractRecord[] = [];
@@ -34,6 +36,7 @@
 	let loaded = false;
 	let dataMissing = false;
 	let showMap = false;
+	let cartOpen = false;
 	let semanticScores: Map<number, number> | null = null;
 	let semanticQuerySerial = 0;
 	let showFacets = false; // mobile drawer state; desktop always-shown
@@ -261,9 +264,24 @@
 				>
 					{showMap ? '✕ Hide map' : '🗺  Show map'}
 				</button>
+				<button
+					type="button"
+					class="control-toggle cart-toggle"
+					class:active={$cartStore.size > 0}
+					on:click={() => (cartOpen = true)}
+					aria-label={`Open your list (${$cartStore.size} saved)`}
+					title={$cartStore.size > 0
+						? `${$cartStore.size} abstract${$cartStore.size === 1 ? '' : 's'} saved — click to open`
+						: 'Your list is empty — save abstracts via the cart icon on each result'}
+					data-testid="toggle-cart"
+				>
+					🛒 {$cartStore.size}
+				</button>
 			</div>
 		{/if}
 	</div>
+
+	<CartDrawer bind:open={cartOpen} {abstracts} {authorsById} />
 
 	{#if showMap && loaded && !dataMissing}
 		<UmapPanel {abstracts} selection={filteredIds} />

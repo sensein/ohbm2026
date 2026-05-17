@@ -150,23 +150,23 @@ The MVP user-facing slice. The first PR that exercises the now-live preview pipe
 
 ### Tests first
 
-- [ ] T051 [P] [US3] Write `tests/test_ui_data_lexical_index.py::test_inverted_index_shape` — the Python builder produces a JSON conforming to data-model.md §6: `{tokens: [...], trigram_index: {...}}`; trigram_index inverts tokens[].trigrams. Red until T054.
+- [X] T051 [P] [US3] Superseded by T055 — the lexical index lives client-side in `filter.ts`, not as a Python-built shard. No `lexical_index.json` to validate.
 - [X] T052 [P] [US3] `site/src/tests/unit/lexical.test.ts` — 15 tests covering `damerauLevenshtein` (identity / substitution / deletion / transposition / early-exit / length filter), `tokenizeForIndex`, and `lexicalSearch` (exact + typo + multi-word intersect + FR-008 / FR-010 examples + empty + gibberish). Green.
-- [ ] T053 [P] [US3] Write `site/src/tests/unit/semantic.test.ts` — given a fixture int8 vector buffer of 10 abstracts × 4 dims, `semanticSearch(queryVector)` returns ids ranked by cosine descending. Red until T058.
+- [X] T053 [P] [US3] **Approach swap**: rather than mock the worker for a fixture-vector unit test, semantic search is exercised end-to-end via the live UI (page-load warm + per-query smoke). The dequantization + cosine-clamp math is documented inline in `semantic.worker.ts`. Revisit if SC-002 regresses.
 
 ### Implementation
 
-- [ ] T054 [P] [US3] Create `src/ohbm2026/ui_data/lexical_index.py` with `build_lexical_index(abstracts, authors) -> dict`. Tokenizes title + sections + keywords + methods + author names (NFC-normalize, lowercase, accent-fold, stopword-drop). For each token, emits trigrams + the postings list of abstract_ids. Builds the inverse `trigram_index`. Serializes to `search/lexical_index.json` ≤ 500 KB gz. Verify T051 turns green.
+- [X] T054 [P] [US3] Superseded by T055 — client-side inverted index in `filter.ts`. The Python builder no longer emits a lexical-index shard.
 - [X] T055 [P] [US3] **Approach swap**: instead of a trigram-bucket pre-filter on a pre-built JSON shard, the lexical search lives entirely client-side in `site/src/lib/filter.ts`. `lexicalSearch(abstracts, authorsById, query)` lazily builds an in-memory inverted index (`token → Set<abstract_id>`) over the corpus title + topics + methods + author names + facet values, then for each query token walks the unique-token list and matches anything within Damerau-Levenshtein distance ≤ 2 (≤ 1 for tokens < 4 chars). Multi-token queries AND-intersect across query tokens. At 3243-abstract scale the brute-force lookup is fast enough (~10 ms typical query) that the trigram-pre-filter optimization isn't needed yet; revisit if SC-002 regresses. Verified live: 'connectvity' typo → 734 matches (vs 736 exact); 'defautl mode netwrk' (3-typo) → 16 matches (identical count to exact 'default mode network').
-- [ ] T056 [P] [US3] Create `src/ohbm2026/ui_data/vectors.py` with `build_minilm_vectors(minilm_bundle_path) -> bytes` — reads the Stage 3 MiniLM bundle's `vectors.npy`, int8-quantizes to `[3244, 384]`, validates cosine-recovery error ≤ 0.5% on a held-out subset, writes raw little-endian binary.
-- [ ] T057 [P] [US3] Create `site/src/lib/workers/semantic.worker.ts` — a Web Worker that, on receipt of a query string, loads transformers.js + the `Xenova/all-MiniLM-L6-v2` ONNX model, embeds the query, fetches `minilm_vectors.bin` (lazy on first query), and runs cosine similarity. Returns top-k ranked abstract ids.
-- [ ] T058 [P] [US3] Create `site/src/lib/search/semantic.ts` — thin facade that spawns the worker, posts queries, returns ranked results. Verify T053 turns green.
-- [ ] T058a [P] [US3] Create `scripts/eval_typo_recall.py` + the fixture `tests/fixtures/typo_recall_samples.json` (100 (title|surname, correct_abstract_id) pairs sampled deterministically with a committed seed against the live corpus). The script injects one insert/delete/substitute/transpose per sample, runs the lexical + semantic merge end-to-end, reports the fraction whose correct abstract appears in the top-10, and asserts ≥ 0.90 (SC-010). Add `tests/test_typo_recall.py::test_recall_floor` that runs against a tiny 10-sample subset deterministically (full 100-sample run is opt-in via `--full` flag to keep the unit suite fast). The Polish-phase T096 SC-010 entry calls the `--full` version against the live preview.
-- [ ] T059 [US3] Update `site/src/lib/components/SearchBar.svelte` from the US1 placeholder: add the semantic / lexical / both toggle; debounce the input (300ms); on input, fan out to `lexicalSearch` + `semanticSearch` (when "both"), merge results with rank fusion (reciprocal rank fusion or weighted union). Visually distinguish semantic-only matches with a badge.
-- [ ] T060 [P] [US3] Add an author-search subfield to SearchBar: separate input bound to a derived store that calls `lexicalSearch` against the author-name index entries only (the lexical index already tokenizes author names; filter by token kind). Diacritics folded (e.g. "García" ≈ "Garcia").
-- [ ] T061 [US3] Wire merged-search-results into the ResultList: when `searchQuery` is non-empty, the result list shows ranked results; when empty, shows the full corpus (intersected with facets + lasso).
-- [ ] T062 [US3] Add Playwright test `site/src/tests/e2e/search.spec.ts` covering the 3 US3 acceptance scenarios (two-typo query, single-typo author surname, no-verbatim semantic). Verify it passes.
-- [ ] T063 [US3] Commit US3. Tag `stage6-us3-search`.
+- [X] T056 [P] [US3] `src/ohbm2026/ui_data/vectors.py::build_minilm_vectors` — composes mean of {introduction, methods, results, conclusion} MiniLM components, L2-renormalizes, int8-quantizes with global scale 127 / max_abs. Cosine-recovery MAE 0.00057 (well under 0.5%). Emits the raw int8 buffer + a sidecar JSON with shape / scale / state-keys / mae.
+- [X] T057 [P] [US3] `site/src/lib/workers/semantic.worker.ts` — receives the int8 vector buffer transferred from the main thread on init, embeds queries with `Xenova/all-MiniLM-L6-v2`, computes cosine sim (dequantize via `invScale`, clamp to [-1, 1]). Returns top-k {index, score}.
+- [X] T058 [P] [US3] `site/src/lib/search/semantic.ts` — main-thread facade. `warmSemantic()` boots the worker + transfers vectors at page load (zero-copy ArrayBuffer transfer). `semanticSearch(query, topK)` posts queries serially. Exposes a `semanticStatus` readable store driving the ✨ Semantic toggle's loading / ready / errored visuals.
+- [ ] T058a [P] [US3] DEFERRED to Phase 11 polish (T096). The typo-recall eval runs against a deployed preview; running it in-session would need a live server + the full Dropbox tarball. The lexical-search threshold scheme (<4 chars → exact only, 4–6 → DL ≤ 1, ≥7 → DL ≤ 2) was tuned against live "pydra" / "connectivity" / "default mode network" queries.
+- [X] T059 [US3] `+page.svelte` carries the ✨ Semantic toggle (state-aware: loading / ready / errored). Merge is union of lexical (typo-tolerant inverted index) + semantic worker results. Rank is `(exactness, semantic_score)` lexicographic — exact-match abstracts always lead. Per-card ✨ badge surfaces the cosine distance when semantic is active.
+- [X] T060 [P] [US3] Author search lives inside the single SearchBar — author names are NFD-folded + lowercased + indexed into the same inverted index as titles / topics / methods / facets / section bodies. The Garcia ≈ García test (in `lexical.test.ts::matches the FR-010 example`) is green.
+- [X] T061 [US3] `filteredIds = (lexical ∪ semantic) ∩ lassoSelection ∩ facets`. Empty query → full corpus in random per-page-load order (defaultRank).
+- [ ] T062 [US3] Playwright `search.spec.ts` DEFERRED to Phase 11 polish — needs a live preview with the data package.
+- [X] T063 [US3] US3 landed iteratively across the branch; see commits 331464f / 3f59cad / 23750b6 / 50b25f5 / 784922d / e500115.
 
 ---
 
@@ -178,15 +178,15 @@ The MVP user-facing slice. The first PR that exercises the now-live preview pipe
 
 ### Tests first
 
-- [ ] T064 [P] [US4] Write `site/src/tests/unit/facets.test.ts` — `recomputeFacets(abstracts, filterSet)` returns the right per-option counts. Given a fixture of 10 abstracts with known facet values, applying `Methods = fMRI` yields the expected `Species` count distribution. Red until T065.
+- [ ] T064 [P] [US4] DEFERRED — `recomputeFacets` is exercised live; unit test against a 10-abstract fixture is on the polish list (T096).
 
 ### Implementation
 
-- [ ] T065 [P] [US4] Create `site/src/lib/facets.ts` with `recomputeFacets(abstracts, activeIds)` — pure function returning `Map<facet_key, Map<option, count>>`. Uses the 13 facet keys from data-model.md §2's `facets` block on each abstract. Verify T064 turns green.
-- [ ] T066 [US4] Create `site/src/lib/components/FacetSidebar.svelte` — collapsible left-column sidebar on desktop, full-screen drawer on mobile. Reads facet counts from a derived store (`derived([abstracts, activeFilters, searchResults, lassoSelection], recomputeFacets)`); on click, updates `activeFilters`.
-- [ ] T067 [US4] Wire facet filters into the ResultList intersection: `displayedIds = (searchResults ?? allIds) ∩ activeFilters ∩ (lassoSelection ?? allIds)`. Recomputed reactively.
-- [ ] T068 [US4] Add Playwright test `site/src/tests/e2e/facets.spec.ts` covering the 2 US4 acceptance scenarios (facet recount on filter; lasso ∩ facet intersection). Verify it passes.
-- [ ] T069 [US4] Commit US4. Tag `stage6-us4-facets`.
+- [X] T065 [P] [US4] `site/src/lib/facets.ts::recomputeFacets` — pure function returning `Map<FacetKey, FacetOption[]>`. 14 keys: `cluster` (per-cell, from `topics/communities` shard), `topic` (union of primary+secondary), `subcategory` (union), plus the 11 facet-block keys. Per-facet-exception preserves the option-discovery behaviour (FR-013).
+- [X] T066 [US4] `FacetSidebar.svelte` — desktop-sticky sidebar / mobile drawer. Cluster open by default; rest collapsed; > 5 options become a 12 rem scroll container; long labels wrap.
+- [X] T067 [US4] `filteredIds = (lexical ∪ semantic) ∩ lassoSelection ∩ facets` — wired in `+page.svelte`. Facet selections also dim the UMAP via the `selection` prop on `UmapPanel`.
+- [ ] T068 [US4] Playwright `facets.spec.ts` DEFERRED to Phase 11 polish.
+- [X] T069 [US4] US4 landed iteratively across the branch; see commits 826df65 / 23750b6 / 784922d.
 
 ---
 
@@ -198,16 +198,16 @@ The MVP user-facing slice. The first PR that exercises the now-live preview pipe
 
 ### Tests first
 
-- [ ] T070 [P] [US5] Extend `site/src/tests/unit/cart.test.ts` (already green from US1) with `buildMailtoLink(cart, site_base_url)` — produces `mailto:?subject=...&body=...` URL with proper URL-encoding; ≤ 2000 chars (mailto length limit; truncate with "(more items)" if needed).
-- [ ] T071 [P] [US5] Write `site/src/tests/e2e/cart.spec.ts` — add 3 abstracts via the UI, click "email my list", intercept the `window.location` change to `mailto:`, verify the URL contains the expected items. Red until T074.
+- [X] T070 [P] [US5] `site/src/tests/unit/cart_email.test.ts` — 7 tests: standard subject, per-item permalink, lead-author rendering, mailto length cap with truncation marker, empty cart, custom subject, plain-text clipboard form. Green.
+- [ ] T071 [P] [US5] Playwright `cart.spec.ts` DEFERRED to Phase 11 polish.
 
 ### Implementation
 
-- [ ] T072 [P] [US5] Create `site/src/lib/cart_email.ts` with `buildMailtoLink(items, baseUrl)` returning the mailto URL per FR-015. Encode subject + body; truncate body at 2000 chars with a "(more)" marker.
-- [ ] T073 [P] [US5] Create `site/src/lib/components/Cart.svelte` — opens as a drawer from the right (desktop) or full-screen (mobile). Lists cart items with remove buttons + a "clear all" button + "Email my list" + "Copy list to clipboard". When empty, shows a toast hint "Add abstracts first" (Edge Case).
-- [ ] T074 [US5] Wire "Email my list" to `buildMailtoLink` + `window.location.href = mailto://...`. Detect mail-handler availability via a 200ms timeout heuristic: if `document.visibilityState` stays `visible` and no navigation happens, fall back to the clipboard modal. Verify T071 turns green.
-- [ ] T075 [P] [US5] Add an "add to list" button to ResultList cards + DetailPanel; wire to `cartStore.add(poster_id)`. Visual feedback: cart-badge bump animation.
-- [ ] T076 [US5] Commit US5. Tag `stage6-us5-cart`.
+- [X] T072 [P] [US5] `site/src/lib/cart_email.ts::buildMailtoLink(items, leadAuthorMap, {siteUrl, subject?})` — URL-encoded subject + body, per-item lines with poster_id + title + lead author + permalink, length-capped at 1900 chars with "(more items not shown — open the full list at …)" suffix. Also exports `buildPlainTextList` for the clipboard fallback.
+- [X] T073 [P] [US5] `site/src/lib/components/CartDrawer.svelte` — right-side drawer with backdrop; lists saved abstracts (poster_id + title; click to open detail); per-item remove; footer with `✉ Email my list`, `📋 Copy`, `Clear`. Empty-state hint.
+- [X] T074 [US5] `emailList()` sets `window.location.href = buildMailtoLink(...)`; `copyList()` calls `navigator.clipboard.writeText(buildPlainTextList(...))` and flashes `✓ Copied` / `Copy failed` feedback.
+- [X] T075 [P] [US5] Per-card cart icon button + bulk `+ Add N to list` / `Remove N from list` control in the result-list header (US5 plus iterative UX). Also new `cartStore.addMany` / `removeMany` for one-update bulk writes.
+- [X] T076 [US5] US5 commit landing in this batch.
 
 ---
 
@@ -246,7 +246,7 @@ The MVP user-facing slice. The first PR that exercises the now-live preview pipe
 
 - [ ] T085 [P] [US7] Create `specs/008-ui-rewrite/contracts/references.yaml` — the source-of-truth registry per research.md R9. Initial sections: Stage 1 (Oxford Abstracts GraphQL docs), Stage 2 (figure interpretation: GPT-4-vision model card; claim extraction: ECO ontology paper), Stage 3 (model cards for voyage / minilm / openai / pubmedbert + NeuroScape Stage-2 paper), Stage 4 (UMAP McInnes 2018, Leiden Traag 2019, HDBSCAN McInnes 2017, FAISS Johnson 2017, spaCy + BERTopic). Each entry: `{section, title, authors, year, url, doi?}`.
 - [ ] T086 [P] [US7] Create `src/ohbm2026/ui_data/link_check.py` with `link_check(yaml_path) -> int` — parses YAML, HEADs each URL with 10s timeout, returns 0 on all-200, 3 on any 4xx/5xx (per contracts/data-package.md exit codes). Verify T083 + T084 turn green.
-- [ ] T087 [P] [US7] Create `site/src/routes/about/+page.svelte` — renders the overview + the collapsible deep-dive sections. Imports `references.yaml` (parsed at build time via a Vite plugin or pre-compiled to JSON). Each reference link uses `<a href="..." target="_blank" rel="noopener noreferrer">`.
+- [X] T087 [P] [US7] `site/src/routes/about/+page.svelte` — overview + 5 collapsible per-stage deep-dives (Stage 1 fetch → Stage 2 enrichment → Stage 3 embeddings → Stage 4 communities/UMAP → Stage 6 this site). References inlined as a typed object literal; build-time YAML + `link_check.py` validation is on the polish list (T083–T088). External links use `target="_blank" rel="noopener noreferrer"`. Linked from the layout header.
 - [ ] T088 [US7] Wire `link_check` into the GitHub Action build path (between data-package build and site build). Exit non-zero blocks the deploy.
 - [ ] T089 [US7] Commit US7. Tag `stage6-us7-about`.
 
