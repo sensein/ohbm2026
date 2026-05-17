@@ -28,15 +28,17 @@
 		</div>
 		<script>
 			// GitHub Pages 404-fallback redirect for the OHBM 2026 Atlas SPA.
-			// gh-pages serves THIS file for any URL that doesn't match an
-			// existing path. SPA routes like `/abstract/M-AM-101/` (and
-			// PR-preview equivalents `/pr-9/abstract/M-AM-101/`) live behind
-			// the SPA shell at the base root (`/` or `/pr-N/`). We:
+			// gh-pages serves THIS file for any URL that doesn't match a real
+			// path. SPA routes like `/abstract/M-AM-101/` (and PR-preview
+			// equivalents `/pr-N/abstract/...`) live behind the SPA shell at
+			// the base root (`/` or `/pr-N/`). We:
 			//   1. Detect the base path from the requested URL.
-			//   2. Stash the full original path in sessionStorage.
-			//   3. Replace location with the SPA shell's index URL.
-			// The layout's onMount reads the stash and uses `goto()` to
-			// client-route to the original deep link.
+			//   2. Pass the full original path along TWO channels:
+			//        a. `?spa=…` query param (survives cold incognito loads)
+			//        b. sessionStorage (fallback if a redirect strips query)
+			//   3. Replace location with the SPA shell + the query.
+			// The layout's onMount reads the query (or storage), strips the
+			// param, and uses `goto()` to client-route to the deep link.
 			(function () {
 				var loc = window.location;
 				var pathname = loc.pathname || '/';
@@ -48,8 +50,9 @@
 				var fullPath = pathname + (loc.search || '') + (loc.hash || '');
 				try {
 					sessionStorage.setItem('ohbm2026.spa.redirect', fullPath);
-				} catch (e) { /* private mode or quota — best effort */ }
-				loc.replace(basePath + '/');
+				} catch (e) { /* best effort */ }
+				var target = basePath + '/?spa=' + encodeURIComponent(fullPath);
+				loc.replace(target);
 			})();
 		</script>
 	</body>
