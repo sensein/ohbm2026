@@ -20,11 +20,11 @@
 
 <svelte:head>
 	{#if envBuildInfo}
-		<title>OHBM 2026 — under construction · {envBuildInfo.code_revision_short}</title>
+		<title>OHBM 2026 Atlas · {envBuildInfo.code_revision_short}</title>
 	{:else if dataBuildInfo}
-		<title>OHBM 2026 — under construction · {dataBuildInfo.code_revision_short}</title>
+		<title>OHBM 2026 Atlas · {dataBuildInfo.code_revision_short}</title>
 	{:else}
-		<title>OHBM 2026 — under construction</title>
+		<title>OHBM 2026 Atlas</title>
 	{/if}
 </svelte:head>
 
@@ -32,9 +32,9 @@
 	<header>
 		<div class="header-row">
 			<div class="header-text">
-				<h1>OHBM 2026 — under construction</h1>
+				<h1>OHBM 2026 Atlas</h1>
 				<p class="subtitle">
-					Stage 6 UI rewrite · static SvelteKit on GitHub Pages · accepted abstracts only
+					Browse, search, and explore the 2026 accepted abstracts
 				</p>
 			</div>
 			<div class="header-controls">

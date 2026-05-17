@@ -19,6 +19,7 @@
 	import ModelSelector from '$lib/components/ModelSelector.svelte';
 	import UmapPanel from '$lib/components/UmapPanel.svelte';
 	import FacetSidebar from '$lib/components/FacetSidebar.svelte';
+	import { semanticEnabled } from '$lib/stores/searchMode';
 
 	let manifest: Manifest | null = null;
 	let abstracts: AbstractRecord[] = [];
@@ -28,7 +29,7 @@
 	let loaded = false;
 	let dataMissing = false;
 	let showMap = false;
-	let semanticIds: Set<number> | null = null;
+	let semanticScores: Map<number, number> | null = null;
 	let semanticQuerySerial = 0;
 	let showFacets = false; // mobile drawer state; desktop always-shown
 	const envBuildInfo: BuildInfo | null = buildInfoFromEnv();
@@ -67,36 +68,38 @@
 	});
 
 	// Re-run semantic search on query change, with serial-number guard so
-	// out-of-order completions don't overwrite a newer result.
-	$: void (async (q: string) => {
+	// out-of-order completions don't overwrite a newer result. Skipped when
+	// the user has disabled semantic via the toggle.
+	$: void (async (q: string, on: boolean) => {
 		const trimmed = q.trim();
-		if (!trimmed) {
-			semanticIds = null;
+		if (!on || !trimmed) {
+			semanticScores = null;
 			return;
 		}
 		const my = ++semanticQuerySerial;
 		try {
 			const mod = await import('$lib/search/semantic');
 			const hits = await mod.semanticSearch(trimmed, 50);
-			if (my !== semanticQuerySerial) return; // newer query in flight
-			// Translate worker indices (positional in abstracts.json) → abstract_ids
-			const ids = new Set<number>();
+			if (my !== semanticQuerySerial) return;
+			// Translate worker indices (positional in abstracts.json) → abstract_id
+			// AND preserve the per-hit cosine similarity so the card can show it.
+			const scores = new Map<number, number>();
 			for (const h of hits) {
 				const rec = abstracts[h.index];
-				if (rec) ids.add(rec.abstract_id);
+				if (rec) scores.set(rec.abstract_id, h.score);
 			}
-			semanticIds = ids;
+			semanticScores = scores;
 		} catch {
-			if (my === semanticQuerySerial) semanticIds = null;
+			if (my === semanticQuerySerial) semanticScores = null;
 		}
-	})($searchQuery);
+	})($searchQuery, $semanticEnabled);
 
 	$: lexicalIds = lexicalSearch(abstracts, authorsById, $searchQuery);
-	$: searchIds = mergeSearch(lexicalIds, semanticIds, $searchQuery);
+	$: semanticIdsForMerge = semanticScores
+		? new Set<number>(semanticScores.keys())
+		: null;
+	$: searchIds = mergeSearch(lexicalIds, semanticIdsForMerge, $searchQuery);
 	$: facetIds = filterByFacets(abstracts, $activeFilters);
-	// Facet counts honor FR-013: each facet's option counts come from the
-	// intersection of search + lasso + OTHER active facets (not the facet itself
-	// — that's handled inside recomputeFacets via the `exceptKey` param).
 	$: preFilterForFacetCounts = intersect(searchIds, $lassoSelection);
 	$: facetCounts = recomputeFacets(abstracts, $activeFilters, preFilterForFacetCounts);
 	$: filteredIds = intersect(intersect(searchIds, $lassoSelection), facetIds);
@@ -106,12 +109,10 @@
 		sem: Set<number> | null,
 		query: string
 	): Set<number> | null {
-		// No query → no filter (let the lasso decide).
 		if (!query.trim()) return null;
 		if (lex === null && sem === null) return null;
 		if (lex === null) return sem;
 		if (sem === null) return lex;
-		// Union: surfacing every hit from either source preserves recall.
 		const union = new Set<number>(lex);
 		for (const id of sem) union.add(id);
 		return union;
@@ -139,7 +140,20 @@
 				<ModelSelector {manifest} />
 				<button
 					type="button"
-					class="filters-toggle mobile-only"
+					class="control-toggle"
+					class:active={$semanticEnabled}
+					on:click={() => semanticEnabled.toggle()}
+					aria-pressed={$semanticEnabled}
+					title={$semanticEnabled
+						? 'Semantic search is ON — clicking disables it'
+						: 'Semantic search is OFF — clicking enables it'}
+					data-testid="toggle-semantic"
+				>
+					✨ Semantic
+				</button>
+				<button
+					type="button"
+					class="control-toggle mobile-only"
 					class:active={showFacets}
 					on:click={() => (showFacets = !showFacets)}
 					aria-pressed={showFacets}
@@ -149,7 +163,7 @@
 				</button>
 				<button
 					type="button"
-					class="map-toggle"
+					class="control-toggle"
 					class:active={showMap}
 					on:click={() => (showMap = !showMap)}
 					aria-pressed={showMap}
@@ -189,7 +203,7 @@
 				<FacetSidebar counts={facetCounts} />
 			</div>
 			<div class="list-pane">
-				<ResultList {abstracts} {authorsById} {filteredIds} />
+				<ResultList {abstracts} {authorsById} {filteredIds} {semanticScores} />
 			</div>
 			<div class="detail-pane" class:active={focused !== null}>
 				{#if focused}
@@ -236,7 +250,7 @@
 		align-items: flex-end;
 		gap: 0.75rem;
 	}
-	.map-toggle {
+	.control-toggle {
 		all: unset;
 		cursor: pointer;
 		padding: 0.45rem 0.8rem;
@@ -246,10 +260,10 @@
 		background: var(--bg);
 		color: var(--text);
 	}
-	.map-toggle:hover {
+	.control-toggle:hover {
 		background: var(--bg-sunken);
 	}
-	.map-toggle.active {
+	.control-toggle.active {
 		background: var(--accent);
 		color: var(--accent-text);
 		border-color: var(--accent);
@@ -272,21 +286,6 @@
 	}
 	.detail-pane {
 		min-width: 0;
-	}
-	.filters-toggle {
-		all: unset;
-		cursor: pointer;
-		padding: 0.45rem 0.8rem;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		border: 1px solid var(--border-strong);
-		background: var(--bg);
-		color: var(--text);
-	}
-	.filters-toggle.active {
-		background: var(--accent);
-		color: var(--accent-text);
-		border-color: var(--accent);
 	}
 	.detail-empty {
 		background: var(--bg-subtle);
@@ -346,7 +345,7 @@
 			max-height: calc(100vh - 2rem);
 			overflow-y: auto;
 		}
-		.filters-toggle.mobile-only {
+		.mobile-only {
 			display: none;
 		}
 	}

@@ -79,6 +79,6 @@ test.describe('US1: build provenance (FR-022 / SC-011)', () => {
 	test('placeholder route also surfaces the build short SHA in the title', async ({ page }) => {
 		await page.goto('/');
 		const title = await page.title();
-		expect(title).toMatch(/OHBM 2026 — under construction · [0-9a-f]{7}/);
+		expect(title).toMatch(/OHBM 2026 Atlas · [0-9a-f]{7}/);
 	});
 });

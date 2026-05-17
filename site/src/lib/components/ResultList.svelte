@@ -10,12 +10,31 @@
 	 * `null` means "show all" (no filter).
 	 */
 	export let filteredIds: Set<number> | null = null;
+	/** When semantic search is active, a map `abstract_id → cosine similarity` so
+	 * we can show a per-card score badge and sort by score. */
+	export let semanticScores: Map<number, number> | null = null;
 	/** Truncate to this many cards to keep DOM size bounded; "Show more" appends. */
 	export let initialWindow = 60;
 
 	let revealed = initialWindow;
 
-	$: visible = abstracts.filter((a) => filteredIds === null || filteredIds.has(a.abstract_id));
+	$: visible = (() => {
+		const matched = abstracts.filter((a) => filteredIds === null || filteredIds.has(a.abstract_id));
+		// When semantic scores are present, sort by score descending so the
+		// most semantically similar surface first. Stable sort: cards with no
+		// semantic score keep their corpus order.
+		if (semanticScores && semanticScores.size > 0) {
+			return matched.slice().sort((a, b) => {
+				const sa = semanticScores!.get(a.abstract_id);
+				const sb = semanticScores!.get(b.abstract_id);
+				if (sa === undefined && sb === undefined) return 0;
+				if (sa === undefined) return 1;
+				if (sb === undefined) return -1;
+				return sb - sa;
+			});
+		}
+		return matched;
+	})();
 	$: pageItems = visible.slice(0, revealed);
 
 	function loadMore() {
@@ -54,7 +73,18 @@
 						data-testid="result-card"
 						data-poster-id={record.poster_id}
 					>
-						<div class="poster-id">{record.poster_id || `id ${record.abstract_id}`}</div>
+						<div class="card-top">
+							<span class="poster-id">{record.poster_id || `id ${record.abstract_id}`}</span>
+							{#if semanticScores && semanticScores.has(record.abstract_id)}
+								<span
+									class="semantic-badge"
+									title={`cosine similarity ${semanticScores.get(record.abstract_id)?.toFixed(3)} (distance ${(1 - (semanticScores.get(record.abstract_id) ?? 0)).toFixed(3)})`}
+									data-testid="semantic-score"
+								>
+									✨ d={(1 - (semanticScores.get(record.abstract_id) ?? 0)).toFixed(3)}
+								</span>
+							{/if}
+						</div>
 						<div class="title">{record.title}</div>
 						<div class="lead-author">
 							{leadAuthor(record)}
@@ -141,11 +171,26 @@
 	.card-body:hover {
 		background: var(--bg-sunken);
 	}
+	.card-top {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
+		gap: 0.5rem;
+	}
 	.poster-id {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 0.8rem;
 		color: var(--accent);
 		font-weight: 600;
+	}
+	.semantic-badge {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.72rem;
+		color: var(--text-muted);
+		background: var(--accent-soft-bg);
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
+		flex-shrink: 0;
 	}
 	.title {
 		font-size: 0.95rem;
