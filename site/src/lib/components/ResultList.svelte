@@ -72,6 +72,17 @@
 		if (id === undefined) return '';
 		return authorsById.get(id)?.name ?? '';
 	}
+
+	// Visible poster_ids in the current filter/result state, used by the
+	// bulk add/remove control.
+	$: visiblePosterIds = visible.map((r) => r.poster_id).filter(Boolean);
+	$: allVisibleInCart =
+		visiblePosterIds.length > 0 && visiblePosterIds.every((id) => $cartStore.has(id));
+
+	function toggleAllVisible() {
+		if (allVisibleInCart) cartStore.removeMany(visiblePosterIds);
+		else cartStore.addMany(visiblePosterIds);
+	}
 </script>
 
 <section class="results" data-testid="result-list">
@@ -79,6 +90,22 @@
 		<span data-testid="result-count">{visible.length}</span> abstract{visible.length === 1 ? '' : 's'}
 		{#if filteredIds !== null}
 			<span class="muted">(filtered)</span>
+		{/if}
+		{#if visiblePosterIds.length > 0}
+			<button
+				type="button"
+				class="bulk-action"
+				class:remove-mode={allVisibleInCart}
+				on:click={toggleAllVisible}
+				title={allVisibleInCart
+					? `Remove all ${visiblePosterIds.length} visible from your list`
+					: `Add all ${visiblePosterIds.length} visible to your list`}
+				data-testid="bulk-cart-toggle"
+			>
+				{allVisibleInCart
+					? `Remove ${visiblePosterIds.length} from list`
+					: `+ Add ${visiblePosterIds.length} to list`}
+			</button>
 		{/if}
 	</header>
 
@@ -119,21 +146,62 @@
 						{#if $cartStore.has(record.poster_id)}
 							<button
 								type="button"
-								class="cart-action remove"
+								class="cart-icon in-cart"
 								on:click={() => cartStore.remove(record.poster_id)}
+								aria-label="Remove from your list"
+								aria-pressed="true"
+								title="In your list — click to remove"
 								data-testid="card-cart-remove"
 							>
-								Saved ✓
+								<!-- filled cart with checkmark indicates "in your list" -->
+								<svg
+									width="20"
+									height="20"
+									viewBox="0 0 24 24"
+									fill="currentColor"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<circle cx="9" cy="21" r="1.2" />
+									<circle cx="18" cy="21" r="1.2" />
+									<path
+										fill="currentColor"
+										stroke="currentColor"
+										d="M2 3h2.5L5.5 7H21l-2 9H7L5.5 7 4.5 3H2zM7 9l1 5h11l1-5z"
+									/>
+								</svg>
+								<span class="check-pip" aria-hidden="true">✓</span>
 							</button>
 						{:else}
 							<button
 								type="button"
-								class="cart-action add"
+								class="cart-icon"
 								on:click={() => cartStore.add(record.poster_id)}
 								disabled={!record.poster_id}
+								aria-label="Add to your list"
+								aria-pressed="false"
+								title="Add to your list"
 								data-testid="card-cart-add"
 							>
-								+ list
+								<!-- outlined cart indicates "not in list" -->
+								<svg
+									width="20"
+									height="20"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<circle cx="9" cy="21" r="1.2" />
+									<circle cx="18" cy="21" r="1.2" />
+									<path d="M2 3h2.5L5.5 7H21l-2 9H7L5.5 7" />
+								</svg>
 							</button>
 						{/if}
 					</div>
@@ -156,6 +224,10 @@
 		font-size: 0.85rem;
 		color: var(--text-muted);
 		margin: 0 0 0.5rem;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
 	}
 	.results-header .muted {
 		color: var(--text-faint);
@@ -242,23 +314,67 @@
 		padding: 0 0.5rem;
 		border-left: 1px solid var(--border);
 	}
-	.cart-action {
+	.cart-icon {
 		all: unset;
 		cursor: pointer;
-		padding: 0.25rem 0.5rem;
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.1rem;
+		height: 2.1rem;
 		border-radius: 4px;
-		font-size: 0.8rem;
+		color: var(--text-faint);
+	}
+	.cart-icon:hover {
+		background: var(--accent-soft-bg);
 		color: var(--accent);
 	}
-	.cart-action:hover {
-		background: var(--accent-soft-bg);
+	.cart-icon.in-cart {
+		color: var(--accent);
 	}
-	.cart-action.remove {
-		color: var(--success);
+	.cart-icon.in-cart:hover {
+		color: var(--warning-text, var(--accent));
 	}
-	.cart-action:disabled {
+	.cart-icon .check-pip {
+		position: absolute;
+		bottom: -2px;
+		right: -2px;
+		background: var(--success);
+		color: var(--bg-elevated);
+		border-radius: 999px;
+		width: 0.9rem;
+		height: 0.9rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.65rem;
+		font-weight: 700;
+		line-height: 1;
+		border: 1.5px solid var(--bg-elevated);
+	}
+	.cart-icon:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
+	}
+	.bulk-action {
+		all: unset;
+		cursor: pointer;
+		margin-left: auto;
+		padding: 0.25rem 0.6rem;
+		font-size: 0.72rem;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		color: var(--accent);
+		background: var(--bg-elevated);
+	}
+	.bulk-action:hover {
+		background: var(--accent-soft-bg);
+	}
+	.bulk-action.remove-mode {
+		color: var(--text);
+		border-color: var(--warning-border, var(--border));
+		background: var(--warning-bg, var(--bg-sunken));
 	}
 	.load-more {
 		margin-top: 0.5rem;

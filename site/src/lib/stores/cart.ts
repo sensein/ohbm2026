@@ -45,6 +45,20 @@ function remove(posterId: string): void {
 	persist(next);
 }
 
+function addMany(posterIds: Iterable<string>): void {
+	const next = new Set(get(_store));
+	for (const id of posterIds) if (id) next.add(id);
+	_store.set(next);
+	persist(next);
+}
+
+function removeMany(posterIds: Iterable<string>): void {
+	const next = new Set(get(_store));
+	for (const id of posterIds) next.delete(id);
+	_store.set(next);
+	persist(next);
+}
+
 function clear(): void {
 	_store.set(new Set());
 	persist(new Set());
@@ -60,6 +74,8 @@ export const cartStore = {
 	subscribe: _store.subscribe,
 	add,
 	remove,
+	addMany,
+	removeMany,
 	clear,
 	reset
 };

@@ -53,4 +53,16 @@ describe('cartStore', () => {
 		const raw = window.localStorage.getItem(CART_STORAGE_KEY);
 		expect(JSON.parse(raw!)).toEqual([]);
 	});
+
+	it('addMany unions multiple poster ids in one update', () => {
+		cartStore.add('M-AM-100');
+		cartStore.addMany(['M-AM-101', 'M-AM-102', 'M-AM-100']); // 100 already present
+		expect(get(cartStore)).toEqual(new Set(['M-AM-100', 'M-AM-101', 'M-AM-102']));
+	});
+
+	it('removeMany deletes only the listed poster ids', () => {
+		cartStore.addMany(['a', 'b', 'c', 'd']);
+		cartStore.removeMany(['b', 'd', 'zzz']); // unknown id is a no-op
+		expect(get(cartStore)).toEqual(new Set(['a', 'c']));
+	});
 });
