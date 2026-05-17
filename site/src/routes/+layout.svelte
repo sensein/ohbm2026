@@ -3,15 +3,52 @@
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { buildInfoFromEnv, loadManifest, type BuildInfo, type Manifest } from '$lib/shards';
 	import BuildInfoFooter from '$lib/components/BuildInfo.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import Tour from '$lib/components/Tour.svelte';
 	import { tourStore, tourFlags } from '$lib/stores/tour';
 
+	const FEEDBACK_REPO = 'sensein/ohbm2026';
+
 	let manifest: Manifest | null = null;
 	const envBuildInfo: BuildInfo | null = buildInfoFromEnv();
 	$: dataBuildInfo = manifest?.build_info ?? null;
+
+	/**
+	 * Reactive GitHub-issue pre-fill URL. Recomputes on route change so
+	 * the body reflects whichever page the user was on when they clicked.
+	 */
+	$: feedbackUrl = (() => {
+		const sha =
+			envBuildInfo?.code_revision_short ??
+			dataBuildInfo?.code_revision_short ??
+			'(unknown)';
+		const here = $page.url.href;
+		const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+		const body = [
+			'<!-- Replace this template with your bug report or feature request. -->',
+			'',
+			'## What were you doing?',
+			'',
+			'## What happened?',
+			'',
+			'## What did you expect?',
+			'',
+			'---',
+			'',
+			`- page: ${here}`,
+			`- build: \`${sha}\``,
+			`- user-agent: ${ua}`
+		].join('\n');
+		const params = new URLSearchParams({
+			labels: 'feedback',
+			title: '[feedback] ',
+			body
+		});
+		return `https://github.com/${FEEDBACK_REPO}/issues/new?${params.toString()}`;
+	})();
 
 	const SPA_REDIRECT_KEY = 'ohbm2026.spa.redirect';
 
@@ -101,6 +138,40 @@
 				</button>
 				<a class="header-link" href={`${base}/about/`} data-testid="header-about-link">
 					About
+				</a>
+				<!--
+					Feedback icon — opens a pre-filled GitHub issue in a new tab.
+					The body templates the current page URL, the deploy SHA, and
+					the user-agent so a maintainer has the minimum context to
+					reproduce. Repo owner / project link from a const so it's
+					trivial to swap.
+				-->
+				<a
+					class="header-feedback"
+					target="_blank"
+					rel="noopener noreferrer"
+					title="Report a bug or request a feature"
+					aria-label="Report a bug or request a feature on GitHub"
+					data-testid="header-feedback"
+					href={feedbackUrl}
+				>
+					<!-- Lucide-style "message-square-warning" icon — keeps the meaning
+						 unambiguous: a comment bubble with an exclamation. -->
+					<svg
+						width="20"
+						height="20"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+						<line x1="12" y1="8" x2="12" y2="12" />
+						<line x1="12" y1="16" x2="12.01" y2="16" />
+					</svg>
 				</a>
 				<ThemeToggle />
 			</div>
@@ -218,6 +289,20 @@
 		border-radius: 4px;
 	}
 	button.header-link:hover {
+		background: var(--accent-soft-bg);
+	}
+	.header-feedback {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
+		color: var(--text-muted);
+		border-radius: 4px;
+		text-decoration: none;
+	}
+	.header-feedback:hover {
+		color: var(--accent);
 		background: var(--accent-soft-bg);
 	}
 	.tour-cta {

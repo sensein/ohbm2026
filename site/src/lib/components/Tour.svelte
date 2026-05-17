@@ -199,6 +199,12 @@
 					title: 'About + methodology',
 					text: 'The "About" link in the header opens a page describing how the data + the AI surfaces are produced — a short lay paragraph per stage, plus a "Technical details" toggle that expands code-grounded specifics (algorithms, parameters, file paths, cache keys). Every external citation is HEAD-checked at build time so the references stay live.',
 					attachTo: { element: '[data-testid="header-about-link"]', on: place('bottom') }
+				},
+				{
+					id: 'home-feedback',
+					title: 'Spot something broken? Have an idea?',
+					text: 'The speech-bubble icon next to the theme switch opens a pre-filled GitHub issue (page URL + deploy SHA + user-agent templated in for you). Use it for bug reports, missing features, or "this abstract looks wrong" notes — issues land under the `feedback` label.',
+					attachTo: { element: '[data-testid="header-feedback"]', on: place('bottom') }
 				}
 			);
 		} else if (kind === 'detail') {
