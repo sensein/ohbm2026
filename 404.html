@@ -3,57 +3,69 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Loading… · OHBM 2026 Atlas</title>
-		<style>
-			html, body { margin: 0; padding: 0; background: #fafafa; color: #333; font-family: -apple-system, system-ui, sans-serif; }
-			.box { max-width: 28rem; margin: 18vh auto; padding: 2rem; text-align: center; }
-			h1 { font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem; }
-			p { font-size: 0.85rem; color: #666; margin: 0.25rem 0; }
-			@media (prefers-color-scheme: dark) {
-				html, body { background: #121417; color: #ececec; }
-				p { color: #999; }
-			}
-		</style>
-	</head>
-	<body>
-		<noscript>
-			<div class="box">
-				<h1>JavaScript required</h1>
-				<p>This page needs JavaScript to load. Try <a href="/">the home page</a>.</p>
-			</div>
-		</noscript>
-		<div class="box" id="msg">
-			<h1>Loading…</h1>
-			<p>Restoring your deep link.</p>
-		</div>
 		<script>
-			// GitHub Pages 404-fallback redirect for the OHBM 2026 Atlas SPA.
-			// gh-pages serves THIS file for any URL that doesn't match a real
-			// path. SPA routes like `/abstract/M-AM-101/` (and PR-preview
-			// equivalents `/pr-N/abstract/...`) live behind the SPA shell at
-			// the base root (`/` or `/pr-N/`). We:
-			//   1. Detect the base path from the requested URL.
-			//   2. Pass the full original path along TWO channels:
-			//        a. `?spa=…` query param (survives cold incognito loads)
-			//        b. sessionStorage (fallback if a redirect strips query)
-			//   3. Replace location with the SPA shell + the query.
-			// The layout's onMount reads the query (or storage), strips the
-			// param, and uses `goto()` to client-route to the deep link.
+			// Theme boot — runs before any rendering to avoid FOUC.
+			// Resolves `light` | `dark` | `auto` from localStorage and sets
+			// data-theme on <html> + the CSS color-scheme so native form
+			// controls + scrollbars adopt the right palette immediately.
 			(function () {
-				var loc = window.location;
-				var pathname = loc.pathname || '/';
-				var segments = pathname.replace(/^\/+/, '').split('/').filter(Boolean);
-				var basePath = '';
-				if (segments.length > 0 && /^pr-\d+$/.test(segments[0])) {
-					basePath = '/' + segments[0];
-				}
-				var fullPath = pathname + (loc.search || '') + (loc.hash || '');
 				try {
-					sessionStorage.setItem('ohbm2026.spa.redirect', fullPath);
-				} catch (e) { /* best effort */ }
-				var target = basePath + '/?spa=' + encodeURIComponent(fullPath);
-				loc.replace(target);
+					var raw = localStorage.getItem('ohbm2026.ui.theme.v1');
+					var choice = raw === 'light' || raw === 'dark' || raw === 'auto' ? raw : 'auto';
+					var effective =
+						choice === 'auto'
+							? window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+							: choice;
+					document.documentElement.setAttribute('data-theme', effective);
+					document.documentElement.style.colorScheme = effective;
+				} catch (e) {
+					// localStorage might be unavailable; default to system pref.
+					document.documentElement.setAttribute(
+						'data-theme',
+						window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+					);
+				}
 			})();
 		</script>
+		<link href="/_app/immutable/entry/start.NpyMzaWU.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CUbW0bsu.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/grBROpRT.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CtEXV6Ry.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.BIctGnQy.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/Dp1pzeXC.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CfsBuQlH.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BAdNfywN.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BnIuuonq.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CQY8s78C.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/0.DXje6Gpl.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DJqCkxES.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DaX5jQg-.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/TTaaP19R.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/ICR3YXsq.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DpfrrEbi.js" rel="modulepreload">
+		
+		<link href="/_app/immutable/assets/0.BxTfVI5J.css" rel="stylesheet">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_1ivzb0c = {
+						base: ""
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/_app/immutable/entry/start.NpyMzaWU.js"),
+						import("/_app/immutable/entry/app.BIctGnQy.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
 	</body>
 </html>
