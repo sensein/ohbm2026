@@ -13,6 +13,12 @@
 	/** When semantic search is active, a map `abstract_id → cosine similarity` so
 	 * we can show a per-card score badge and sort by score. */
 	export let semanticScores: Map<number, number> | null = null;
+	/** Abstracts the lexical evaluator considers matches. Used to gate the ✨
+	 * badge: ✨ now specifically means "semantic-only hit" — present in the
+	 * semantic top-K but NOT in the lexical match set. Lexical-only cards
+	 * stay unmarked. `null` = no lexical search active (badge falls back to
+	 * the original "any semantic hit" behaviour). */
+	export let lexicalIds: Set<number> | null = null;
 	/** When lexical search is active, a map `abstract_id → number of EXACT
 	 * query-token matches`. Used as the primary sort key so an abstract that
 	 * literally contains the user's query (e.g. "pydra") surfaces above
@@ -142,10 +148,18 @@
 					>
 						<div class="card-top">
 							<span class="poster-id">{record.poster_id || `id ${record.abstract_id}`}</span>
-							{#if semanticScores && semanticScores.has(record.abstract_id)}
+							{#if semanticScores && semanticScores.has(record.abstract_id) && (lexicalIds === null || !lexicalIds.has(record.abstract_id))}
+								<!--
+									✨ badge marks SEMANTIC-ONLY hits — abstracts surfaced by
+									MiniLM's neighbour pass that the lexical evaluator did NOT
+									match (a phrase wasn't adjacent, a required word was
+									missing, etc.). Lexical hits stay unmarked so the reader
+									can scan which cards came from the literal query and which
+									came from the conceptual neighbour.
+								-->
 								<span
 									class="semantic-badge"
-									title={`cosine similarity ${semanticScores.get(record.abstract_id)?.toFixed(3)} (distance ${(1 - (semanticScores.get(record.abstract_id) ?? 0)).toFixed(3)})`}
+									title={`Semantic-only hit · cosine similarity ${semanticScores.get(record.abstract_id)?.toFixed(3)} (distance ${(1 - (semanticScores.get(record.abstract_id) ?? 0)).toFixed(3)})`}
 									data-testid="semantic-score"
 								>
 									✨ d={(1 - (semanticScores.get(record.abstract_id) ?? 0)).toFixed(3)}
