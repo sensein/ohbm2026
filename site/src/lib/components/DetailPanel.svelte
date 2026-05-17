@@ -200,8 +200,8 @@
 
 <style>
 	.detail {
-		background: #fff;
-		border: 1px solid #e6e6e6;
+		background: var(--bg-elevated);
+		border: 1px solid var(--border);
 		border-radius: 6px;
 		padding: 1rem;
 		display: flex;
@@ -224,11 +224,11 @@
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-weight: 700;
 		font-size: 1rem;
-		color: #2c5fa3;
+		color: var(--accent);
 	}
 	.accepted-for {
 		font-size: 0.75rem;
-		color: #666;
+		color: var(--text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
@@ -236,23 +236,23 @@
 		all: unset;
 		cursor: pointer;
 		font-size: 1.5rem;
-		color: #888;
+		color: var(--text-muted);
 		padding: 0 0.25rem;
 	}
 	.close:hover {
-		color: #222;
+		color: var(--text);
 	}
 	.detail-title {
 		font-size: 1.2rem;
 		margin: 0;
 		line-height: 1.3;
-		color: #222;
+		color: var(--text);
 	}
 	h2 {
 		font-size: 0.85rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
-		color: #666;
+		color: var(--text-muted);
 		margin: 0 0 0.25rem;
 	}
 	.section p,
@@ -260,7 +260,7 @@
 		margin: 0;
 		font-size: 0.95rem;
 		line-height: 1.55;
-		color: #333;
+		color: var(--text);
 	}
 	.section p {
 		white-space: pre-wrap;
@@ -271,11 +271,11 @@
 		font-size: 0.9rem;
 	}
 	.author-aff {
-		color: #666;
+		color: var(--text-muted);
 	}
 	.link {
 		all: unset;
-		color: #2c5fa3;
+		color: var(--accent);
 		cursor: pointer;
 		font-size: 0.85rem;
 		margin-top: 0.25rem;
@@ -291,14 +291,14 @@
 		font-size: 0.9rem;
 	}
 	dt {
-		color: #777;
+		color: var(--text-muted);
 		font-weight: 500;
 	}
 	dd {
 		margin: 0;
 	}
 	.muted {
-		color: #999;
+		color: var(--text-faint);
 	}
 	.chips {
 		list-style: none;
@@ -309,8 +309,8 @@
 		gap: 0.4rem;
 	}
 	.chips li {
-		background: #eef3fa;
-		color: #2c5fa3;
+		background: var(--accent-soft-bg);
+		color: var(--accent-soft-text);
 		padding: 0.2rem 0.5rem;
 		border-radius: 999px;
 		font-size: 0.8rem;
@@ -324,14 +324,14 @@
 		font-size: 0.85rem;
 	}
 	.references a {
-		color: #2c5fa3;
+		color: var(--accent);
 		word-break: normal;
 	}
 	.references a:hover {
 		text-decoration: underline;
 	}
 	.ref-doi {
-		color: #888;
+		color: var(--text-muted);
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 0.78rem;
 		margin-left: 0.5rem;
@@ -341,7 +341,7 @@
 		gap: 0.75rem;
 		align-items: center;
 		justify-content: flex-end;
-		border-top: 1px solid #f0f0f0;
+		border-top: 1px solid var(--border);
 		padding-top: 0.5rem;
 	}
 	.cart-action {
@@ -350,13 +350,13 @@
 		padding: 0.4rem 0.8rem;
 		border-radius: 4px;
 		font-size: 0.85rem;
-		background: #2c5fa3;
-		color: #fff;
+		background: var(--accent);
+		color: var(--accent-text);
 	}
 	.cart-action.remove {
-		background: #fff;
-		color: #2a7;
-		border: 1px solid #2a7;
+		background: var(--bg);
+		color: var(--success);
+		border: 1px solid var(--success);
 	}
 	.cart-action:disabled {
 		opacity: 0.5;
@@ -364,11 +364,11 @@
 	}
 	.permalink {
 		font-size: 0.85rem;
-		color: #888;
+		color: var(--text-muted);
 		text-decoration: none;
 	}
 	.permalink:hover {
-		color: #2c5fa3;
+		color: var(--accent);
 		text-decoration: underline;
 	}
 </style>

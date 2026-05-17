@@ -76,10 +76,10 @@
 		font-family:
 			ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 		font-size: 0.75rem;
-		color: #555;
+		color: var(--text-muted);
 		padding: 0.5rem 1rem;
-		border-top: 1px solid #eaeaea;
-		background: #fafafa;
+		border-top: 1px solid var(--border);
+		background: var(--bg-subtle);
 	}
 	.summary {
 		all: unset;
@@ -95,10 +95,10 @@
 	.label {
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
-		color: #888;
+		color: var(--text-faint);
 	}
 	.sep {
-		color: #bbb;
+		color: var(--text-faint);
 	}
 	.detail {
 		margin: 0.5rem 0 0;
@@ -108,7 +108,7 @@
 	}
 	.detail dt {
 		font-weight: 600;
-		color: #777;
+		color: var(--text-muted);
 	}
 	.detail dd {
 		margin: 0;

@@ -57,7 +57,7 @@
 		gap: 0.15rem;
 	}
 	.caption {
-		color: #666;
+		color: var(--text-muted);
 		font-size: 0.7rem;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
@@ -65,18 +65,19 @@
 	select {
 		font-size: 0.85rem;
 		padding: 0.3rem 0.5rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-strong);
 		border-radius: 4px;
-		background: #fff;
+		background: var(--bg);
+		color: var(--text);
 		min-width: 8rem;
 	}
 	select:focus {
-		outline: 2px solid #2c5fa3;
+		outline: 2px solid var(--accent);
 		outline-offset: -1px;
-		border-color: #2c5fa3;
+		border-color: var(--accent);
 	}
 	.sep {
-		color: #aaa;
+		color: var(--text-faint);
 		padding-bottom: 0.45rem;
 	}
 </style>

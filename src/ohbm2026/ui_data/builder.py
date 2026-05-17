@@ -117,6 +117,7 @@ def build_ui_data_package(
         rollup_db=rollup_db,
         abstract_ids=abstract_ids,
         build_info=build_info,
+        analysis_root=Path(analysis_root) if analysis_root else None,
     )
 
     topics_envelopes = build_topics(

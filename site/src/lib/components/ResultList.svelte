@@ -102,11 +102,11 @@
 	}
 	.results-header {
 		font-size: 0.85rem;
-		color: #666;
+		color: var(--text-muted);
 		margin: 0 0 0.5rem;
 	}
 	.results-header .muted {
-		color: #999;
+		color: var(--text-faint);
 	}
 	.cards {
 		list-style: none;
@@ -119,14 +119,14 @@
 	.card {
 		display: flex;
 		align-items: stretch;
-		border: 1px solid #e6e6e6;
+		border: 1px solid var(--border);
 		border-radius: 6px;
-		background: #fff;
+		background: var(--bg-elevated);
 		overflow: hidden;
 	}
 	.card.focused {
-		border-color: #2c5fa3;
-		box-shadow: 0 0 0 1px #2c5fa3;
+		border-color: var(--accent);
+		box-shadow: 0 0 0 1px var(--accent);
 	}
 	.card-body {
 		all: unset;
@@ -139,19 +139,19 @@
 		min-width: 0;
 	}
 	.card-body:hover {
-		background: #f7f7f7;
+		background: var(--bg-sunken);
 	}
 	.poster-id {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 0.8rem;
-		color: #2c5fa3;
+		color: var(--accent);
 		font-weight: 600;
 	}
 	.title {
 		font-size: 0.95rem;
 		font-weight: 500;
 		line-height: 1.3;
-		color: #222;
+		color: var(--text);
 		overflow: hidden;
 		text-overflow: ellipsis;
 		display: -webkit-box;
@@ -160,20 +160,20 @@
 	}
 	.lead-author {
 		font-size: 0.8rem;
-		color: #666;
+		color: var(--text-muted);
 	}
 	.sep {
-		color: #bbb;
+		color: var(--text-faint);
 		margin: 0 0.25rem;
 	}
 	.topic {
-		color: #555;
+		color: var(--text-muted);
 	}
 	.card-actions {
 		display: flex;
 		align-items: center;
 		padding: 0 0.5rem;
-		border-left: 1px solid #f0f0f0;
+		border-left: 1px solid var(--border);
 	}
 	.cart-action {
 		all: unset;
@@ -181,13 +181,13 @@
 		padding: 0.25rem 0.5rem;
 		border-radius: 4px;
 		font-size: 0.8rem;
-		color: #2c5fa3;
+		color: var(--accent);
 	}
 	.cart-action:hover {
-		background: #eef3fa;
+		background: var(--accent-soft-bg);
 	}
 	.cart-action.remove {
-		color: #2a7;
+		color: var(--success);
 	}
 	.cart-action:disabled {
 		opacity: 0.4;
@@ -197,13 +197,14 @@
 		margin-top: 0.5rem;
 		align-self: center;
 		padding: 0.5rem 1rem;
-		border: 1px solid #ccc;
-		background: #fff;
+		border: 1px solid var(--border-strong);
+		background: var(--bg);
+		color: var(--text);
 		border-radius: 4px;
 		cursor: pointer;
 	}
 	.empty {
-		color: #888;
+		color: var(--text-muted);
 		font-style: italic;
 	}
 </style>

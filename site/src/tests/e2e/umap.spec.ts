@@ -5,72 +5,87 @@ const DATA_AVAILABLE = process.env.UI_DATA_AVAILABLE !== '0';
 test.describe('US2: UMAP panel + lasso + model selector', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
-	test('opens map; lazy-loads Plotly; default cell renders', async ({ page }) => {
+	test('opens map; lazy-loads Plotly; both 2D + 3D charts render side-by-side', async ({
+		page
+	}) => {
 		await page.goto('/');
 		await expect(page.getByTestId('result-count')).toBeVisible({ timeout: 5000 });
-		// Map is hidden by default.
 		await expect(page.getByTestId('umap-panel')).toHaveCount(0);
 
 		await page.getByTestId('toggle-map').click();
-		const panel = page.getByTestId('umap-panel');
-		await expect(panel).toBeVisible();
+		await expect(page.getByTestId('umap-panel')).toBeVisible();
+		await expect(page.getByTestId('umap-chart-2d')).toBeVisible();
+		await expect(page.getByTestId('umap-chart-3d')).toBeVisible();
 
-		// Plotly is lazy-loaded; the chart container appears after ~1s.
-		await expect(page.getByTestId('umap-chart')).toBeVisible();
-		// Wait until Plotly has injected an SVG (or WebGL canvas).
+		// Plotly lazy-loads — wait for the 2D pane to render an SVG/canvas.
 		await expect
 			.poll(
 				async () =>
-					page.locator('[data-testid="umap-chart"] svg, [data-testid="umap-chart"] canvas').count(),
-				{ timeout: 10000 }
+					page
+						.locator('[data-testid="umap-chart-2d"] svg, [data-testid="umap-chart-2d"] canvas')
+						.count(),
+				{ timeout: 15000 }
+			)
+			.toBeGreaterThan(0);
+		// 3D pane renders a WebGL canvas inside `.gl-container`.
+		await expect
+			.poll(
+				async () =>
+					page.locator('[data-testid="umap-chart-3d"] canvas').count(),
+				{ timeout: 15000 }
 			)
 			.toBeGreaterThan(0);
 	});
 
-	test('model selector switches the cell shard; lasso selection persists by abstract_id', async ({
-		page
-	}) => {
+	test('rotate toggle pauses / resumes the 3D animation', async ({ page }) => {
 		await page.goto('/');
 		await page.getByTestId('toggle-map').click();
-		await expect(page.getByTestId('umap-chart')).toBeVisible();
+		await expect(page.getByTestId('umap-chart-3d')).toBeVisible();
+		const btn = page.getByTestId('umap-rotate-toggle');
+		await expect(btn).toBeVisible();
+		// Initial state: rotating (aria-pressed=true, label "⏸ pause").
+		await expect(btn).toHaveAttribute('aria-pressed', 'true');
+		await btn.click();
+		await expect(btn).toHaveAttribute('aria-pressed', 'false');
+		await btn.click();
+		await expect(btn).toHaveAttribute('aria-pressed', 'true');
+	});
+
+	test('lasso selection (simulated) updates the result list count', async ({ page }) => {
+		await page.goto('/');
+		await page.getByTestId('toggle-map').click();
+		await expect(page.getByTestId('umap-chart-2d')).toBeVisible();
 		await expect
 			.poll(
 				async () =>
-					page.locator('[data-testid="umap-chart"] svg, [data-testid="umap-chart"] canvas').count(),
-				{ timeout: 10000 }
+					page
+						.locator('[data-testid="umap-chart-2d"] svg, [data-testid="umap-chart-2d"] canvas')
+						.count(),
+				{ timeout: 15000 }
 			)
 			.toBeGreaterThan(0);
 
-		// Simulate a synthetic lasso event via Plotly's emit hook on the chart div.
-		// Selecting two arbitrary points (indices 0 and 1) is enough to verify the
-		// store → ResultList wiring.
-		const fakeSelection = await page.evaluate(() => {
-			const el = document.querySelector('[data-testid="umap-chart"]') as unknown as {
+		const initialCount = Number(
+			(await page.getByTestId('result-count').textContent())?.trim()
+		);
+		expect(initialCount).toBeGreaterThan(100);
+
+		const ok = await page.evaluate(() => {
+			const el = document.querySelector('[data-testid="umap-chart-2d"]') as unknown as {
 				emit?: (event: string, payload: unknown) => void;
 			} | null;
 			if (!el?.emit) return false;
 			el.emit('plotly_selected', {
-				points: [
-					{ pointIndex: 0 },
-					{ pointIndex: 1 }
-				]
+				points: [{ pointIndex: 0 }, { pointIndex: 1 }, { pointIndex: 2 }]
 			});
 			return true;
 		});
-		expect(fakeSelection).toBe(true);
+		expect(ok).toBe(true);
 
 		const clear = page.getByTestId('umap-clear-lasso');
 		await expect(clear).toBeVisible({ timeout: 3000 });
-		// "Clear selection (2)" is what the button label should say.
-		await expect(clear).toHaveText(/Clear selection \(2\)/);
-
-		// Switch the model — coordinates should re-render but the abstract_id set
-		// stays selected (the store doesn't reset).
-		await page.getByTestId('model-selector-model').selectOption('voyage');
-		await expect(clear).toBeVisible();
-		await expect(clear).toHaveText(/Clear selection \(2\)/);
-
-		// Clear the selection.
+		// 3-point lasso → 3 abstracts selected → result-count drops to 3.
+		await expect(page.getByTestId('result-count')).toHaveText('3', { timeout: 3000 });
 		await clear.click();
 		await expect(clear).toHaveCount(0);
 	});

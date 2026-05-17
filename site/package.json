@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.0",
-    "plotly.js-basic-dist-min": "^2.35.0",
+    "plotly.js-gl3d-dist-min": "^2.35.0",
     "shepherd.js": "^14.0.0"
   }
 }

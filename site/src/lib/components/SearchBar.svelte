@@ -38,16 +38,16 @@
 		width: 100%;
 		padding: 0.6rem 2.5rem 0.6rem 0.8rem;
 		font-size: 1rem;
-		border: 1px solid #ccc;
+		border: 1px solid var(--border-strong);
 		border-radius: 6px;
 		box-sizing: border-box;
-		background: #fff;
-		color: #222;
+		background: var(--bg);
+		color: var(--text);
 	}
 	input[type='search']:focus {
-		outline: 2px solid #2c5fa3;
+		outline: 2px solid var(--accent);
 		outline-offset: 0;
-		border-color: #2c5fa3;
+		border-color: var(--accent);
 	}
 	button {
 		position: absolute;
@@ -59,11 +59,11 @@
 		font-size: 1.4rem;
 		line-height: 1;
 		cursor: pointer;
-		color: #888;
+		color: var(--text-muted);
 		padding: 0.2rem 0.4rem;
 	}
 	button:hover {
-		color: #222;
+		color: var(--text);
 	}
 	.visually-hidden {
 		position: absolute;

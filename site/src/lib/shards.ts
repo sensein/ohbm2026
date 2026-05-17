@@ -115,10 +115,27 @@ export interface CellShard {
 	rows: CellRow[];
 }
 
+export interface TopicRecord {
+	cluster_id: number;
+	keywords: string[];
+	title: string;
+	description: string;
+	focus: string;
+}
+
+export interface TopicShard {
+	schema_version: string;
+	build_info: BuildInfo;
+	cell_key: string;
+	kind: string;
+	topics: TopicRecord[];
+}
+
 let manifestCache: Promise<Manifest | null> | null = null;
 let abstractsCache: Promise<AbstractsShard | null> | null = null;
 let authorsCache: Promise<AuthorsShard | null> | null = null;
 const cellCache: Map<string, Promise<CellShard | null>> = new Map();
+const topicsCache: Map<string, Promise<TopicShard | null>> = new Map();
 
 async function fetchJson<T>(url: string, fetcher: typeof fetch): Promise<T | null> {
 	try {
@@ -165,9 +182,30 @@ export function loadCell(
 	return cellCache.get(cellKey)!;
 }
 
+/**
+ * Load a per-(model, input, kind) topics shard. `kind` is one of
+ * `communities` | `topic_clusters` | `neuroscape_clusters`. Cached by
+ * the full (cell_key, kind) tuple.
+ */
+export function loadTopics(
+	cellKey: string,
+	kind: string,
+	fetcher: typeof fetch = fetch
+): Promise<TopicShard | null> {
+	const key = `${cellKey}__${kind}`;
+	if (!topicsCache.has(key)) {
+		topicsCache.set(
+			key,
+			fetchJson<TopicShard>(`${base}/data/topics/${cellKey}_${kind}.json`, fetcher)
+		);
+	}
+	return topicsCache.get(key)!;
+}
+
 export function resetCachesForTests(): void {
 	manifestCache = null;
 	abstractsCache = null;
 	authorsCache = null;
 	cellCache.clear();
+	topicsCache.clear();
 }
