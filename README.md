@@ -103,6 +103,28 @@ The latest end state of the project is:
    - two semantic cluster lenses:
      - `25-cluster benchmark`
      - `claims 28-cluster benchmark`
+9. **Stage 6 (in progress)** — UI rewrite as a static SvelteKit site served from GitHub Pages, with per-PR preview deploys surfaced in the PR's Deployments box. See `specs/008-ui-rewrite/` for the spec, plan, and tasks; `specs/008-ui-rewrite/quickstart.md` for the local-dev recipe.
+
+## Stage 6: UI (under construction)
+
+The Stage 6 site lives under `site/` (a self-contained SvelteKit project) and the data-package builder lives under `src/ohbm2026/ui_data/`. The first PR ships only the deploy workflows + a placeholder page that renders the build provenance (`manifest.build_info`) so reviewers can verify each PR-preview deploy reflects the latest pushed commit.
+
+Build the data package + the site locally:
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/build_ui_data.py \
+  --corpus data/primary/abstracts.json \
+  --withdrawn data/primary/abstracts_withdrawn.json \
+  --authors data/primary/authors.json \
+  --enriched data/primary/abstracts_enriched.sqlite \
+  --analysis-root data/outputs/analysis \
+  --discover-rollup \
+  --output site/static/data
+
+cd site && pnpm install && pnpm dev   # http://localhost:5173
+```
+
+Per-PR previews surface in the **PR's Deployments box** (top-of-PR, via the `environment:` declaration in `.github/workflows/pr-preview.yml`) — NOT as a bot comment. After US8 lands on `main`, the production GitHub Pages URL goes live; each subsequent PR for US1–US7 gets an automatic preview deploy.
 
 ## External Requirements
 

@@ -1,6 +1,6 @@
 [project]
 name = "ohbm2026"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local ingestion pipeline for OHBM 2026 Oxford Abstracts data"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,13 @@ analysis = [
     "hdbscan>=0.8",
 ]
 analysis-sci = ["scispacy>=0.5"]
+ui = [
+    "numpy>=1.26",
+    "sentence-transformers>=2.7",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+]
+ui-dev = ["playwright>=1.58.0"]
 
 [project.scripts]
 ohbm-ingest = "ohbm2026.assets:main"

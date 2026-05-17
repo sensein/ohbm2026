@@ -45,6 +45,8 @@ __all__ = [
     "ProjectionDimensionMismatch",
     "TopicGroupingHallucination",
     "CommunityResolutionDegenerate",
+    "UIBuildError",
+    "Stage6Error",
 ]
 
 
@@ -105,6 +107,15 @@ class UIBuildError(RuntimeError):
     inputs, malformed rollup, etc.). Kept as a `RuntimeError` subclass
     rather than an `OhbmStageError` because the UI export is downstream
     of the per-stage pipelines and consumes their canonical artifacts.
+    """
+
+
+class Stage6Error(OhbmStageError):
+    """Base class for Stage 6 (UI data-package build) failures.
+
+    Subclassed by :class:`ohbm2026.ui_data.state_key.Stage6BuildError` and
+    other Stage 6 callsites. Distinct from :class:`UIBuildError` (which
+    covers the legacy ``ui.py`` export path) so callers can differentiate.
     """
 
 

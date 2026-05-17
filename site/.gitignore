@@ -1,0 +1,22 @@
+node_modules
+.svelte-kit
+build
+package
+.env
+.env.*
+!.env.example
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Build output of the data-package builder — populated at deploy time per quickstart.md
+static/data/
+
+# Playwright
+playwright-report
+test-results
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+*.log

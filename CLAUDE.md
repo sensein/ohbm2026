@@ -124,6 +124,7 @@ All library code lives in `src/ohbm2026/`:
 - `category_evaluation.py`, `category_rollup.py` — compare learned cluster families against submitter taxonomies.
 - `layout/` (**parked** as of Stage 5 — specs/007-package-reorg/) — poster_layout, poster_sequencing, nocd_experiments. Preserved verbatim for future revival; not actively maintained. Tests under `tests/test_poster_*.py` + `tests/test_nocd_experiments.py` still run with import-paths updated to `ohbm2026.layout.*`. The 15 companion scripts live under `scripts/layout/`. Revive when a new organizer cycle needs poster-layout work.
 - `ui.py` — static UI export (`export-ui` writes a fresh bundle; `build-ui` also mirrors to `export/ui-site/`).
+- `ui_data/` — **Stage 6** UI data-package builders. `manifest.py`, `abstracts.py`, `authors.py`, `cells.py`, `topics.py` produce per-shard envelopes (every shard carries a top-level `build_info` block — FR-019 + CA-008). `state_key.py` discovers the corpus + Stage 4 rollup state-keys at build time (CA-007). `builder.py` orchestrates + enforces the 8 cross-shard invariants from `specs/008-ui-rewrite/data-model.md` §8. CLI entry: `scripts/build_ui_data.py`. The SvelteKit site lives at `site/` (self-contained pnpm project; gh-pages deploy via `.github/workflows/{deploy-ui,pr-preview,pr-preview-cleanup}.yml`).
 - `cli.py` — single dispatch entrypoint that wires the above into subcommands.
 
 Tests in `tests/` mirror the module names and use `unittest`.
@@ -168,28 +169,33 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/007-package-reorg/plan.md`. The companion design artifacts
+at `specs/008-ui-rewrite/plan.md`. The companion design artifacts
 under the same directory — `research.md`, `data-model.md`, `contracts/`,
-and `quickstart.md` — pin Stage 5 package-reorganization design: three
-independent commit series that collapse the legacy `src/ohbm2026/
-enrichment.py` (1,361 LOC, 62 def/class symbols, ~22+ unused) into
-focused `enrich/` submodules (`text.py`, `cache_paths.py`,
-`markdown_render.py`, `openai_compat.py`); park `poster_layout.py`,
-`poster_sequencing.py`, and `nocd_experiments.py` under
-`src/ohbm2026/layout/` (no scheduled maintenance; revive when a new
-organizer cycle needs it) along with their 15 `scripts/` companions
-under `scripts/layout/`; and split the monolithic `src/ohbm2026/ui.py`
-(1,361 LOC) into a `ui/` package with leaf/mid/trunk submodules
-(`text.py`, `figures.py`, `references.py`, `manifest.py`,
-`payload_legacy.py`, `payload_stage4.py`, `cli.py`). No backward-compat
-shim at any `__init__.py`; every consumer imports from the explicit
-submodule that owns the symbol (Stage 4 / Q2 / T108b precedent). Tests
-are explicitly waived for the refactor body per the user's "OK to skip
-tests" guidance; the existing test suite (583 / 1 pre-existing failure)
-stays green, with `tests/test_enrichment.py` deleted because it covers
-only the legacy Stage 2 path that Stage 2.1 already replaced.
+and `quickstart.md` — pin Stage 6 UI-rewrite design: a static
+SvelteKit + Vite site served from GitHub Pages, built and deployed by
+a GitHub Action with per-PR preview management, consuming a static-
+JSON-shard data package (DuckDB-WASM ruled out at 3,244-abstract scale
+per the Session-2026-05-17 clarification). Adds previously-missing
+capabilities: program-assigned poster ids (not submission ids),
+restored author + affiliation details, 3D UMAP alongside 2D + lasso,
+typo-tolerant lexical + semantic search (MiniLM-L6 ONNX via
+transformers.js with int8-quantized corpus vectors), interactive
+facet recomputation, a saved-list shopping cart with mailto-based
+export, an optional walkthrough (shepherd.js), an About page with
+build-time verified references, and mobile-first responsive layout.
+Accepted abstracts only; withdrawn submissions never surface
+anywhere. Three workflows: `deploy-ui.yml` (main → root), `pr-
+preview.yml` (PR → `/pr-<N>/`), `pr-preview-cleanup.yml` (close →
+remove). 8 user stories; MVP = US1 (search + browse on every device).
+No new secrets beyond the default `GITHUB_TOKEN`. The Python data-
+builder package lives at `src/ohbm2026/ui_data/`; the site lives at
+`site/`.
 
 Previous-stage plans:
+- Stage 5 package reorganization: `specs/007-package-reorg/plan.md`
+  (collapsed `enrichment.py` into `enrich/{text, markdown_render}.py`;
+  parked `layout/`; split `ui.py` into `ui/{payload, cli}.py`;
+  consolidated `load_json`/`write_json` into `ohbm2026/util/json_io.py`).
 - Stage 4 analysis & annotation: `specs/006-analysis-annotation/plan.md`
   (canonical `ohbmcli analyze-matrix` producing 48 bundles + canonical
   rollup `annotations__<state-key>.{parquet,sqlite}`; joblib-parallel

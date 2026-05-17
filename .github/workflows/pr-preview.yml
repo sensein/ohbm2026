@@ -1,0 +1,102 @@
+name: pr-preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'src/ohbm2026/ui_data/**'
+      - 'scripts/build_ui_data.py'
+      - 'scripts/fetch_ui_inputs.sh'
+      - 'site/**'
+      - 'specs/008-ui-rewrite/contracts/references.yaml'
+      - '.github/workflows/pr-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  deployments: write
+  pull-requests: read
+
+concurrency:
+  group: deploy-ui-preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # NOTE: this `environment:` declaration is what surfaces the preview URL
+    # in the PR's Deployments box (top-of-PR). GitHub auto-creates the
+    # `pr-preview-<N>` environment on first deploy and re-uses it across
+    # pushes — no bot-comment spam (FR-021).
+    environment:
+      name: pr-preview-${{ github.event.pull_request.number }}
+      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}/
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install uv + project (ui extras)
+        run: |
+          pip install --upgrade pip uv
+          uv venv --python 3.14 .venv
+          uv pip install --python .venv/bin/python -e ".[ui]"
+
+      - name: Set up Node 20 + pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Enable pnpm
+        run: |
+          npm install --global pnpm@10
+
+      - name: Install site deps
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+
+      - name: Fetch Stage 1–4 inputs (best-effort)
+        id: fetch_inputs
+        run: |
+          set +e
+          ./scripts/fetch_ui_inputs.sh
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Build data package
+        if: steps.fetch_inputs.outputs.rc == '0'
+        run: |
+          PYTHONPATH=src .venv/bin/python scripts/build_ui_data.py \
+            --corpus data/primary/abstracts.json \
+            --withdrawn data/primary/abstracts_withdrawn.json \
+            --authors data/primary/authors.json \
+            --enriched data/primary/abstracts_enriched.sqlite \
+            --analysis-root data/outputs/analysis \
+            --discover-rollup \
+            --output site/static/data
+
+      - name: Run Python unit tests (ui_data only)
+        run: PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -p "test_ui_data*"
+
+      - name: Build site (PR preview)
+        working-directory: site
+        env:
+          BASE_PATH: /pr-${{ github.event.pull_request.number }}
+        run: pnpm build
+
+      - name: Publish to gh-pages /pr-${{ github.event.pull_request.number }}
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: site/build
+          publish_branch: gh-pages
+          destination_dir: pr-${{ github.event.pull_request.number }}
+          keep_files: true
+          enable_jekyll: false
+          commit_message: 'preview(ui): pr-${{ github.event.pull_request.number }} ${{ github.sha }}'
