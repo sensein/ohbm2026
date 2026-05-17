@@ -38,6 +38,7 @@
 	// stacks; only `react()` is idempotent for the chart itself).
 	let handlers2dAttached = false;
 	let handlers3dAttached = false;
+	let chart3dInitialized = false;
 
 	$: cellKey = `${$selectedCell.model}_${$selectedCell.input}`;
 
@@ -204,7 +205,12 @@
 			plot_bgcolor: c.plot,
 			font: { color: c.font },
 			xaxis: { visible: false, scaleanchor: 'y' },
-			yaxis: { visible: false }
+			yaxis: { visible: false },
+			// uirevision pinned constant so axis zoom + pan + selection state
+			// survive react() calls (selection / theme / cell switches all
+			// reach this code path).
+			uirevision: 'umap-2d',
+			selectionrevision: 'umap-2d-sel'
 		};
 		const config = {
 			responsive: true,
@@ -220,16 +226,16 @@
 				const node = el as unknown as { on: (e: string, h: (e: unknown) => void) => void };
 				node.on('plotly_selected', (e: unknown) => {
 					const ev = e as { points?: Array<{ pointIndex: number }> } | null;
-					if (!ev || !ev.points) {
-						$lassoSelection = null;
-						return;
-					}
-					// Reverse the visible-index → abstract_id map. Capture the
-					// CURRENT shard via the cellShard module variable so a
-					// model-switch since render uses the fresh data.
+					// Plotly fires a *second* `plotly_selected` with an empty
+					// `points` array immediately after its internal
+					// `plotly_relayout` — that's a no-op for us, not a real
+					// deselect. The real deselect comes via `plotly_deselect`
+					// (double-click on empty space). So ignore empty events.
+					if (!ev || !ev.points || ev.points.length === 0) return;
+					// Capture the CURRENT shard via the cellShard module
+					// variable so a model-switch since render uses fresh data.
 					const shardNow = cellShard;
 					if (!shardNow) return;
-					// Rebuild the visible → abstract_id mapping from this shard.
 					const visibleIds: number[] = [];
 					for (let i = 0; i < shardNow.rows.length; i++) {
 						const row = shardNow.rows[i];
@@ -241,7 +247,7 @@
 						const aid = visibleIds[p.pointIndex];
 						if (aid !== undefined) ids.add(aid);
 					}
-					$lassoSelection = ids.size ? ids : null;
+					if (ids.size > 0) $lassoSelection = ids;
 				});
 				node.on('plotly_deselect', () => {
 					$lassoSelection = null;
@@ -284,6 +290,14 @@
 	) {
 		if (!api || !el || !shard) return;
 		const s = buildSeries(shard, records, selected, topicMap);
+		// 3D doesn't honor `selectedpoints` reliably — encode the selection via
+		// per-point opacity so unselected points dim out without resetting the
+		// camera. When nothing is selected, use a constant 0.85.
+		let opacityArr: number[] | undefined;
+		if (selected !== null && s.selectedIdx.length) {
+			const selSet = new Set(s.selectedIdx);
+			opacityArr = s.xs3.map((_, i) => (selSet.has(i) ? 1 : 0.08));
+		}
 		const t1 = {
 			type: 'scatter3d' as const,
 			mode: 'markers' as const,
@@ -294,28 +308,53 @@
 				size: 3,
 				color: s.colors,
 				colorscale: 'Viridis',
-				opacity: 0.85,
+				opacity: opacityArr ? undefined : 0.85,
 				line: { width: 0 }
-			},
+			} as Record<string, unknown>,
 			customdata: s.posters.map((p, i) => [p, s.titles[i], s.communityLabels[i]]) as unknown as number[][],
 			hovertemplate:
 				'<b>%{customdata[0]}</b><br>%{customdata[1]}<br><i>%{customdata[2]}</i><extra></extra>'
 		};
+		if (opacityArr) {
+			// scatter3d supports per-point opacity via marker.opacity as an array.
+			(t1.marker as { opacity?: number[] }).opacity = opacityArr;
+		}
 		const c = themedColors(t);
 		const axisCfg = { visible: false, showbackground: false };
+		// Explicitly carry the current camera forward into each react() so
+		// Plotly doesn't reset to its default. (`uirevision` should do this
+		// automatically per the docs, but in this bundle it doesn't.) The
+		// rotation animation uses `relayout` to update camera between
+		// react() calls; we read whatever camera is current and pass it back.
+		let cameraEye: { x: number; y: number; z: number } = { x: 1.6, y: 1.6, z: 0.9 };
+		if (chart3dInitialized) {
+			const flLayout = (el as unknown as { _fullLayout?: { scene?: { camera?: { eye?: { x: number; y: number; z: number } } } } })
+				._fullLayout;
+			const eye = flLayout?.scene?.camera?.eye;
+			if (eye && typeof eye.x === 'number') {
+				cameraEye = { x: eye.x, y: eye.y, z: eye.z };
+			}
+		}
+		const scene: Record<string, unknown> = {
+			xaxis: axisCfg,
+			yaxis: axisCfg,
+			zaxis: axisCfg,
+			bgcolor: c.plot,
+			camera: { eye: cameraEye }
+		};
 		const layout = {
 			margin: { l: 0, r: 0, t: 0, b: 0 },
 			showlegend: false,
 			paper_bgcolor: c.paper,
 			plot_bgcolor: c.plot,
 			font: { color: c.font },
-			scene: {
-				xaxis: axisCfg,
-				yaxis: axisCfg,
-				zaxis: axisCfg,
-				bgcolor: c.plot,
-				camera: { eye: { x: 1.6, y: 1.6, z: 0.9 } }
-			}
+			scene,
+			// uirevision pinned constant so camera (rotation, zoom) survives
+			// re-renders triggered by selection / theme / cell switches.
+			// Per US2 acceptance scenario 2, the lasso selection is by
+			// abstract_id and should persist across cell switches anyway, so
+			// keeping the camera too feels right.
+			uirevision: 'umap-3d'
 		};
 		const config = {
 			responsive: true,
@@ -324,6 +363,7 @@
 		(api as unknown as { react: (...args: unknown[]) => Promise<unknown> })
 			.react(el, [t1], layout, config)
 			.then(() => {
+				chart3dInitialized = true;
 				if (!handlers3dAttached) {
 					handlers3dAttached = true;
 					const node = el as unknown as { on: (e: string, h: (e: unknown) => void) => void };
