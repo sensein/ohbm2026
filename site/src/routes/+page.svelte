@@ -94,7 +94,9 @@
 		}
 	})($searchQuery, $semanticEnabled);
 
-	$: lexicalIds = lexicalSearch(abstracts, authorsById, $searchQuery);
+	$: lexicalResult = lexicalSearch(abstracts, authorsById, $searchQuery);
+	$: lexicalIds = lexicalResult?.ids ?? null;
+	$: lexicalExactness = lexicalResult?.exactness ?? null;
 	$: semanticIdsForMerge = semanticScores
 		? new Set<number>(semanticScores.keys())
 		: null;
@@ -203,7 +205,13 @@
 				<FacetSidebar counts={facetCounts} />
 			</div>
 			<div class="list-pane">
-				<ResultList {abstracts} {authorsById} {filteredIds} {semanticScores} />
+				<ResultList
+					{abstracts}
+					{authorsById}
+					{filteredIds}
+					{semanticScores}
+					lexicalExactness={lexicalExactness}
+				/>
 			</div>
 			<div class="detail-pane" class:active={focused !== null}>
 				{#if focused}

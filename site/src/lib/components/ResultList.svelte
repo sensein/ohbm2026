@@ -13,6 +13,11 @@
 	/** When semantic search is active, a map `abstract_id → cosine similarity` so
 	 * we can show a per-card score badge and sort by score. */
 	export let semanticScores: Map<number, number> | null = null;
+	/** When lexical search is active, a map `abstract_id → number of EXACT
+	 * query-token matches`. Used as the primary sort key so an abstract that
+	 * literally contains the user's query (e.g. "pydra") surfaces above
+	 * fuzzy/proximal matches (hydra, pydry, etc.). */
+	export let lexicalExactness: Map<number, number> | null = null;
 	/** Truncate to this many cards to keep DOM size bounded; "Show more" appends. */
 	export let initialWindow = 60;
 
@@ -20,20 +25,25 @@
 
 	$: visible = (() => {
 		const matched = abstracts.filter((a) => filteredIds === null || filteredIds.has(a.abstract_id));
-		// When semantic scores are present, sort by score descending so the
-		// most semantically similar surface first. Stable sort: cards with no
-		// semantic score keep their corpus order.
-		if (semanticScores && semanticScores.size > 0) {
-			return matched.slice().sort((a, b) => {
-				const sa = semanticScores!.get(a.abstract_id);
-				const sb = semanticScores!.get(b.abstract_id);
-				if (sa === undefined && sb === undefined) return 0;
-				if (sa === undefined) return 1;
-				if (sb === undefined) return -1;
-				return sb - sa;
-			});
-		}
-		return matched;
+		const hasExactness = lexicalExactness !== null && lexicalExactness.size > 0;
+		const hasSemantic = semanticScores !== null && semanticScores.size > 0;
+		if (!hasExactness && !hasSemantic) return matched;
+		// Sort key: primary = lexical exactness (higher first), secondary =
+		// semantic score (higher first). Exactness wins because the user's
+		// expectation when typing a rare technical term ("pydra") is that the
+		// actual abstract containing the word lands at the top, not buried
+		// among fuzzy proximal matches.
+		return matched.slice().sort((a, b) => {
+			const ea = (hasExactness ? lexicalExactness!.get(a.abstract_id) : undefined) ?? 0;
+			const eb = (hasExactness ? lexicalExactness!.get(b.abstract_id) : undefined) ?? 0;
+			if (ea !== eb) return eb - ea;
+			const sa = hasSemantic ? semanticScores!.get(a.abstract_id) : undefined;
+			const sb = hasSemantic ? semanticScores!.get(b.abstract_id) : undefined;
+			if (sa === undefined && sb === undefined) return 0;
+			if (sa === undefined) return 1;
+			if (sb === undefined) return -1;
+			return sb - sa;
+		});
 	})();
 	$: pageItems = visible.slice(0, revealed);
 

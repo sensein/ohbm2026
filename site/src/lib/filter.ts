@@ -83,6 +83,10 @@ function buildInvertedIndex(
 			.map((v) => (Array.isArray(v) ? v.join(' ') : (v as string)))
 			.filter(Boolean)
 			.join(' ');
+		// IMPORTANT: section bodies are part of the haystack now. The earlier
+		// build only indexed metadata (title, topics, methods checklist,
+		// authors, facets), which meant a query like "pydra" missed the one
+		// abstract that mentions the tool in its Methods section.
 		const corpus = [
 			a.title,
 			a.poster_id,
@@ -91,6 +95,10 @@ function buildInvertedIndex(
 			a.topics.secondary,
 			a.topics.secondary_subcategory,
 			a.methods_checklist.join(' '),
+			a.sections.introduction,
+			a.sections.methods,
+			a.sections.results,
+			a.sections.conclusion,
 			authorNames,
 			facetBlob
 		].join(' ');
@@ -111,9 +119,20 @@ function buildInvertedIndex(
 	return index;
 }
 
-/** Distance threshold per token length, per FR-008. */
+/**
+ * Distance threshold per token length. Tighter than FR-008's "≤2 for ≥4"
+ * because at 3K abstracts × ~50K unique corpus tokens, a 5-char query like
+ * "pydra" admits dozens of proximal matches (hydra, pyra, pydry, …) most
+ * of which aren't what the user wants. Stricter scheme:
+ *   < 4 chars  → exact only (DL = 0); too noisy otherwise
+ *   4–6 chars  → DL ≤ 1     ; catches single-typo / transposition (Smtih→Smith)
+ *   ≥ 7 chars  → DL ≤ 2     ; matches the FR-008 spec for longer words
+ */
 function thresholdFor(token: string): number {
-	return token.length < 4 ? 1 : 2;
+	const n = token.length;
+	if (n < 4) return 0;
+	if (n < 7) return 1;
+	return 2;
 }
 
 /**
@@ -122,48 +141,68 @@ function thresholdFor(token: string): number {
  * token within its Damerau-Levenshtein threshold; the abstract sets are
  * intersected so all words contribute.
  *
- * Returns `null` for an empty query (= "show everything", same convention
- * as the substring search) or a Set of matching `abstract_id`s.
+ * Returns `null` for an empty query, or a `{ ids, exactness }` pair where
+ * `exactness` is a per-abstract count of how many query tokens matched
+ * EXACTLY (not just within DL distance). The UI uses `exactness` to rank
+ * exact-match abstracts first.
  */
+export interface LexicalResult {
+	ids: Set<number>;
+	exactness: Map<number, number>; // abstract_id → number of EXACT query-token matches
+}
+
 export function lexicalSearch(
 	abstracts: AbstractRecord[],
 	authorsById: Map<number, AuthorRecord>,
 	query: string
-): Set<number> | null {
+): LexicalResult | null {
 	const q = normalize(query).trim();
 	if (!q) return null;
 	const queryTokens = tokenizeForIndex(q);
-	if (queryTokens.length === 0) return new Set();
+	if (queryTokens.length === 0) return { ids: new Set(), exactness: new Map() };
 	const index = buildInvertedIndex(abstracts, authorsById);
-	const perTokenMatches: Set<number>[] = [];
+
+	// Per-token match sets, paired with per-abstract exact-hit flags.
+	type PerTokenMatch = { all: Set<number>; exact: Set<number> };
+	const perTokenMatches: PerTokenMatch[] = [];
 	for (const qt of queryTokens) {
 		const threshold = thresholdFor(qt);
-		const matchedAbstractIds = new Set<number>();
+		const all = new Set<number>();
+		const exact = new Set<number>();
 		for (const corpusToken of index.tokens) {
 			if (Math.abs(corpusToken.length - qt.length) > threshold) continue;
-			// Match by EXACT equality or Damerau-Levenshtein ≤ threshold only.
-			// The earlier impl also took bidirectional substring matches as
-			// 0-distance — that was too permissive (a 3-char corpus token like
-			// "mri" matched any longer query containing those chars), so it's
-			// gone now. Behaviour now strictly follows FR-008.
-			if (corpusToken === qt || damerauLevenshtein(qt, corpusToken, threshold) <= threshold) {
+			const isExact = corpusToken === qt;
+			if (isExact || damerauLevenshtein(qt, corpusToken, threshold) <= threshold) {
 				const posting = index.postings.get(corpusToken);
-				if (posting) for (const id of posting) matchedAbstractIds.add(id);
+				if (!posting) continue;
+				for (const id of posting) {
+					all.add(id);
+					if (isExact) exact.add(id);
+				}
 			}
 		}
-		perTokenMatches.push(matchedAbstractIds);
+		perTokenMatches.push({ all, exact });
 	}
-	if (perTokenMatches.length === 0) return new Set();
-	// Intersect all per-token sets (AND semantics).
-	let final = perTokenMatches[0];
+	if (perTokenMatches.length === 0) return { ids: new Set(), exactness: new Map() };
+
+	// AND-intersect across per-token sets.
+	let finalIds = perTokenMatches[0].all;
 	for (let i = 1; i < perTokenMatches.length; i++) {
 		const next = new Set<number>();
-		const probe = perTokenMatches[i];
-		for (const id of final) if (probe.has(id)) next.add(id);
-		final = next;
-		if (final.size === 0) break;
+		const probe = perTokenMatches[i].all;
+		for (const id of finalIds) if (probe.has(id)) next.add(id);
+		finalIds = next;
+		if (finalIds.size === 0) break;
 	}
-	return final;
+
+	// For each surviving abstract, count how many query tokens matched EXACTLY.
+	const exactness = new Map<number, number>();
+	for (const id of finalIds) {
+		let n = 0;
+		for (const m of perTokenMatches) if (m.exact.has(id)) n++;
+		exactness.set(id, n);
+	}
+	return { ids: finalIds, exactness };
 }
 
 interface SearchHaystack {

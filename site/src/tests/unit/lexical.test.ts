@@ -94,34 +94,58 @@ describe('lexicalSearch (FR-008 typo tolerance)', () => {
 	});
 
 	it('matches an exact token', () => {
-		expect(lexicalSearch(abstracts, authorsById, 'aging')).toEqual(new Set([1001]));
+		const result = lexicalSearch(abstracts, authorsById, 'aging');
+		expect(result?.ids).toEqual(new Set([1001]));
+		// "aging" is an exact match in abstract 1001 → exactness count = 1.
+		expect(result?.exactness.get(1001)).toBe(1);
 	});
 
 	it('matches a single-substitution typo on a long word', () => {
-		// "aginq" → "aging" (1 substitution; threshold = 2 for length 5)
-		expect(lexicalSearch(abstracts, authorsById, 'aginq')).toEqual(new Set([1001]));
+		// "aginq" → "aging" (1 substitution; threshold = 1 for length 5 under
+		// the tightened scheme).
+		const result = lexicalSearch(abstracts, authorsById, 'aginq');
+		expect(result?.ids).toEqual(new Set([1001]));
+		// Fuzzy hit, NOT exact → exactness should be 0.
+		expect(result?.exactness.get(1001) ?? 0).toBe(0);
 	});
 
 	it('matches the FR-008 example: 2-typo query "defautl mode netwrk" → "default mode network"', () => {
 		// All three query tokens must hit the abstract (AND across tokens).
-		expect(lexicalSearch(abstracts, authorsById, 'defautl mode netwrk')).toEqual(new Set([1003]));
+		// Lengths: defautl=7 (thr 2), mode=4 (thr 1), netwrk=6 (thr 1).
+		// "defautl"→"default" = 1 transposition (DL 1 ≤ 2) ✓
+		// "mode" exact ✓; "netwrk"→"network" = 1 deletion (DL 1 ≤ 1) ✓
+		const result = lexicalSearch(abstracts, authorsById, 'defautl mode netwrk');
+		expect(result?.ids).toEqual(new Set([1003]));
+		// "mode" hits exactly; the other two are typo-corrected → exactness = 1.
+		expect(result?.exactness.get(1003)).toBe(1);
 	});
 
-	it('matches the FR-010 example: surname "Smtih" within the typo budget would match "Smith"', () => {
-		// We only have a "García" author here so verify diacritic-folded match.
-		expect(lexicalSearch(abstracts, authorsById, 'Garcia')).toEqual(new Set([1001]));
+	it('matches the FR-010 example: diacritic-folded surname', () => {
+		// "Garcia" tokenizes to ["garcia"]; corpus has the NFD-folded "garcia"
+		// from "García". Length 6 → threshold 1; exact hit after folding.
+		const result = lexicalSearch(abstracts, authorsById, 'Garcia');
+		expect(result?.ids).toEqual(new Set([1001]));
 	});
 
 	it('intersects across multiple query tokens', () => {
-		// "memory mri" should hit only abstracts that have BOTH tokens; both
-		// abstracts mention MRI / functional MRI but only 1001 has "memory" in
-		// the title (1003 has it under primary_subcategory). Either way both
-		// should match for "memory mri".
-		const ids = lexicalSearch(abstracts, authorsById, 'memory mri');
-		expect(ids?.size).toBeGreaterThan(0);
+		const result = lexicalSearch(abstracts, authorsById, 'memory mri');
+		expect((result?.ids.size ?? 0)).toBeGreaterThan(0);
 	});
 
 	it('returns an empty set for queries that match nothing', () => {
-		expect(lexicalSearch(abstracts, authorsById, 'xyzpdqzzz')).toEqual(new Set());
+		const result = lexicalSearch(abstracts, authorsById, 'xyzpdqzzz');
+		expect(result?.ids).toEqual(new Set());
+		expect(result?.exactness.size).toBe(0);
+	});
+
+	it('ranks the exact-match abstract above fuzzy proximal matches', () => {
+		// Regression guard for the "pydra" issue: an exact-token hit must
+		// produce a strictly higher exactness count than any fuzzy hit so the
+		// UI can sort it to the top.
+		const result = lexicalSearch(abstracts, authorsById, 'aging');
+		expect(result).not.toBeNull();
+		// Only the abstract with the literal word should have exactness ≥ 1.
+		const counts = [...result!.exactness.values()];
+		expect(Math.max(0, ...counts)).toBeGreaterThanOrEqual(1);
 	});
 });
