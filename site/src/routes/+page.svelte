@@ -85,11 +85,11 @@
 			dataMissing = true;
 		}
 		loaded = true;
-		// Warm the semantic worker in the background so the model is ready
-		// the moment the user types. The worker does NOT influence ordering
-		// while the search box is empty — the reactive block below nulls
-		// `semanticScores` whenever `$searchQuery` is blank.
 		if (!dataMissing) {
+			// Warm the semantic worker in the background so the model is ready
+			// the moment the user types. The worker does NOT influence ordering
+			// while the search box is empty — the reactive block below nulls
+			// `semanticScores` whenever `$searchQuery` is blank.
 			void (async () => {
 				try {
 					const mod = await import('$lib/search/semantic');
@@ -98,6 +98,24 @@
 					console.warn('semantic search unavailable:', err);
 				}
 			})();
+			// Pre-build the lexical inverted index off the critical render
+			// path. `lexicalSearch` lazy-builds + caches in a WeakMap; running
+			// it once with a no-match token populates the cache. Schedule via
+			// requestIdleCallback (or a 200 ms setTimeout fallback) so we
+			// don't compete with the first interactive paint.
+			const warmLexical = (): void => {
+				void lexicalSearch(abstracts, authorsById, '__warm__');
+			};
+			if (typeof window !== 'undefined') {
+				const w = window as unknown as {
+					requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void;
+				};
+				if (typeof w.requestIdleCallback === 'function') {
+					w.requestIdleCallback(warmLexical, { timeout: 1500 });
+				} else {
+					setTimeout(warmLexical, 200);
+				}
+			}
 		}
 	});
 

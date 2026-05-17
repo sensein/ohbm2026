@@ -19,15 +19,14 @@
 	/**
 	 * Reactive GitHub-issue pre-fill URL. Recomputes on route change so
 	 * the body reflects whichever page the user was on when they clicked.
+	 * The full build_info block (deploy + data) is templated in so a
+	 * maintainer can correlate the report to the exact code revision and
+	 * data-package state-keys that were live when the user hit the issue.
 	 */
 	$: feedbackUrl = (() => {
-		const sha =
-			envBuildInfo?.code_revision_short ??
-			dataBuildInfo?.code_revision_short ??
-			'(unknown)';
 		const here = $page.url.href;
 		const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-		const body = [
+		const lines: string[] = [
 			'<!-- Replace this template with your bug report or feature request. -->',
 			'',
 			'## What were you doing?',
@@ -38,14 +37,38 @@
 			'',
 			'---',
 			'',
-			`- page: ${here}`,
-			`- build: \`${sha}\``,
-			`- user-agent: ${ua}`
-		].join('\n');
+			'## Context (auto-filled; please leave intact)',
+			'',
+			`- **page**: ${here}`,
+			`- **user-agent**: ${ua}`
+		];
+		if (envBuildInfo) {
+			lines.push(
+				'',
+				'### deploy build_info',
+				`- code_revision_short: \`${envBuildInfo.code_revision_short}\``,
+				`- code_revision: \`${envBuildInfo.code_revision}\``,
+				`- built_at: ${envBuildInfo.built_at}`
+			);
+		}
+		if (dataBuildInfo) {
+			lines.push(
+				'',
+				'### data build_info',
+				`- code_revision_short: \`${dataBuildInfo.code_revision_short}\``,
+				`- code_revision: \`${dataBuildInfo.code_revision}\``,
+				`- corpus_state_key: \`${dataBuildInfo.corpus_state_key}\``,
+				`- stage4_rollup_state_key: \`${dataBuildInfo.stage4_rollup_state_key}\``,
+				`- built_at: ${dataBuildInfo.built_at}`
+			);
+		}
+		if (!envBuildInfo && !dataBuildInfo) {
+			lines.push('', '### build_info', '- (unavailable — page loaded before manifest)');
+		}
 		const params = new URLSearchParams({
 			labels: 'feedback',
 			title: '[feedback] ',
-			body
+			body: lines.join('\n')
 		});
 		return `https://github.com/${FEEDBACK_REPO}/issues/new?${params.toString()}`;
 	})();
