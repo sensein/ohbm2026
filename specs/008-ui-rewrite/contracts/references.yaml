@@ -62,15 +62,15 @@ references:
     year: 2024
     url: https://docs.voyageai.com/docs/embeddings
   - section: stage3
-    title: 'NeuroScape — code repository'
-    authors: sensein
+    title: 'NeuroScape — code repository (ccnmaastricht / Cognitive Computational Neuroscience Maastricht)'
+    authors: ccnmaastricht
     year: 2024
-    url: https://github.com/sensein/neuroscape
+    url: https://github.com/ccnmaastricht/NeuroScape
   - section: stage3
-    title: 'NeuroScape: a domain-specific embedding for neuroscience abstracts'
-    authors: Vali Tehrani et al.
+    title: 'The evolving landscape of neuroscience (Aperture Neuro)'
+    authors: Cognitive Computational Neuroscience Maastricht et al.
     year: 2024
-    url: https://apertureneuro.org/article/124574-neuroscape-a-domain-specific-embedding-for-neuroscience-abstracts
+    url: https://apertureneuro.org/article/156380-the-evolving-landscape-of-neuroscience
 
   # ---- Stage 4 — analysis ----
   - section: stage4

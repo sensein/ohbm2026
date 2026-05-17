@@ -6,6 +6,8 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/deploy-ui.yml'
+      - 'specs/008-ui-rewrite/contracts/references.yaml'
+      - 'src/ohbm2026/ui_data/link_check.py'
   workflow_dispatch:
 
 permissions:

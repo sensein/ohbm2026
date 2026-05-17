@@ -6,6 +6,8 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/pr-preview.yml'
+      - 'specs/008-ui-rewrite/contracts/references.yaml'
+      - 'src/ohbm2026/ui_data/link_check.py'
   workflow_dispatch:
 
 permissions:
@@ -45,6 +47,20 @@ jobs:
       - name: Run JS unit tests (Vitest)
         working-directory: site
         run: pnpm test:unit --run
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install link-check deps
+        run: pip install requests pyyaml
+
+      - name: References link check (FR-017)
+        # Same check that gates the production deploy in deploy-ui.yml —
+        # mirrored here so PR previews surface a broken reference BEFORE
+        # the merge instead of failing at deploy time.
+        run: PYTHONPATH=src python -m ohbm2026.ui_data.link_check specs/008-ui-rewrite/contracts/references.yaml
 
       - name: Build site (PR preview)
         working-directory: site

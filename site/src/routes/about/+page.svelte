@@ -44,13 +44,13 @@
 			url: 'https://openalex.org/'
 		},
 		neuroscape_repo: {
-			title: 'NeuroScape — code repository',
-			url: 'https://github.com/sensein/neuroscape'
+			title: 'NeuroScape — code repository (ccnmaastricht)',
+			url: 'https://github.com/ccnmaastricht/NeuroScape'
 		},
 		neuroscape_paper: {
 			title:
-				'Vali Tehrani et al. (2024) — NeuroScape: a domain-specific embedding for neuroscience abstracts (Aperture Neuro)',
-			url: 'https://apertureneuro.org/article/124574-neuroscape-a-domain-specific-embedding-for-neuroscience-abstracts'
+				'The evolving landscape of neuroscience — Aperture Neuro',
+			url: 'https://apertureneuro.org/article/156380-the-evolving-landscape-of-neuroscience'
 		},
 		repo: {
 			title: 'OHBM 2026 Atlas — source repository',
