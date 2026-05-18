@@ -29,14 +29,31 @@ async function resultCount(page: import('@playwright/test').Page): Promise<numbe
 	return Number.parseInt(t, 10) || 0;
 }
 
+/**
+ * Type a query, then wait for `result-count` to settle on a stable
+ * numeric value. The lexical pipeline is synchronous in Svelte's
+ * reactivity, but the result-count can re-render once or twice before
+ * the final paint — so we poll until two consecutive reads agree
+ * instead of using a hard-coded `waitForTimeout` (brittle on slow CI
+ * runners and slower than necessary on fast ones).
+ */
 async function typeQueryAndSettle(page: import('@playwright/test').Page, q: string): Promise<number> {
 	const input = page.getByTestId('search-input');
+	const previous = await resultCount(page);
 	await input.fill(q);
-	// The lexical pipeline is synchronous; semantic is async but only
-	// changes the ✨ badge / rank, not the result-count. Wait briefly for
-	// the count to stabilise.
-	await page.waitForTimeout(250);
-	return resultCount(page);
+	let last = -1;
+	await expect
+		.poll(
+			async () => {
+				const cur = await resultCount(page);
+				if (cur === last) return 'stable';
+				last = cur;
+				return cur === previous ? 'unchanged' : 'changing';
+			},
+			{ timeout: 3_000, intervals: [50, 100, 150, 200] }
+		)
+		.toBe('stable');
+	return last;
 }
 
 test.describe('US3: lexical + semantic search', () => {
@@ -58,7 +75,10 @@ test.describe('US3: lexical + semantic search', () => {
 		await page.getByTestId('search-input').waitFor();
 		const baseline = await typeQueryAndSettle(page, 'memory');
 		await page.getByTestId('search-input').fill('');
-		await page.waitForTimeout(100);
+		// Wait for the empty-query state to settle — `result-count` returns
+		// to the full-corpus count, which we can detect by re-using the
+		// existing `result-count` testid.
+		await expect.poll(async () => resultCount(page), { timeout: 2_000 }).toBeGreaterThan(0);
 		const fuzzy = await typeQueryAndSettle(page, 'memry');
 		// Fuzzy must hit at least one abstract; we don't require strict
 		// equality with the exact-match set because typo proximity admits
@@ -72,7 +92,10 @@ test.describe('US3: lexical + semantic search', () => {
 		await page.getByTestId('search-input').waitFor();
 		const bareAnd = await typeQueryAndSettle(page, 'default mode network');
 		await page.getByTestId('search-input').fill('');
-		await page.waitForTimeout(100);
+		// Wait for the empty-query state to settle — `result-count` returns
+		// to the full-corpus count, which we can detect by re-using the
+		// existing `result-count` testid.
+		await expect.poll(async () => resultCount(page), { timeout: 2_000 }).toBeGreaterThan(0);
 		const phrased = await typeQueryAndSettle(page, '"default mode network"');
 		expect(phrased).toBeGreaterThan(0);
 		// Phrased ≤ bare-AND because the adjacency constraint can only remove
@@ -85,7 +108,10 @@ test.describe('US3: lexical + semantic search', () => {
 		await page.getByTestId('search-input').waitFor();
 		const withFmri = await typeQueryAndSettle(page, 'memory');
 		await page.getByTestId('search-input').fill('');
-		await page.waitForTimeout(100);
+		// Wait for the empty-query state to settle — `result-count` returns
+		// to the full-corpus count, which we can detect by re-using the
+		// existing `result-count` testid.
+		await expect.poll(async () => resultCount(page), { timeout: 2_000 }).toBeGreaterThan(0);
 		const withoutFmri = await typeQueryAndSettle(page, 'memory -fmri');
 		expect(withoutFmri).toBeGreaterThanOrEqual(0);
 		expect(withoutFmri).toBeLessThanOrEqual(withFmri);
@@ -96,10 +122,16 @@ test.describe('US3: lexical + semantic search', () => {
 		await page.getByTestId('search-input').waitFor();
 		const left = await typeQueryAndSettle(page, 'memory');
 		await page.getByTestId('search-input').fill('');
-		await page.waitForTimeout(100);
+		// Wait for the empty-query state to settle — `result-count` returns
+		// to the full-corpus count, which we can detect by re-using the
+		// existing `result-count` testid.
+		await expect.poll(async () => resultCount(page), { timeout: 2_000 }).toBeGreaterThan(0);
 		const right = await typeQueryAndSettle(page, 'aging');
 		await page.getByTestId('search-input').fill('');
-		await page.waitForTimeout(100);
+		// Wait for the empty-query state to settle — `result-count` returns
+		// to the full-corpus count, which we can detect by re-using the
+		// existing `result-count` testid.
+		await expect.poll(async () => resultCount(page), { timeout: 2_000 }).toBeGreaterThan(0);
 		const ored = await typeQueryAndSettle(page, 'memory OR aging');
 		// Union must include both contributors (≥ max(left, right)).
 		expect(ored).toBeGreaterThanOrEqual(Math.max(left, right));
@@ -131,7 +163,23 @@ test.describe('US3: lexical + semantic search', () => {
 			)
 			.catch(() => null);
 		await typeQueryAndSettle(page, '"critical brain hypothesis"');
-		await page.waitForTimeout(800); // give semantic neighbour pass time to settle
+		// Wait for the semantic worker's neighbour pass to settle. We can't
+		// rely on a "semantic ready" toast — the worker has no global signal
+		// — so we wait for the result list to stabilise: read the current
+		// count, then assert it hasn't changed across two consecutive ticks.
+		// Bounded at 2 s so the test fails fast if the worker hangs.
+		let priorCount = -1;
+		await expect
+			.poll(
+				async () => {
+					const cur = await page.getByTestId('result-card').count();
+					if (cur === priorCount) return 'stable';
+					priorCount = cur;
+					return 'changing';
+				},
+				{ timeout: 2_000, intervals: [100, 200, 300] }
+			)
+			.toBe('stable');
 		// Pull every visible card and its ✨ badge state. A card with the
 		// badge MUST be a semantic-only hit, not a lexical hit. The opposite
 		// direction (every semantic neighbour appears) isn't asserted —

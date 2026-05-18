@@ -26,30 +26,28 @@ test.describe('US5: saved-list cart + email export', () => {
 		expect(posterId).toBeTruthy();
 		// Click the card-level add button.
 		await card.getByTestId('card-cart-add').click();
-		await page.waitForTimeout(150);
-		// Open the cart drawer.
+		// Open the cart drawer and let Playwright auto-wait for the first
+		// item — web-first assertions retry until the UI converges, no
+		// hand-rolled `waitForTimeout` needed.
 		await page.getByTestId('toggle-cart').click();
 		await expect(page.getByTestId('cart-drawer')).toBeVisible();
-		const items = page.getByTestId('cart-item');
-		expect(await items.count()).toBeGreaterThanOrEqual(1);
+		await expect(page.getByTestId('cart-item').first()).toBeVisible();
 		// Reload — the cart store hydrates from localStorage on mount.
 		await page.reload();
 		await page.getByTestId('toggle-cart').click();
 		await expect(page.getByTestId('cart-drawer')).toBeVisible();
-		expect(await page.getByTestId('cart-item').count()).toBeGreaterThanOrEqual(1);
+		await expect(page.getByTestId('cart-item').first()).toBeVisible();
 	});
 
 	test('clear empties the cart', async ({ page }) => {
 		await page.goto('/');
 		await page.getByTestId('search-input').waitFor();
 		await page.getByTestId('result-card').first().getByTestId('card-cart-add').click();
-		await page.waitForTimeout(150);
 		await page.getByTestId('toggle-cart').click();
 		await expect(page.getByTestId('cart-drawer')).toBeVisible();
-		expect(await page.getByTestId('cart-item').count()).toBeGreaterThanOrEqual(1);
+		await expect(page.getByTestId('cart-item').first()).toBeVisible();
 		await page.getByTestId('cart-clear').click();
-		await page.waitForTimeout(100);
-		expect(await page.getByTestId('cart-item').count()).toBe(0);
+		await expect(page.getByTestId('cart-item')).toHaveCount(0);
 	});
 
 	test('email-my-list opens a mailto: URL with the poster_ids', async ({ page }) => {
@@ -59,11 +57,12 @@ test.describe('US5: saved-list cart + email export', () => {
 		await card.waitFor({ timeout: 10_000 });
 		const posterId = (await card.getAttribute('data-poster-id')) ?? '';
 		await card.getByTestId('card-cart-add').click();
-		await page.waitForTimeout(150);
 		await page.getByTestId('toggle-cart').click();
-		// Intercept the navigation to `mailto:` rather than actually opening
-		// the user's mail client. The anchor's `href` is the source of truth
-		// for the URL; read it directly.
+		// Wait for at least one cart item to render — the email anchor's
+		// href is recomputed reactively from the cart contents.
+		await expect(page.getByTestId('cart-item').first()).toBeVisible();
+		// We never actually NAVIGATE the mailto: link (that'd open the user's
+		// mail client). The anchor's `href` is the source of truth — read it.
 		const emailLink = page.getByTestId('cart-email');
 		const href = await emailLink.getAttribute('href');
 		expect(href).toMatch(/^mailto:/);

@@ -45,6 +45,7 @@ import random
 import re
 import sys
 import unicodedata
+import zlib
 from collections import defaultdict
 from pathlib import Path
 
@@ -187,7 +188,10 @@ def single_typo_variants(word: str) -> list[str]:
     """
     if len(word) < 4 or not word.isalpha():
         return []
-    rng = random.Random(hash(word) & 0xFFFFFFFF)
+    # `hash(...)` is randomised between Python processes via `PYTHONHASHSEED`,
+    # which would break the docstring's determinism promise. `adler32` is a
+    # 32-bit stable hash that's plenty for seeding a per-word PRNG.
+    rng = random.Random(zlib.adler32(word.encode("utf-8")))
     raw: list[str] = []
     # Delete a non-edge character.
     i = rng.randrange(1, len(word) - 1)

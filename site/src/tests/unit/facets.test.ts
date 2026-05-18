@@ -176,8 +176,11 @@ describe('recomputeFacets', () => {
 		const empty = clearAllFilters();
 		expect(empty.size).toBe(0);
 		// recomputeFacets with the empty map === recomputeFacets with no filters.
+		// Vitest's `toEqual` walks Map<K,V> natively and gives a structural
+		// diff on failure — much more useful than the prior `JSON.stringify`
+		// stringification (which also fails on undefined/NaN values).
 		const a = recomputeFacets(fixture, empty, null);
 		const b = recomputeFacets(fixture, NO_FILTERS, null);
-		expect(JSON.stringify([...a])).toBe(JSON.stringify([...b]));
+		expect(a).toEqual(b);
 	});
 });
