@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<!--
+  Stage 9 (spec 009-conference-subpath FR-105 + FR-107): smart root 404.
+
+  gh-pages serves a SINGLE `404.html` from the publishing-source root
+  for every path that doesn't resolve to a static file. This file
+  therefore handles two distinct cases:
+
+  1. **Direct-load of a deep link inside the conference subpath**, e.g.
+     `<cname>/ohbm2026/abstract/M-AM-101/`. The SvelteKit static
+     adapter cannot pre-render dynamic `[id]` routes, so the request
+     404s and lands here. We bounce to the SvelteKit shell at
+     `<base>/?spa=<encoded-original-path>` — the existing Stage-6
+     handler in `+layout.svelte`'s `onMount` reads the `?spa=` query,
+     decodes the path, and calls `goto()` to render the right route.
+
+  2. **Legacy or genuinely-unknown root-level path**, e.g.
+     `<cname>/abstract/M-AM-101` (no `/ohbm2026/` prefix) or
+     `<cname>/something-random`. Per FR-106 we accept losing the path
+     component and bounce to `<cname>/ohbm2026/`.
+
+  PR previews introduce a `/pr-<N>/` prefix that has to be honoured
+  in both branches; we detect it from the request URL at runtime so
+  the SAME file works at the gh-pages root AND at every per-PR root.
+
+  Relative paths like `./ohbm2026/` are NOT safe here — the browser
+  resolves them against the REQUEST URL, not the file's gh-pages
+  location, so a request to `<cname>/some/deep/path/` would resolve
+  `./ohbm2026/` to `<cname>/some/deep/path/ohbm2026/`. Absolute paths
+  composed from the detected prefix are correct in every case.
+
+  No SvelteKit boot here — that would require duplicating the hash-
+  stable module-preload tags from `site/build/404.html`, which change
+  on every build. The `?spa=` handoff is cheap, clean, and reuses the
+  layout-side handler that's already covered by US2 tests.
+-->
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Abstract Atlas — locating your page</title>
+	<meta name="robots" content="noindex">
+	<script>
+		(function () {
+			var p = window.location.pathname;
+			var search = window.location.search;
+			var hash = window.location.hash;
+			// Detect PR-preview prefix so absolute redirects compose correctly.
+			var prMatch = p.match(/^(\/pr-\d+)\//);
+			var prefix = prMatch ? prMatch[1] : '';
+			// Match conference subpath under whichever prefix is in play.
+			var m = p.match(/^(\/pr-\d+)?\/ohbm2026\//);
+			if (m) {
+				// Inside the conference — hand the deep-link to the SvelteKit
+				// shell via the existing `?spa=` query handoff (see
+				// `site/src/routes/+layout.svelte` `onMount`).
+				var base = (m[1] || '') + '/ohbm2026';
+				var stash = p + search + hash;
+				try { sessionStorage.setItem('ohbm2026.spa.redirect', stash); } catch (e) {}
+				window.location.replace(base + '/?spa=' + encodeURIComponent(stash));
+				return;
+			}
+			// Outside the conference subpath — bounce to the conference home.
+			// The original path component is lost (acceptable per FR-106).
+			window.location.replace(prefix + '/ohbm2026/' + search + hash);
+		})();
+	</script>
+	<!-- No-JS fallback: a 2-second meta-refresh + a manual link to the
+	     conference home. Deep-link recovery requires JS and is best-effort. -->
+	<meta http-equiv="refresh" content="2; url=/ohbm2026/">
+</head>
+<body>
+	<noscript>
+		<p>Page not found. <a href="/ohbm2026/">Open the OHBM 2026 Atlas</a>.</p>
+	</noscript>
+</body>
+</html>
