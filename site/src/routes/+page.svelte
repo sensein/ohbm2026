@@ -15,7 +15,7 @@
 		type TopicShard
 	} from '$lib/shards';
 	import { activeFilters, authorChips, cartOnly, focusedAbstract, lassoSelection, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
-	import { lexicalSearch } from '$lib/filter';
+	import { lexicalSearch, parseQuery, queryForSemantic } from '$lib/filter';
 	import { filterByFacets, recomputeFacets, type FacetCellContext } from '$lib/facets';
 	import SearchBar from '$lib/components/SearchBar.svelte';
 	import ResultList from '$lib/components/ResultList.svelte';
@@ -122,16 +122,28 @@
 	// Re-run semantic search on query change, with serial-number guard so
 	// out-of-order completions don't overwrite a newer result. Skipped when
 	// the user has disabled semantic via the toggle.
+	//
+	// When the query carries operators (quotes / `-` / `OR`), the semantic
+	// embedder receives the operators-stripped form (positive content words
+	// only) so the vector reflects the conceptual intent. Negation is still
+	// honoured by subtracting `negationBlocked` from the semantic set in
+	// `mergeSearch` — semantic has no native NOT.
 	$: void (async (q: string, on: boolean) => {
 		const trimmed = q.trim();
 		if (!on || !trimmed) {
 			semanticScores = null;
 			return;
 		}
+		const parsed = parseQuery(trimmed);
+		const forSemantic = parsed.hasOperators ? queryForSemantic(parsed) : trimmed;
+		if (!forSemantic.trim()) {
+			semanticScores = null;
+			return;
+		}
 		const my = ++semanticQuerySerial;
 		try {
 			const mod = await import('$lib/search/semantic');
-			const hits = await mod.semanticSearch(trimmed, 50);
+			const hits = await mod.semanticSearch(forSemantic, 50);
 			if (my !== semanticQuerySerial) return;
 			// Translate worker indices (positional in abstracts.json) → abstract_id
 			// AND preserve the per-hit cosine similarity so the card can show it.
@@ -149,10 +161,11 @@
 	$: lexicalResult = lexicalSearch(abstracts, authorsById, $searchQuery);
 	$: lexicalIds = lexicalResult?.ids ?? null;
 	$: lexicalExactness = lexicalResult?.exactness ?? null;
+	$: lexicalNegationBlocked = lexicalResult?.negationBlocked ?? null;
 	$: semanticIdsForMerge = semanticScores
 		? new Set<number>(semanticScores.keys())
 		: null;
-	$: searchIds = mergeSearch(lexicalIds, semanticIdsForMerge, $searchQuery);
+	$: searchIds = mergeSearch(lexicalIds, semanticIdsForMerge, $searchQuery, lexicalNegationBlocked);
 
 	// Load the current (model, input) cell + its community topics so the
 	// Cluster facet can offer per-cell options. The same data feeds the
@@ -269,14 +282,21 @@
 	function mergeSearch(
 		lex: Set<number> | null,
 		sem: Set<number> | null,
-		query: string
+		query: string,
+		negationBlocked: Set<number> | null
 	): Set<number> | null {
 		if (!query.trim()) return null;
 		if (lex === null && sem === null) return null;
 		if (lex === null) return sem;
 		if (sem === null) return lex;
 		const union = new Set<number>(lex);
-		for (const id of sem) union.add(id);
+		// Honour `-clause` negations across semantic candidates too. Semantic
+		// has no native NOT, so the merger subtracts any abstract that hit a
+		// negated clause before unioning it in.
+		for (const id of sem) {
+			if (negationBlocked && negationBlocked.has(id)) continue;
+			union.add(id);
+		}
 		return union;
 	}
 	$: focused = $focusedAbstract ? (abstractsByPosterId.get($focusedAbstract) ?? null) : null;
@@ -447,6 +467,7 @@
 					{authorsById}
 					{filteredIds}
 					{semanticScores}
+					lexicalIds={lexicalIds}
 					lexicalExactness={lexicalExactness}
 					{defaultRank}
 				/>

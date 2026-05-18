@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { damerauLevenshtein, lexicalSearch, tokenizeForIndex } from '$lib/filter';
+import {
+	damerauLevenshtein,
+	lexicalSearch,
+	parseQuery,
+	queryForSemantic,
+	tokenizeForIndex
+} from '$lib/filter';
 import type { AbstractRecord, AuthorRecord } from '$lib/shards';
 
 describe('damerauLevenshtein', () => {
@@ -147,5 +153,137 @@ describe('lexicalSearch (FR-008 typo tolerance)', () => {
 		// Only the abstract with the literal word should have exactness ≥ 1.
 		const counts = [...result!.exactness.values()];
 		expect(Math.max(0, ...counts)).toBeGreaterThanOrEqual(1);
+	});
+});
+
+describe('parseQuery (operator grammar)', () => {
+	it('treats a bare query as a single AND-group of words with no operators flag', () => {
+		const p = parseQuery('memory aging');
+		expect(p.hasOperators).toBe(false);
+		expect(p.groups).toHaveLength(1);
+		expect(p.groups[0].clauses).toEqual([
+			{ kind: 'word', word: 'memory', negate: false },
+			{ kind: 'word', word: 'aging', negate: false }
+		]);
+	});
+
+	it('recognises a quoted phrase as one phrase clause', () => {
+		const p = parseQuery('"working memory"');
+		expect(p.hasOperators).toBe(true);
+		expect(p.groups[0].clauses).toEqual([
+			{ kind: 'phrase', words: ['working', 'memory'], negate: false }
+		]);
+	});
+
+	it('drops a leading `-` to mark negation', () => {
+		const p = parseQuery('brain -fmri');
+		expect(p.hasOperators).toBe(true);
+		expect(p.groups[0].clauses).toEqual([
+			{ kind: 'word', word: 'brain', negate: false },
+			{ kind: 'word', word: 'fmri', negate: true }
+		]);
+	});
+
+	it('splits at uppercase `OR` into separate AND-groups', () => {
+		// Use ≥ 2-char tokens — the tokenizer drops 1-char tokens, which would
+		// collapse this test into an empty groups list.
+		const p = parseQuery('aa bb OR cc dd');
+		expect(p.hasOperators).toBe(true);
+		expect(p.groups).toHaveLength(2);
+		expect(p.groups[0].clauses.map((c) => c.kind === 'word' && c.word)).toEqual(['aa', 'bb']);
+		expect(p.groups[1].clauses.map((c) => c.kind === 'word' && c.word)).toEqual(['cc', 'dd']);
+	});
+
+	it('lowercase `or` is just a word, not an operator', () => {
+		const p = parseQuery('memory or aging');
+		expect(p.hasOperators).toBe(false);
+		expect(p.groups).toHaveLength(1);
+		expect(p.groups[0].clauses.map((c) => c.kind === 'word' && c.word)).toEqual([
+			'memory',
+			'or',
+			'aging'
+		]);
+	});
+
+	it('tolerates an unclosed quote by falling back to plain words', () => {
+		const p = parseQuery('"unclosed phrase');
+		// We don't promise specific clause shape here — only that parse doesn't
+		// throw and produces SOMETHING parseable.
+		expect(p.groups.length).toBeGreaterThanOrEqual(1);
+	});
+
+	it('coalesces leading / trailing / duplicate OR markers', () => {
+		const p = parseQuery('OR memory OR OR aging OR');
+		expect(p.groups).toHaveLength(2);
+		expect(p.groups[0].clauses.map((c) => c.kind === 'word' && c.word)).toEqual(['memory']);
+		expect(p.groups[1].clauses.map((c) => c.kind === 'word' && c.word)).toEqual(['aging']);
+	});
+});
+
+describe('queryForSemantic (operator-stripped form)', () => {
+	it('is byte-identical for a bare query and the same query quoted as a phrase', () => {
+		// This is the user-visible promise: the semantic embedder sees the
+		// same input whether or not the user added quotes around the phrase.
+		// The lexical contribution differs (adjacency required), but the
+		// semantic neighbour pass behaves identically.
+		const a = queryForSemantic(parseQuery('critical brain hypotheses'));
+		const b = queryForSemantic(parseQuery('"critical brain hypotheses"'));
+		expect(a).toBe(b);
+		expect(a).toBe('critical brain hypotheses');
+	});
+
+	it('drops negated clauses', () => {
+		const out = queryForSemantic(parseQuery('brain -fmri -"task activation"'));
+		expect(out).toBe('brain');
+	});
+
+	it('joins phrase words back with spaces and concatenates across OR-groups', () => {
+		const out = queryForSemantic(parseQuery('"resting state" OR "task activation"'));
+		expect(out).toBe('resting state task activation');
+	});
+});
+
+describe('lexicalSearch — phrase adjacency', () => {
+	it('matches a quoted phrase whose words ARE adjacent in the corpus', () => {
+		const r = lexicalSearch(abstracts, authorsById, '"memory fmri"');
+		// Abstract 1001 title is "Memory fMRI in aging" → "memory" + "fmri" are
+		// adjacent at positions 0,1 in the stream.
+		expect(r?.ids).toContain(1001);
+	});
+
+	it('rejects a quoted phrase whose words are present but NOT adjacent', () => {
+		// "memory" and "aging" both appear in 1001's title but with "fmri in"
+		// between them, so the phrase must fail.
+		const r = lexicalSearch(abstracts, authorsById, '"memory aging"');
+		expect(r?.ids.has(1001)).toBe(false);
+	});
+});
+
+describe('lexicalSearch — negation', () => {
+	it('subtracts a -word clause from the positive set', () => {
+		// Both abstracts mention "fmri" / "Functional MRI" in their facets,
+		// so `aging -fmri` should drop 1001.
+		const r = lexicalSearch(abstracts, authorsById, 'aging -fmri');
+		expect(r?.ids.has(1001)).toBe(false);
+		// And the abstract should appear in negationBlocked so the merger can
+		// honour the NOT across semantic candidates too.
+		expect(r?.negationBlocked.has(1001)).toBe(true);
+	});
+
+	it('handles a query consisting only of negations as "everything except"', () => {
+		const r = lexicalSearch(abstracts, authorsById, '-fmri');
+		// Both seed abstracts mention fmri via the Functional MRI checklist,
+		// so neither should remain.
+		expect(r?.ids.has(1001)).toBe(false);
+		expect(r?.ids.has(1003)).toBe(false);
+	});
+});
+
+describe('lexicalSearch — OR alternation', () => {
+	it('unions abstracts that match either AND-group', () => {
+		const r = lexicalSearch(abstracts, authorsById, 'aging OR "default mode"');
+		// 1001 matches "aging"; 1003 matches the "default mode" phrase
+		// (adjacent in the title "Default mode network in fMRI").
+		expect(r?.ids).toEqual(new Set([1001, 1003]));
 	});
 });
