@@ -31,10 +31,10 @@ description: "Tasks: 010 — Data export redesign (LinkML-tight + compact + cros
 
 **Purpose**: Make the bench runnable. Install candidate-format deps; record the Stage-6 baseline numbers; gitignore the bench workspace.
 
-- [ ] T001 Install candidate-format Python dependencies into the venv. From repo root: `UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python pyarrow duckdb apache-arrow`. Pin versions in a follow-up commit after the first successful build of all six candidates so re-runs are reproducible.
-- [ ] T002 [P] Install candidate-format JS decoder dependencies. From `site/`: `pnpm add --save-dev hyparquet @sqlite.org/sqlite-wasm @duckdb/duckdb-wasm apache-arrow`. The losing candidates' deps are pruned in T046.
-- [ ] T003 [P] Gitignore the bench workspace. Append `bench/` to `.gitignore` at repo root so per-candidate generated containers (10–30 MB each × 6) never get tracked.
-- [ ] T004 Record the Stage-6 baseline. Build the current production export locally (`scripts/build_ui_data.py`), then run the soon-to-exist measurement scripts against `main` (size, TTI, session bytes, decoder bundle). Write the four baseline numbers into `specs/010-export-redesign/research.md` § B1 "Baseline references" rows so the bench rows have something to compare against. Until T030–T033 land, capture the numbers manually (`du -b`, manual Playwright trace, browser DevTools network panel).
+- [X] T001 Installed candidate-format Python dependencies. From repo root: `UV_CACHE_DIR=.uv-cache uv pip install --python .venv/bin/python pyarrow duckdb`. **Correction from the original task description**: `apache-arrow` is the npm package name; on Python the equivalent (Parquet + Arrow IPC support) ships in `pyarrow`. Two packages, not three. Installed versions: `pyarrow==24.0.0`, `duckdb==1.5.2`. Pin in a follow-up after the first successful 6-candidate build.
+- [~] T002 [P] DEFERRED to Phase 3. Installing candidate-format JS decoder deps now (`hyparquet @sqlite.org/sqlite-wasm @duckdb/duckdb-wasm apache-arrow`) burns 10+ MB of node_modules churn that mostly gets pruned in T053. Moved to a Phase-3 prerequisite so we install only what each candidate's decoder needs as we touch it.
+- [X] T003 [P] Gitignored the bench workspace at repo root (`bench/`).
+- [X] T004 Recorded the Stage-6 baseline **size** numbers (A3.1 + corpus breakdown) in `research.md` § B1. TTI (A3.2), session bytes (A3.3), decoder bundle (A3.4) baselines deferred until T033–T035 (their measurement scripts) land — captured at that time. Key finding: `enrichment.json` (35.5 %) + `abstracts.json` (31.8 %) = 67.3 % of uncompressed corpus; any shrink strategy that doesn't touch those two is bounded at ≤ 33 % improvement.
 
 ---
 

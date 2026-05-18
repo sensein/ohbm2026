@@ -125,11 +125,25 @@ This fallback is named here so the architect-agent review knows the floor exists
 | 5 | single-file DuckDB | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` |
 | 6 | Arrow IPC | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` | `<RESULTS LANDS HERE>` |
 
-Baseline references (Stage 6):
-- A3.1 baseline: 26 MB (gzipped tarball).
-- A3.2 baseline: `<RESULTS LANDS HERE>` (measure once, against `main`).
-- A3.3 baseline: ≈ 26 MB (the whole tarball fetched eagerly).
-- A3.4 baseline: 0 (no decoder bundle today beyond browser-native gzip).
+Baseline references (Stage 6) — captured 2026-05-18 against `main`:
+- **A3.1 baseline (gzipped tarball size)**: **26 914 297 bytes** (= 25.67 MiB / 26.91 MB) — `site/publish/data-package.tar.gz` after a fresh `pnpm preview:gh-pages` rebuild.
+- **A3.2 baseline (cold-start TTI on 1 Mbps)**: `<RESULTS LANDS HERE>` — captured when the bench harness lands (T033).
+- **A3.3 baseline (session wire bytes)**: ≈ 27 MB (the whole tarball + decoder bundle ~0); full measurement when T034 lands.
+- **A3.4 baseline (decoder bundle delta)**: 0 — Stage 6 uses only browser-native `DecompressionStream('gzip')` + a ~50-line tar parser inline in the worker.
+
+Per-shard byte breakdown (uncompressed JSON, 100 908 678 bytes / 96.23 MiB total):
+
+| Shard | Size (bytes) | % of corpus |
+|---|---|---|
+| `enrichment.json` | 35 824 451 | 35.5 % |
+| `abstracts.json` | 32 047 513 | 31.8 % |
+| `authors.json` | 4 312 311 | 4.3 % |
+| `search/minilm_vectors.bin` (binary sidecar) | 1 245 312 | 1.2 % |
+| neighbors/*.json (15 files combined) | 14 992 174 | 14.9 % |
+| cells/*.json (15 files combined) | 9 942 718 | 9.9 % |
+| topics/*.json + manifest.json | ~2 500 000 | 2.5 % |
+
+Hotspot confirmation: `enrichment.json` + `abstracts.json` = **67.3 %** of the uncompressed bytes. Any shrink strategy that doesn't touch those two is bounded at ≤ 33 % improvement.
 
 ### B2. Architect-agent review
 

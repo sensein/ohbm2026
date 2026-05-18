@@ -45,3 +45,4 @@ data/outputs/analysis/
 data/cache/analysis/
 data/provenance/analysis/
 data/inputs/neuroscape/
+bench/
