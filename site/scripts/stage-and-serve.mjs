@@ -43,6 +43,10 @@ const MIME = {
 	'.ico': 'image/x-icon',
 	'.onnx': 'application/octet-stream',
 	'.wasm': 'application/wasm',
+	'.woff': 'font/woff',
+	'.woff2': 'font/woff2',
+	'.ttf': 'font/ttf',
+	'.otf': 'font/otf',
 	'.txt': 'text/plain; charset=utf-8',
 	'.map': 'application/json'
 };
