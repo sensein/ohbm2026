@@ -1,71 +1,76 @@
-<!doctype html>
+<!DOCTYPE html>
+<!--
+  Stage 9 (spec 009-conference-subpath FR-105 + FR-107): smart root 404.
+
+  gh-pages serves a SINGLE `404.html` from the publishing-source root
+  for every path that doesn't resolve to a static file. This file
+  therefore handles two distinct cases:
+
+  1. **Direct-load of a deep link inside the conference subpath**, e.g.
+     `<cname>/ohbm2026/abstract/M-AM-101/`. The SvelteKit static
+     adapter cannot pre-render dynamic `[id]` routes, so the request
+     404s and lands here. We bounce to the SvelteKit shell at
+     `<base>/?spa=<encoded-original-path>` — the existing Stage-6
+     handler in `+layout.svelte`'s `onMount` reads the `?spa=` query,
+     decodes the path, and calls `goto()` to render the right route.
+
+  2. **Legacy or genuinely-unknown root-level path**, e.g.
+     `<cname>/abstract/M-AM-101` (no `/ohbm2026/` prefix) or
+     `<cname>/something-random`. Per FR-106 we accept losing the path
+     component and bounce to `<cname>/ohbm2026/`.
+
+  PR previews introduce a `/pr-<N>/` prefix that has to be honoured
+  in both branches; we detect it from the request URL at runtime so
+  the SAME file works at the gh-pages root AND at every per-PR root.
+
+  Relative paths like `./ohbm2026/` are NOT safe here — the browser
+  resolves them against the REQUEST URL, not the file's gh-pages
+  location, so a request to `<cname>/some/deep/path/` would resolve
+  `./ohbm2026/` to `<cname>/some/deep/path/ohbm2026/`. Absolute paths
+  composed from the detected prefix are correct in every case.
+
+  No SvelteKit boot here — that would require duplicating the hash-
+  stable module-preload tags from `site/build/404.html`, which change
+  on every build. The `?spa=` handoff is cheap, clean, and reuses the
+  layout-side handler that's already covered by US2 tests.
+-->
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<script>
-			// Theme boot — runs before any rendering to avoid FOUC.
-			// Resolves `light` | `dark` | `auto` from localStorage and sets
-			// data-theme on <html> + the CSS color-scheme so native form
-			// controls + scrollbars adopt the right palette immediately.
-			(function () {
-				try {
-					var raw = localStorage.getItem('ohbm2026.ui.theme.v1');
-					var choice = raw === 'light' || raw === 'dark' || raw === 'auto' ? raw : 'auto';
-					var effective =
-						choice === 'auto'
-							? window.matchMedia('(prefers-color-scheme: dark)').matches
-								? 'dark'
-								: 'light'
-							: choice;
-					document.documentElement.setAttribute('data-theme', effective);
-					document.documentElement.style.colorScheme = effective;
-				} catch (e) {
-					// localStorage might be unavailable; default to system pref.
-					document.documentElement.setAttribute(
-						'data-theme',
-						window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-					);
-				}
-			})();
-		</script>
-		<link href="/_app/immutable/entry/start.DHPeL41s.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CsestTGo.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DlEoMwxz.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BD5V72XK.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.BjKPXZnk.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/Dp1pzeXC.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BOd_vWlg.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/-RPN68X2.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/DD9Tfm-O.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/39XoNEEm.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/0.Cbnrcg8Q.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CmM9YoqQ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/CB6NRGFf.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/ZXmX9AWc.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BXealSUZ.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BCPgZaCk.js" rel="modulepreload">
-		
-		<link href="/_app/immutable/assets/0.BfaFvlsc.css" rel="stylesheet">
-	</head>
-	<body data-sveltekit-preload-data="hover">
-		<div style="display: contents">
-			<script>
-				{
-					__sveltekit_ht5tsg = {
-						base: ""
-					};
-
-					const element = document.currentScript.parentElement;
-
-					Promise.all([
-						import("/_app/immutable/entry/start.DHPeL41s.js"),
-						import("/_app/immutable/entry/app.BjKPXZnk.js")
-					]).then(([kit, app]) => {
-						kit.start(app, element);
-					});
-				}
-			</script>
-		</div>
-	</body>
+<head>
+	<meta charset="utf-8">
+	<title>Abstract Atlas — locating your page</title>
+	<meta name="robots" content="noindex">
+	<script>
+		(function () {
+			var p = window.location.pathname;
+			var search = window.location.search;
+			var hash = window.location.hash;
+			// Detect PR-preview prefix so absolute redirects compose correctly.
+			var prMatch = p.match(/^(\/pr-\d+)\//);
+			var prefix = prMatch ? prMatch[1] : '';
+			// Match conference subpath under whichever prefix is in play.
+			var m = p.match(/^(\/pr-\d+)?\/ohbm2026\//);
+			if (m) {
+				// Inside the conference — hand the deep-link to the SvelteKit
+				// shell via the existing `?spa=` query handoff (see
+				// `site/src/routes/+layout.svelte` `onMount`).
+				var base = (m[1] || '') + '/ohbm2026';
+				var stash = p + search + hash;
+				try { sessionStorage.setItem('ohbm2026.spa.redirect', stash); } catch (e) {}
+				window.location.replace(base + '/?spa=' + encodeURIComponent(stash));
+				return;
+			}
+			// Outside the conference subpath — bounce to the conference home.
+			// The original path component is lost (acceptable per FR-106).
+			window.location.replace(prefix + '/ohbm2026/' + search + hash);
+		})();
+	</script>
+	<!-- No-JS fallback: a 2-second meta-refresh + a manual link to the
+	     conference home. Deep-link recovery requires JS and is best-effort. -->
+	<meta http-equiv="refresh" content="2; url=/ohbm2026/">
+</head>
+<body>
+	<noscript>
+		<p>Page not found. <a href="/ohbm2026/">Open the OHBM 2026 Atlas</a>.</p>
+	</noscript>
+</body>
 </html>

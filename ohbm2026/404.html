@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<script>
+			// Theme boot — runs before any rendering to avoid FOUC.
+			// Resolves `light` | `dark` | `auto` from localStorage and sets
+			// data-theme on <html> + the CSS color-scheme so native form
+			// controls + scrollbars adopt the right palette immediately.
+			(function () {
+				try {
+					var raw = localStorage.getItem('ohbm2026.ui.theme.v1');
+					var choice = raw === 'light' || raw === 'dark' || raw === 'auto' ? raw : 'auto';
+					var effective =
+						choice === 'auto'
+							? window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+							: choice;
+					document.documentElement.setAttribute('data-theme', effective);
+					document.documentElement.style.colorScheme = effective;
+				} catch (e) {
+					// localStorage might be unavailable; default to system pref.
+					document.documentElement.setAttribute(
+						'data-theme',
+						window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+					);
+				}
+			})();
+		</script>
+		<link href="/ohbm2026/_app/immutable/entry/start.D0y3tM5d.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/CUikGV4J.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/DlEoMwxz.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/Ct2rOM2T.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/entry/app.Cv5aFfuj.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/Dp1pzeXC.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/BOd_vWlg.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/-RPN68X2.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/DD9Tfm-O.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/39XoNEEm.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/nodes/0.DdzkoKnM.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/CmM9YoqQ.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/CB6NRGFf.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/g5essw46.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/BoptBveU.js" rel="modulepreload">
+		<link href="/ohbm2026/_app/immutable/chunks/BCPgZaCk.js" rel="modulepreload">
+		
+		<link href="/ohbm2026/_app/immutable/assets/0.BfaFvlsc.css" rel="stylesheet">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_1naq0d6 = {
+						base: "/ohbm2026",
+						assets: "/ohbm2026"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/ohbm2026/_app/immutable/entry/start.D0y3tM5d.js"),
+						import("/ohbm2026/_app/immutable/entry/app.Cv5aFfuj.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>
