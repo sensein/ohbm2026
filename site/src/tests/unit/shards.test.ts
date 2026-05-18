@@ -11,7 +11,11 @@ import {
 	type Manifest,
 	type TopicShard
 } from '$lib/shards';
-import * as dataPackage from '$lib/data_package';
+// Stage-10 (T018): the tarball loader moved from `data_package.ts` into
+// the new `data_package/` namespace under `tarball.ts`. The spy targets
+// the binding that `shards.ts` actually imports from — the canonical
+// home — not the re-export from the namespace index.
+import * as dataPackage from '$lib/data_package/tarball';
 
 const BUILD_INFO = {
 	corpus_state_key: 'test12345678',

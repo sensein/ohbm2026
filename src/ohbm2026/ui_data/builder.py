@@ -84,11 +84,17 @@ def build_ui_data_package(
     output_dir: Path,
     build_info: Mapping[str, str] | None = None,
     minilm_root: Path | None = None,
+    conference_id: str = "ohbm2026",
 ) -> int:
     """Run the full Stage 6 build.
 
     Returns 0 on success, non-zero on any invariant failure (per
     contracts/data-package.md exit codes).
+
+    Stage-10 (spec 010-export-redesign FR-206) stamps ``conference_id``
+    into the ``build_info`` envelope of every emitted shard so a future
+    multi-conference deploy can disambiguate records by conference
+    without consulting the URL path.
     """
 
     rollup_db = _resolve_rollup(
@@ -103,6 +109,10 @@ def build_ui_data_package(
             rollup_db=rollup_db,
             analysis_root=Path(analysis_root) if analysis_root else None,
         )
+    # Stage-10 stamp: every shard's `build_info` carries `conference_id`.
+    # Stage-6 emitters consume `build_info` as `dict(build_info)` so the
+    # new field propagates without per-emitter changes.
+    build_info = {**build_info, "conference_id": conference_id}
 
     # Build authors first to derive the raw→synthetic id remap; the abstracts
     # builder uses it so `author_ids` references match the authors shard

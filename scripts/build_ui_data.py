@@ -46,6 +46,40 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Deprecated single-bundle alias; use --minilm-root.")
     parser.add_argument("--references-yaml", dest="references_yaml", type=Path, default=None)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--output-format",
+        dest="output_format",
+        default="gzip-json-shards",
+        choices=[
+            "gzip-json-shards",
+            # The next 5 are wired up in Stage-10 Phase 3 (T019-T024).
+            # Listed here so the CLI surface is stable from Phase 2 onward
+            # and the bench harness can validate every choice it intends
+            # to invoke, even before the emitter exists.
+            "parquet-files",
+            "parquet-duckdb",
+            "sqlite-single",
+            "duckdb-single",
+            "arrow-ipc",
+        ],
+        help=(
+            "Container format for the emitted data package. "
+            "`gzip-json-shards` is Stage-6 behaviour (default); the other "
+            "5 are Stage-10 bench candidates whose emitters land in "
+            "`src/ohbm2026/ui_data/formats/`. Pre-Phase-3, only "
+            "`gzip-json-shards` is implemented."
+        ),
+    )
+    parser.add_argument(
+        "--conference",
+        dest="conference_id",
+        default="ohbm2026",
+        help=(
+            "Conference identifier baked into the manifest's `build_info` "
+            "envelope (FR-206). URL-safe, lower-snake-case. Default "
+            "`ohbm2026`."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -53,6 +87,16 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     from ohbm2026.ui_data.builder import Stage6BuildError, build_ui_data_package
 
+    if args.output_format != "gzip-json-shards":
+        print(
+            f"build_ui_data.py: --output-format={args.output_format!r} is reserved "
+            f"for Stage-10 Phase-3 (its emitter lives at "
+            f"src/ohbm2026/ui_data/formats/{args.output_format.replace('-', '_')}.py "
+            f"and is not yet implemented). Use --output-format=gzip-json-shards "
+            f"(the default) until the bench candidates land.",
+            file=sys.stderr,
+        )
+        return 3
     try:
         return build_ui_data_package(
             corpus_path=args.corpus,
@@ -65,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
             discover_rollup=args.discover_rollup,
             output_dir=args.output,
             minilm_root=args.minilm_root,
+            conference_id=args.conference_id,
         )
     except Stage6BuildError as exc:
         print(f"build_ui_data.py: {exc}", file=sys.stderr)
