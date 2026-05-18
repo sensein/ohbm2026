@@ -2,6 +2,10 @@ node_modules
 .svelte-kit
 build
 package
+# Stage 9 (spec 009-conference-subpath): gh-pages-shape preview harness
+# stages a `publish/` dir from `build/` + the redirect island + a data
+# tarball. Pure build artifact; never committed.
+publish
 .env
 .env.*
 !.env.example

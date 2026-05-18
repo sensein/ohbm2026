@@ -37,8 +37,12 @@
 	let activePathname: string | null = null;
 
 	function detectKind(pathname: string): TourKind {
-		// Route detection is base-path-agnostic: we only look at whether the
-		// URL contains `/abstract/<id>/` or `/about/`. Anything else is home.
+		// Route detection is base-path-agnostic — INTENTIONALLY: each regex
+		// uses substring + `$`-end-anchor so the match works for `/about/`,
+		// `/ohbm2026/about/`, AND `/pr-<N>/ohbm2026/about/` without code
+		// changes. Do NOT replace these with `pathname === '/about/'` or
+		// any anchored-at-start variant — that would break under the
+		// conference subpath (Stage 9, spec 009-conference-subpath FR-101).
 		if (/\/abstract\/[^/]+\/?$/.test(pathname)) return 'detail';
 		if (/\/about\/?$/.test(pathname)) return 'about';
 		return 'home';

@@ -26,7 +26,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     environment:
       name: pr-preview-${{ github.event.pull_request.number }}
-      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}/
+      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}/ohbm2026/
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,7 +65,7 @@ jobs:
       - name: Build site (PR preview)
         working-directory: site
         env:
-          BASE_PATH: /pr-${{ github.event.pull_request.number }}
+          BASE_PATH: /pr-${{ github.event.pull_request.number }}/ohbm2026
           VITE_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
           VITE_BUILD_AT: ${{ github.event.pull_request.head.repo.pushed_at }}
           VITE_DATA_PACKAGE_URL: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL }}
@@ -73,11 +73,21 @@ jobs:
           export VITE_BUILD_SHA_SHORT="${VITE_BUILD_SHA:0:7}"
           pnpm build
 
+      - name: Stage publish tree (conference subpath rework — FR-104)
+        # Same shape as production: the SvelteKit build moves under
+        # /ohbm2026/ inside the per-PR namespace, and the redirect island
+        # sits at the PR root so /pr-<N>/ bounces to /pr-<N>/ohbm2026/.
+        run: |
+          mkdir -p site/publish/ohbm2026
+          cp -r site/build/. site/publish/ohbm2026/
+          cp site/conference-root-redirect/index.html site/publish/index.html
+          cp site/conference-root-redirect/404.html site/publish/404.html
+
       - name: Publish to gh-pages /pr-${{ github.event.pull_request.number }}
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: site/build
+          publish_dir: site/publish
           publish_branch: gh-pages
           destination_dir: pr-${{ github.event.pull_request.number }}
           keep_files: false

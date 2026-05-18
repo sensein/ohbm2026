@@ -40,11 +40,15 @@ jobs:
 
       - name: Resolve target URL
         id: target
+        # Stage 9 (spec 009-conference-subpath FR-104): PR previews now
+        # host the conference site under /pr-<N>/ohbm2026/. The default
+        # target widens accordingly so the audit runs against the actual
+        # conference shell, not the root redirect island.
         run: |
           if [ -n "${{ inputs.target_url }}" ]; then
             echo "url=${{ inputs.target_url }}" >> "$GITHUB_OUTPUT"
           else
-            echo "url=https://abstractatlas.brainkb.org/pr-${{ github.event.pull_request.number }}/" >> "$GITHUB_OUTPUT"
+            echo "url=https://abstractatlas.brainkb.org/pr-${{ github.event.pull_request.number }}/ohbm2026/" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Wait for PR-preview deploy to settle

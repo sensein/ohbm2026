@@ -2,6 +2,7 @@
 	import { cartStore } from '$lib/stores/cart';
 	import { focusedAbstract } from '$lib/stores/selection';
 	import { buildMailtoLink, buildPlainTextList } from '$lib/cart_email';
+	import { base } from '$app/paths';
 	import type { AbstractRecord, AuthorRecord } from '$lib/shards';
 
 	export let open = false;
@@ -28,7 +29,13 @@
 		}
 		return m;
 	})();
-	$: siteUrl = typeof window !== 'undefined' ? window.location.origin + window.location.pathname.replace(/\/abstract\/.+$/, '') : '';
+	// `base` is the SvelteKit-resolved subpath ('/ohbm2026' in production,
+	// '/pr-<N>/ohbm2026' in PR previews, '' in pre-rework deploys). Composing
+	// from `origin + base` keeps the cart-email permalinks valid regardless
+	// of which route the cart was opened from — the previous approach
+	// (regex-stripping `/abstract/.+$`) was broken on the About page and
+	// would have been broken under the conference subpath as well.
+	$: siteUrl = typeof window !== 'undefined' ? window.location.origin + base : '';
 
 	function close() {
 		open = false;

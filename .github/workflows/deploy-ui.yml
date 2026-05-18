@@ -58,7 +58,7 @@ jobs:
       - name: Build site
         working-directory: site
         env:
-          BASE_PATH: ''
+          BASE_PATH: '/ohbm2026'
           VITE_BUILD_SHA: ${{ github.sha }}
           VITE_BUILD_AT: ${{ github.event.head_commit.timestamp }}
           VITE_DATA_PACKAGE_URL: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL }}
@@ -66,11 +66,21 @@ jobs:
           export VITE_BUILD_SHA_SHORT="${VITE_BUILD_SHA:0:7}"
           pnpm build
 
+      - name: Stage publish tree (conference subpath rework — FR-105)
+        # Move the SvelteKit build under /ohbm2026/ and place the static
+        # root-redirect island at the gh-pages root so `<cname>/` bounces
+        # to `<cname>/ohbm2026/`. See specs/009-conference-subpath/research.md.
+        run: |
+          mkdir -p site/publish/ohbm2026
+          cp -r site/build/. site/publish/ohbm2026/
+          cp site/conference-root-redirect/index.html site/publish/index.html
+          cp site/conference-root-redirect/404.html site/publish/404.html
+
       - name: Publish to gh-pages root
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: site/build
+          publish_dir: site/publish
           publish_branch: gh-pages
           destination_dir: .
           keep_files: true

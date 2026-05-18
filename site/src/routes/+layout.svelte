@@ -108,14 +108,17 @@
 			}
 			sessionStorage.removeItem(SPA_REDIRECT_KEY);
 			if (stash && stash.startsWith('/') && !stash.startsWith('//')) {
-				// IMPORTANT: SvelteKit's `goto('/foo')` treats a leading
-				// slash as ORIGIN-absolute (relative to document.baseURI),
-				// NOT base-aware. If we strip the base path before calling
-				// goto, the navigation lands outside the SPA's scope —
-				// in PR-preview mode that means escaping `/pr-N/` and
-				// loading the production root (the placeholder home page).
-				// So pass the FULL stash (with base) to goto: SvelteKit
-				// will recognise it as in-scope and route accordingly.
+				// INVARIANT: pass the FULL stash (with base) to `goto`, never
+				// the stripped form. SvelteKit's `goto('/foo')` treats a
+				// leading slash as ORIGIN-absolute (relative to
+				// document.baseURI), NOT base-aware. Stripping the base
+				// before calling `goto` would land the navigation outside
+				// the SPA's scope — in PR-preview mode that means escaping
+				// `/pr-N/ohbm2026/` and loading the gh-pages root redirect
+				// (which bounces back to `/ohbm2026/`, losing the deep-link
+				// target). The same trap applies in production for any URL
+				// under `/ohbm2026/` once spec 009-conference-subpath lands.
+				// Do NOT add a `stash.replace(base, '')` step here.
 				const currentFull =
 					window.location.pathname + window.location.search + window.location.hash;
 				if (stash !== currentFull) {

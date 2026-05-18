@@ -69,5 +69,10 @@ test.describe('US5: saved-list cart + email export', () => {
 		// The body parameter should mention the poster_id we just added.
 		const decoded = decodeURIComponent(href ?? '');
 		expect(decoded).toContain(posterId);
+		// Stage 9 (spec 009-conference-subpath FR-102 + T016): the embedded
+		// permalink MUST live under the conference subpath, not at the bare
+		// `/abstract/<id>` root. Guards against a regression where the
+		// permalink composer drops the SvelteKit `base`.
+		expect(decoded).toContain('/ohbm2026/abstract/');
 	});
 });
