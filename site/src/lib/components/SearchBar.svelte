@@ -24,9 +24,11 @@
 	}
 </script>
 
-{#if helpOpen}
-	<svelte:window on:keydown={onWindowKeydown} />
-{/if}
+<!--
+	Svelte requires `<svelte:window>` at the component root (not inside an
+	`{#if}` block). The handler is a no-op when the popover is closed.
+-->
+<svelte:window on:keydown={onWindowKeydown} />
 
 <div class="searchbar" role="search">
 	<label for="search-input" class="visually-hidden">Search abstracts</label>
