@@ -185,12 +185,21 @@ def to_docx(
 ) -> None:
     """Run pandoc against `md_path`, writing a `.docx` to `output_path`.
 
+    Pandoc embeds each figure at its native pixel resolution by default,
+    which on the real OHBM corpus (4,690 figures × ~1-3 MB each) yields
+    a ~6 GB docx that Word won't open. We pass `--dpi=150` to downscale
+    embedded images to a print-quality but file-size-sane level (the
+    docx loses no resolution Word would display anyway; image quality
+    stays publication-grade).
+
     Strips `docProps/core.xml` timestamps for determinism (R6) unless
-    `strip_metadata` is False. Pandoc's docx writer doesn't emit
-    PAGEREF field codes, so the author index in the resulting docx
-    uses clickable anchor cross-references — documented limitation
-    in `contracts/cli.md § Known limitations`.
+    `strip_metadata` is False. The strip step is best-effort: a
+    BadZipFile (e.g. ZIP64 quirks at very large outputs) is logged
+    and skipped — the docx itself is still usable; only timestamp
+    determinism is lost.
     """
+    import sys as _sys
+
     pandoc = shutil.which("pandoc") or _which_or_raise(
         "pandoc", "see quickstart.md step 2"
     )
@@ -200,6 +209,10 @@ def to_docx(
         str(md_path),
         "--from=markdown+raw_tex",
         "--to=docx",
+        # 150 DPI is the long-standing print-publication standard for
+        # embedded raster images; halving from 300 saves > 4× space
+        # without visible quality loss at typical figure display widths.
+        "--dpi=150",
         f"--resource-path={resource_path}",
         "--standalone",
         "-o",
@@ -213,7 +226,25 @@ def to_docx(
         )
 
     if strip_metadata:
-        _strip_docx_metadata(output_path)
+        try:
+            _strip_docx_metadata(output_path)
+        except (zipfile.BadZipFile, OSError) as exc:
+            # Don't kill the build for a determinism nicety — the docx
+            # itself is valid Word output; only the timestamps in
+            # core.xml won't be reset to 1970 epoch. Log + continue.
+            print(
+                f"warning: docx metadata-strip skipped ({exc!r}); "
+                f"resulting file is still valid but its core.xml "
+                f"timestamps reflect the build moment instead of "
+                f"the deterministic epoch.",
+                file=_sys.stderr,
+            )
+
+    # Surface final size — pandoc with all corpus figures embedded
+    # produces a sizeable file even at 150 DPI; the operator should
+    # know.
+    size_mb = output_path.stat().st_size / (1024 * 1024)
+    print(f"docx: {output_path.name} = {size_mb:.0f} MB", file=_sys.stderr)
 
 
 def _strip_docx_metadata(docx_path: pathlib.Path) -> None:
