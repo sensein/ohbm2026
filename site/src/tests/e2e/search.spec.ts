@@ -21,6 +21,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { waitForHomeReady } from './_helpers';
 
 const DATA_AVAILABLE = process.env.UI_DATA_AVAILABLE !== '0';
 
@@ -60,8 +61,8 @@ test.describe('US3: lexical + semantic search', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
 	test('FR-007: a content word narrows the result set', async ({ page }) => {
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		const before = await resultCount(page);
 		const after = await typeQueryAndSettle(page, 'memory');
 		expect(after).toBeGreaterThan(0);
@@ -71,8 +72,8 @@ test.describe('US3: lexical + semantic search', () => {
 	test('FR-008: a 1-char typo on a ≥7-char word still hits (DL ≤ 2)', async ({ page }) => {
 		// "memry" is "memory" with one deletion — DL = 1, length 6 so the
 		// threshold is 1; it should match the same record set as "memory".
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		const baseline = await typeQueryAndSettle(page, 'memory');
 		await page.getByTestId('search-input').fill('');
 		// Wait for the empty-query state to settle — `result-count` returns
@@ -92,8 +93,8 @@ test.describe('US3: lexical + semantic search', () => {
 	});
 
 	test('phrase quotes narrow below the bare-AND set', async ({ page }) => {
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		const bareAnd = await typeQueryAndSettle(page, 'default mode network');
 		await page.getByTestId('search-input').fill('');
 		// Wait for the empty-query state to settle — `result-count` returns
@@ -108,8 +109,8 @@ test.describe('US3: lexical + semantic search', () => {
 	});
 
 	test('-word subtracts from the result set', async ({ page }) => {
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		const withFmri = await typeQueryAndSettle(page, 'memory');
 		await page.getByTestId('search-input').fill('');
 		// Wait for the empty-query state to settle — `result-count` returns
@@ -122,8 +123,8 @@ test.describe('US3: lexical + semantic search', () => {
 	});
 
 	test('OR unions two AND-groups', async ({ page }) => {
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		const left = await typeQueryAndSettle(page, 'memory');
 		await page.getByTestId('search-input').fill('');
 		// Wait for the empty-query state to settle — `result-count` returns
@@ -145,8 +146,8 @@ test.describe('US3: lexical + semantic search', () => {
 		// Enable semantic search if it isn't already on; then issue a phrased
 		// query that's narrow enough lexically to leave room for semantic
 		// neighbours to show through.
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		// The semantic toggle may be off by default; turn it on if so.
 		const semBtn = page.getByTestId('toggle-semantic');
 		const semOff = await semBtn

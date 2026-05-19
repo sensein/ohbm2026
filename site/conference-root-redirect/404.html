@@ -19,9 +19,11 @@
      `<cname>/something-random`. Per FR-106 we accept losing the path
      component and bounce to `<cname>/ohbm2026/`.
 
-  PR previews introduce a `/pr-<N>/` prefix that has to be honoured
-  in both branches; we detect it from the request URL at runtime so
-  the SAME file works at the gh-pages root AND at every per-PR root.
+  PR previews introduce a `/pr-<N>/` prefix and the staging sandbox
+  introduces a `/sandbox/` prefix — both have to be honoured in both
+  branches. We detect them from the request URL at runtime so the
+  SAME file works at the gh-pages root AND at every per-PR root AND
+  at the sandbox root.
 
   Relative paths like `./ohbm2026/` are NOT safe here — the browser
   resolves them against the REQUEST URL, not the file's gh-pages
@@ -44,11 +46,13 @@
 			var p = window.location.pathname;
 			var search = window.location.search;
 			var hash = window.location.hash;
-			// Detect PR-preview prefix so absolute redirects compose correctly.
-			var prMatch = p.match(/^(\/pr-\d+)\//);
-			var prefix = prMatch ? prMatch[1] : '';
+			// Detect the prefix the user landed under (per-PR preview or
+			// the sandbox staging root) so absolute redirects compose
+			// correctly.
+			var prefixMatch = p.match(/^(\/(?:pr-\d+|sandbox))\//);
+			var prefix = prefixMatch ? prefixMatch[1] : '';
 			// Match conference subpath under whichever prefix is in play.
-			var m = p.match(/^(\/pr-\d+)?\/ohbm2026\//);
+			var m = p.match(/^(\/(?:pr-\d+|sandbox))?\/ohbm2026\//);
 			if (m) {
 				// Inside the conference — hand the deep-link to the SvelteKit
 				// shell via the existing `?spa=` query handoff (see

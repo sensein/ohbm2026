@@ -7,10 +7,10 @@
  * the goal is to flag broken affordances, not perfect every contrast ratio.
  *
  * Run against the live production site:
- *   TARGET_BASE=https://abstractatlas.brainkb.org pnpm exec playwright test a11y
+ *   PLAYWRIGHT_BASE_URL=https://abstractatlas.brainkb.org/ohbm2026/ pnpm exec playwright test a11y
  *
- * Run against the PR preview:
- *   TARGET_BASE=https://abstractatlas.brainkb.org/pr-9 pnpm exec playwright test a11y
+ * Run against a PR preview:
+ *   PLAYWRIGHT_BASE_URL=https://abstractatlas.brainkb.org/pr-9/ohbm2026/ pnpm exec playwright test a11y
  */
 
 import AxeBuilder from '@axe-core/playwright';
@@ -18,9 +18,13 @@ import { test, expect, chromium } from '@playwright/test';
 
 test.setTimeout(180_000);
 
-// Prefer PLAYWRIGHT_BASE_URL (CI env), then legacy TARGET_BASE,
-// then default to the local preview server (matches playwright.config.ts).
-const BASE = process.env.PLAYWRIGHT_BASE_URL || process.env.TARGET_BASE || 'http://127.0.0.1:4173';
+// PLAYWRIGHT_BASE_URL (CI env) is the FULL URL of the conference home
+// including any per-deploy prefix. Strip the trailing slash so the
+// `${BASE}/x/` composition stays single-slash.
+const BASE = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:4173/ohbm2026').replace(
+	/\/$/,
+	''
+);
 
 async function auditRoute(
 	pathSuffix: string,
@@ -30,7 +34,7 @@ async function auditRoute(
 	const browser = await chromium.launch();
 	const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	const page = await ctx.newPage();
-	const url = `${BASE.replace(/\/$/, '')}${pathSuffix}`;
+	const url = `${BASE}${pathSuffix}`;
 	await page.goto(url, { waitUntil: 'load' });
 	await page.waitForSelector(waitFor, { timeout: 30000 });
 	await page.waitForTimeout(2500); // let hydration + data-package fetch settle
@@ -83,7 +87,7 @@ test('axe — abstract permalink page', async () => {
 	const browser = await chromium.launch();
 	const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	const page = await ctx.newPage();
-	await page.goto(`${BASE.replace(/\/$/, '')}/`, { waitUntil: 'load' });
+	await page.goto(`${BASE}/`, { waitUntil: 'load' });
 	await page.waitForSelector('[data-testid="result-card"]', { timeout: 30000 });
 	const posterId = await page.locator('[data-testid="result-card"]').first().getAttribute('data-poster-id');
 	await browser.close();
@@ -91,10 +95,10 @@ test('axe — abstract permalink page', async () => {
 		test.skip();
 		return;
 	}
-	// Stage 9 (FR-104): permalink lives under `/ohbm2026/`. Test was
-	// written before the subpath rework.
+	// BASE already terminates at the conference home; the permalink is
+	// `${BASE}/abstract/<id>/` regardless of which deploy we audit.
 	await auditRoute(
-		`/ohbm2026/abstract/${encodeURIComponent(posterId)}/`,
+		`/abstract/${encodeURIComponent(posterId)}/`,
 		`permalink-${posterId}`,
 		'[data-testid="detail-panel"]'
 	);
