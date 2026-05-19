@@ -17,17 +17,17 @@ import { test, expect } from '@playwright/test';
 const DATA_AVAILABLE = process.env.UI_DATA_AVAILABLE !== '0';
 // The root-redirect island lives at the *origin* root of the deploy
 // (CNAME root `/`, or local-preview `127.0.0.1:4173/`). When the suite
-// is pointed at a PR-preview URL like `<origin>/pr-N/`, the redirect
-// island sits at `<origin>/pr-N/` — but a `browser.newContext` with a
-// hardcoded localhost baseURL can't reach it. These three tests need
-// the local preview harness; skip when running against a remote URL.
+// is pointed at a per-PR or sandbox URL like `<origin>/pr-N/`, the
+// redirect island sits at `<origin>/pr-N/` — but `browser.newContext`
+// with a hardcoded localhost baseURL can't reach it. Those three tests
+// need the local preview harness; skip when running against a remote URL.
 const REMOTE_BASE_URL = process.env.PLAYWRIGHT_BASE_URL;
 
 test.describe('US1 — subpath canonical', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
 	test('home renders at /ohbm2026/', async ({ page }) => {
-		await page.goto('/ohbm2026/');
+		await page.goto('./');
 		await expect(page.getByTestId('search-input')).toBeVisible({ timeout: 5000 });
 		await expect(page.getByTestId('result-count')).toBeVisible();
 		// Sanity: the URL bar reflects the subpath canonical location.
@@ -35,7 +35,7 @@ test.describe('US1 — subpath canonical', () => {
 	});
 
 	test('about renders at /ohbm2026/about/', async ({ page }) => {
-		await page.goto('/ohbm2026/about/');
+		await page.goto('./about/');
 		// The About page header is the first <h1> on the route; identify by
 		// content to avoid coupling to a brittle testid.
 		await expect(page.locator('main h1').first()).toBeVisible({ timeout: 5000 });
@@ -45,12 +45,12 @@ test.describe('US1 — subpath canonical', () => {
 	test('abstract permalink renders at /ohbm2026/abstract/<id>/', async ({ page }) => {
 		// Pick a known poster_id from the home grid, then direct-navigate to
 		// its permalink via the subpath-scoped route.
-		await page.goto('/');
+		await page.goto('./');
 		const firstCard = page.getByTestId('result-card').first();
 		await firstCard.waitFor({ timeout: 10_000 });
 		const posterId = await firstCard.getAttribute('data-poster-id');
 		expect(posterId).toBeTruthy();
-		await page.goto(`/ohbm2026/abstract/${encodeURIComponent(posterId!)}/`);
+		await page.goto(`./abstract/${encodeURIComponent(posterId!)}/`);
 		await expect(page.getByTestId('detail-poster-id')).toBeVisible({ timeout: 5000 });
 		const headerPosterId = (await page.getByTestId('detail-poster-id').textContent())?.trim();
 		expect(headerPosterId).toBe(posterId);
@@ -67,23 +67,23 @@ test.describe('SC-106 — build_info short SHA visible under the subpath', () =>
 		// is whatever the local build baked in; we don't assert its
 		// content — only that the testid renders a hex string AND is
 		// consistent across the three routes.
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('build-info-short-sha').first().waitFor();
 		const home = (await page.getByTestId('build-info-short-sha').first().textContent())?.trim();
 		expect(home).toMatch(/^[0-9a-f]{7,12}$/);
 
-		await page.goto('/ohbm2026/about/');
+		await page.goto('./about/');
 		await page.getByTestId('build-info-short-sha').first().waitFor();
 		const about = (await page.getByTestId('build-info-short-sha').first().textContent())?.trim();
 		expect(about).toBe(home);
 
 		// Sample a real poster_id to test the permalink route's SHA too.
-		await page.goto('/');
+		await page.goto('./');
 		const card = page.getByTestId('result-card').first();
 		await card.waitFor({ timeout: 10_000 });
 		const posterId = await card.getAttribute('data-poster-id');
 		if (posterId) {
-			await page.goto(`/ohbm2026/abstract/${encodeURIComponent(posterId)}/`);
+			await page.goto(`./abstract/${encodeURIComponent(posterId)}/`);
 			await page.getByTestId('build-info-short-sha').first().waitFor();
 			const permalink = (
 				await page.getByTestId('build-info-short-sha').first().textContent()
@@ -108,7 +108,7 @@ test.describe('US2 — direct-load deep-link', () => {
 		// data-package-version-agnostic.
 		const ctx = await browser.newContext();
 		const probe = await ctx.newPage();
-		await probe.goto('/');
+		await probe.goto('./');
 		const card = probe.getByTestId('result-card').first();
 		await card.waitFor({ timeout: 10_000 });
 		const posterId = await card.getAttribute('data-poster-id');
@@ -124,7 +124,7 @@ test.describe('US2 — direct-load deep-link', () => {
 				/* ignore */
 			}
 		}).catch(() => null);
-		await fresh.goto(`/ohbm2026/abstract/${encodeURIComponent(posterId!)}/`);
+		await fresh.goto(`./abstract/${encodeURIComponent(posterId!)}/`);
 		await expect(fresh.getByTestId('detail-poster-id')).toBeVisible({ timeout: 5000 });
 		const rendered = (await fresh.getByTestId('detail-poster-id').textContent())?.trim();
 		expect(rendered).toBe(posterId);
@@ -132,12 +132,12 @@ test.describe('US2 — direct-load deep-link', () => {
 	});
 
 	test('refresh keeps URL + panel', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		const card = page.getByTestId('result-card').first();
 		await card.waitFor({ timeout: 10_000 });
 		const posterId = await card.getAttribute('data-poster-id');
 		expect(posterId).toBeTruthy();
-		await page.goto(`/ohbm2026/abstract/${encodeURIComponent(posterId!)}/`);
+		await page.goto(`./abstract/${encodeURIComponent(posterId!)}/`);
 		await expect(page.getByTestId('detail-poster-id')).toBeVisible();
 		const before = page.url();
 		await page.reload();
@@ -148,7 +148,7 @@ test.describe('US2 — direct-load deep-link', () => {
 	test('unknown poster_id renders "abstract not found" inside the conference shell', async ({
 		page
 	}) => {
-		await page.goto('/ohbm2026/abstract/NOT-A-REAL-ID/');
+		await page.goto('./abstract/NOT-A-REAL-ID/');
 		// The "not found" affordance MUST render inside the SvelteKit shell
 		// (NOT the generic gh-pages 404). The shell is identified by the
 		// layout-level `header-tour-button` testid which is always present

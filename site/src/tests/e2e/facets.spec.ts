@@ -10,6 +10,7 @@
  */
 
 import { test, expect } from '@playwright/test';
+import { waitForHomeReady } from './_helpers';
 
 const DATA_AVAILABLE = process.env.UI_DATA_AVAILABLE !== '0';
 
@@ -22,8 +23,8 @@ test.describe('US4: interactive facets', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
 	test('clicking a facet option narrows the result set', async ({ page }) => {
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		await page.getByTestId('result-card').first().waitFor({ timeout: 10_000 });
 		const before = await resultCount(page);
 		// Expand the first facet group that exists. The Accepted-for group
@@ -43,8 +44,8 @@ test.describe('US4: interactive facets', () => {
 	});
 
 	test('other facet counts recompute against the narrowed set', async ({ page }) => {
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		await page.getByTestId('result-card').first().waitFor({ timeout: 10_000 });
 		// Sample a count from a second facet group BEFORE filtering.
 		const expandIfClosed = async (key: string): Promise<void> => {
@@ -71,8 +72,8 @@ test.describe('US4: interactive facets', () => {
 	});
 
 	test('Clear releases every active facet at once', async ({ page }) => {
-		await page.goto('/');
-		await page.getByTestId('search-input').waitFor();
+		await page.goto('./');
+		await waitForHomeReady(page);
 		await page.getByTestId('result-card').first().waitFor({ timeout: 10_000 });
 		const before = await resultCount(page);
 		const accepted = page.getByTestId('facet-accepted_for');

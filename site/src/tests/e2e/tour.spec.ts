@@ -23,7 +23,7 @@ test.describe('US6: guided tour', () => {
 	test('first visit shows the CTA; starting it opens the tour overlay', async ({ page, context }) => {
 		// Wipe any localStorage from prior runs so the CTA actually appears.
 		await context.clearCookies();
-		await page.goto('/');
+		await page.goto('./');
 		await page.evaluate(() => {
 			window.localStorage.clear();
 			window.sessionStorage.clear();
@@ -39,7 +39,7 @@ test.describe('US6: guided tour', () => {
 
 	test('dismissing the CTA hides it; header button still opens the tour', async ({ page, context }) => {
 		await context.clearCookies();
-		await page.goto('/');
+		await page.goto('./');
 		await page.evaluate(() => {
 			window.localStorage.clear();
 			window.sessionStorage.clear();

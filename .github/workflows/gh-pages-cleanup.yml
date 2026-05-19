@@ -1,0 +1,81 @@
+name: gh-pages-cleanup
+
+# One-shot cleanup workflow for the gh-pages branch.
+#
+# Removes pre-Stage-9 legacy roots (`_app/`, `about/`) that were left
+# behind when the SvelteKit build was published directly at the
+# gh-pages root, before the conference subpath rework moved everything
+# under `/ohbm2026/`. Those paths are no longer served by any route
+# in the current site but still consume CDN cache slots and surface
+# stale, broken pages if a visitor remembers the old URL.
+#
+# The same cleanup is folded into `deploy-ui.yml` for the production
+# target, so production deploys self-heal going forward. This workflow
+# exists so an operator can trigger the cleanup BEFORE the next
+# production deploy lands.
+
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: 'Space-separated list of top-level paths on gh-pages to remove'
+        required: true
+        default: '_app about'
+      dry_run:
+        description: 'List what would be removed without committing'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 1
+      - name: Inspect + remove
+        env:
+          PATHS: ${{ inputs.paths }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          removed=0
+          for p in $PATHS; do
+            # Defensive: reject anything that looks absolute or escapes
+            # the working tree. We only operate on first-level entries.
+            case "$p" in
+              ''|/*|*..*|*/*)
+                echo "::error::Refusing to operate on suspicious path '$p'"
+                exit 1
+                ;;
+            esac
+            if [ ! -e "$p" ]; then
+              echo "skip: '$p' does not exist on gh-pages"
+              continue
+            fi
+            count=$(find "$p" -type f 2>/dev/null | wc -l)
+            echo "would remove: $p ($count files)"
+            if [ "$DRY_RUN" = "true" ]; then
+              continue
+            fi
+            git rm -rf "$p"
+            removed=1
+          done
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run — no commit made."
+            exit 0
+          fi
+          if [ "$removed" -eq 0 ]; then
+            echo "Nothing to remove."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "cleanup(gh-pages): remove legacy roots ($PATHS)"
+          git push origin gh-pages

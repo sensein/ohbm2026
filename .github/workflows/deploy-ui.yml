@@ -1,5 +1,18 @@
 name: deploy-ui
 
+# Build + publish the SvelteKit site to gh-pages.
+#
+# Routing rules (see spec discussion in CLAUDE.md / 009-conference-subpath):
+#   • Default for every push to `main` → SANDBOX (sandbox/ohbm2026/).
+#   • Push to `main` from a PR labelled `deploy-production` → PRODUCTION
+#     (root + /ohbm2026/).
+#   • workflow_dispatch with target=production → PRODUCTION (regardless
+#     of branch labels).
+#   • workflow_dispatch with target=sandbox (default) → SANDBOX.
+#
+# The legacy "every main push = prod deploy" path is gone — production
+# now requires an explicit signal.
+
 on:
   push:
     branches: [main]
@@ -9,18 +22,94 @@ on:
       - 'specs/008-ui-rewrite/contracts/references.yaml'
       - 'src/ohbm2026/ui_data/link_check.py'
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deploy target'
+        required: true
+        default: sandbox
+        type: choice
+        options:
+          - sandbox
+          - production
 
 permissions:
   contents: write
   pages: write
-
-concurrency:
-  group: deploy-ui-production
-  cancel-in-progress: false
+  pull-requests: read
 
 jobs:
-  deploy:
+  resolve-target:
     runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.resolve.outputs.target }}
+      base_path: ${{ steps.resolve.outputs.base_path }}
+      destination_dir: ${{ steps.resolve.outputs.destination_dir }}
+      keep_files: ${{ steps.resolve.outputs.keep_files }}
+      stage_root: ${{ steps.resolve.outputs.stage_root }}
+    steps:
+      - name: Resolve deploy target
+        id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // workflow_dispatch carries the input directly.
+            let target;
+            if (context.eventName === 'workflow_dispatch') {
+              target = context.payload.inputs?.target || 'sandbox';
+              core.info(`workflow_dispatch input target=${target}`);
+            } else {
+              // Push to main: production iff the merged PR carries the
+              // `deploy-production` label. Otherwise sandbox.
+              //
+              // We only trust a PR record whose `merge_commit_sha`
+              // matches this commit AND whose `merged_at` is set —
+              // an open PR whose head branch happens to contain this
+              // commit (rare, but possible after a force-push) MUST
+              // NOT promote a push to production.
+              const sha = context.sha;
+              const { data: prs } =
+                await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: sha,
+                });
+              const pr = prs.find(
+                (p) => p.merge_commit_sha === sha && p.merged_at,
+              );
+              const labels = (pr?.labels || []).map((l) => l.name);
+              target = labels.includes('deploy-production') ? 'production' : 'sandbox';
+              core.info(
+                `push to main: PR #${pr?.number || '(none)'} labels=[${labels.join(',')}] → target=${target}`,
+              );
+            }
+            // Per-target layout. Production owns the gh-pages root +
+            // /ohbm2026/; sandbox lives entirely under /sandbox/ so
+            // PR-preview / production artefacts are never disturbed.
+            if (target === 'production') {
+              core.setOutput('target', 'production');
+              core.setOutput('base_path', '/ohbm2026');
+              core.setOutput('destination_dir', '.');
+              core.setOutput('stage_root', 'site/publish');
+              // keep_files=true so concurrent PR previews + the
+              // /sandbox/ tree survive a production publish.
+              core.setOutput('keep_files', 'true');
+            } else {
+              core.setOutput('target', 'sandbox');
+              core.setOutput('base_path', '/sandbox/ohbm2026');
+              core.setOutput('destination_dir', 'sandbox');
+              core.setOutput('stage_root', 'site/publish/sandbox');
+              // keep_files=false on sandbox/ so each sandbox deploy
+              // replaces the entire `/sandbox/` subtree atomically —
+              // no asset accumulation, no stale hashed bundles.
+              core.setOutput('keep_files', 'false');
+            }
+
+  deploy:
+    needs: resolve-target
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-ui-${{ needs.resolve-target.outputs.target }}
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,12 +142,14 @@ jobs:
       - name: References link check (FR-017)
         # HEAD every URL in the references registry; non-zero exit blocks
         # the deploy when a citation 4xx's or times out (T086 / T088).
+        # Runs on both targets — a broken reference shouldn't reach
+        # sandbox either.
         run: PYTHONPATH=src python -m ohbm2026.ui_data.link_check specs/008-ui-rewrite/contracts/references.yaml
 
       - name: Build site
         working-directory: site
         env:
-          BASE_PATH: '/ohbm2026'
+          BASE_PATH: ${{ needs.resolve-target.outputs.base_path }}
           VITE_BUILD_SHA: ${{ github.sha }}
           VITE_BUILD_AT: ${{ github.event.head_commit.timestamp }}
           VITE_DATA_PACKAGE_URL: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL }}
@@ -66,23 +157,78 @@ jobs:
           export VITE_BUILD_SHA_SHORT="${VITE_BUILD_SHA:0:7}"
           pnpm build
 
-      - name: Stage publish tree (conference subpath rework — FR-105)
-        # Move the SvelteKit build under /ohbm2026/ and place the static
-        # root-redirect island at the gh-pages root so `<cname>/` bounces
-        # to `<cname>/ohbm2026/`. See specs/009-conference-subpath/research.md.
+      - name: Stage publish tree
+        # Production: redirect island at gh-pages root, app under /ohbm2026/.
+        # Sandbox:    redirect island at /sandbox/, app under /sandbox/ohbm2026/.
+        # Both shapes route the same conference-root-redirect island
+        # (which now detects both `/pr-<N>/` AND `/sandbox/` prefixes
+        # in JS and composes the right `target` for each).
+        env:
+          STAGE_ROOT: ${{ needs.resolve-target.outputs.stage_root }}
         run: |
-          mkdir -p site/publish/ohbm2026
-          cp -r site/build/. site/publish/ohbm2026/
-          cp site/conference-root-redirect/index.html site/publish/index.html
-          cp site/conference-root-redirect/404.html site/publish/404.html
+          rm -rf site/publish
+          mkdir -p "$STAGE_ROOT/ohbm2026"
+          cp -r site/build/. "$STAGE_ROOT/ohbm2026/"
+          cp site/conference-root-redirect/index.html "$STAGE_ROOT/index.html"
+          cp site/conference-root-redirect/404.html "$STAGE_ROOT/404.html"
 
-      - name: Publish to gh-pages root
+      - name: Cleanup legacy gh-pages roots (production only)
+        if: needs.resolve-target.outputs.target == 'production'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Before the conference-subpath rework (Stage 9), the SvelteKit
+        # build was published directly at the gh-pages root, leaving
+        # `_app/` and `about/` trees at `<cname>/_app/...` and
+        # `<cname>/about/`. Those paths are no longer served (the app
+        # is under `/ohbm2026/`) but they still sit in gh-pages from
+        # earlier deploys. Strip them on every production publish so a
+        # request to `<cname>/about` 404s cleanly instead of rendering
+        # a stale, broken page.
+        run: |
+          set -euo pipefail
+          tmp_dir=$(mktemp -d)
+          git clone --depth=1 --branch=gh-pages \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            "$tmp_dir/gh-pages"
+          cd "$tmp_dir/gh-pages"
+          removed=0
+          for legacy in _app about; do
+            if [ -e "$legacy" ]; then
+              git rm -rf "$legacy"
+              removed=1
+            fi
+          done
+          if [ "$removed" -eq 1 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "cleanup(gh-pages): remove pre-subpath root files (_app/, about/)"
+            git push origin gh-pages
+          else
+            echo "No legacy root files found — nothing to clean up."
+          fi
+
+      - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: site/publish
+          publish_dir: ${{ needs.resolve-target.outputs.stage_root }}
           publish_branch: gh-pages
-          destination_dir: .
-          keep_files: true
+          destination_dir: ${{ needs.resolve-target.outputs.destination_dir }}
+          keep_files: ${{ needs.resolve-target.outputs.keep_files == 'true' }}
           enable_jekyll: false
-          commit_message: 'deploy(ui): ${{ github.sha }}'
+          commit_message: 'deploy(ui:${{ needs.resolve-target.outputs.target }}): ${{ github.sha }}'
+
+      - name: Record deploy target
+        # Emitted as a workflow artifact so the downstream e2e workflow
+        # (triggered by workflow_run) can read which target was deployed
+        # — workflow_run doesn't carry job outputs across workflow
+        # boundaries, but it CAN list this run's artifacts.
+        run: |
+          mkdir -p deploy-meta
+          printf '%s\n' '${{ needs.resolve-target.outputs.target }}' > deploy-meta/target.txt
+      - name: Upload deploy target artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-target
+          path: deploy-meta/target.txt
+          retention-days: 14

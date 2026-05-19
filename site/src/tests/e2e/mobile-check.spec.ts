@@ -11,11 +11,15 @@ const probes = [
   { label: 'desktop-landscape', viewport: { width: 1440, height: 900 }, mobile: false }
 ];
 
-// Was hardcoded to the PR-9 preview (long since closed). Default to
-// local; honour PLAYWRIGHT_BASE_URL for CI runs against PR preview /
-// production. The mobile-check probe is geometry-only, so any deploy
-// that renders the same DOM passes.
-const BASE = process.env.PLAYWRIGHT_BASE_URL || process.env.TARGET_BASE || 'http://127.0.0.1:4173';
+// Default to local; honour PLAYWRIGHT_BASE_URL for CI runs against PR
+// preview / production. The mobile-check probe is geometry-only, so any
+// deploy that renders the same DOM passes. BASE is the FULL URL of the
+// conference home (including any per-deploy prefix); we strip the
+// trailing slash so `${BASE}/abstract/<id>/` composes cleanly.
+const BASE = (process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:4173/ohbm2026').replace(
+	/\/$/,
+	''
+);
 
 test('multi-viewport overflow probe', async () => {
   const browser = await chromium.launch();
@@ -60,11 +64,10 @@ test('multi-viewport overflow probe', async () => {
     await page.screenshot({ path: `/tmp/probe-${probe.label}-detail.png`, fullPage: false });
 
     if (posterId && !probe.mobile) {
-      // Stage 9: the abstract permalink lives under /ohbm2026/, not /
-      // (FR-104). Test was hardcoded to the pre-rework `/abstract/<id>/`
-      // shape and would 404 under the conference subpath.
+      // The abstract permalink lives under `${BASE}/abstract/<id>/`
+      // because BASE already terminates at the conference home (FR-104).
       const dp = await ctx.newPage();
-      await dp.goto(`${BASE}/ohbm2026/abstract/${encodeURIComponent(posterId)}/`, { waitUntil: 'load' });
+      await dp.goto(`${BASE}/abstract/${encodeURIComponent(posterId)}/`, { waitUntil: 'load' });
       await dp.waitForSelector('[data-testid="detail-panel"]', { timeout: 30000 });
       await dp.waitForTimeout(1500);
       await dp.screenshot({ path: `/tmp/probe-${probe.label}-permalink.png`, fullPage: false });

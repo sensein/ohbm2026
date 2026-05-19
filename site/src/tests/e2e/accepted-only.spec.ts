@@ -8,7 +8,7 @@ test.describe('FR-001 + SC-005: accepted-only invariant', () => {
 	test('no abstract record in the loaded shard has accepted_for == "Withdrawn"', async ({
 		page
 	}) => {
-		await page.goto('/');
+		await page.goto('./');
 		await expect(page.getByTestId('result-count')).toBeVisible({ timeout: 5000 });
 		// After hydration, the home page exposes window.__abstracts for this guard.
 		const leak = await page.evaluate(() => {

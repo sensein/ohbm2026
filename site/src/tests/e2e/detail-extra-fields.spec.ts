@@ -23,11 +23,11 @@ test.describe('FR-011 — detail panel renders only Topics + Methods extras', ()
 		// `compact={true}` and hides topics / methods / sections by design.
 		// FR-011 applies to the FULL detail view, which lives at the
 		// permalink route — navigate there for the assertion.
-		await page.goto('/');
+		await page.goto('./');
 		await expect(page.getByTestId('result-card').first()).toBeVisible({ timeout: 5000 });
 		const firstCard = page.getByTestId('result-card').first();
 		const posterId = await firstCard.getAttribute('data-poster-id');
-		await page.goto(`/ohbm2026/abstract/${encodeURIComponent(posterId!)}/`);
+		await page.goto(`./abstract/${encodeURIComponent(posterId!)}/`);
 		await expect(page.getByTestId('detail-panel')).toBeVisible();
 
 		// Allowed extra-question sections — at least one must be visible.

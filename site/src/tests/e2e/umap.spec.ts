@@ -21,7 +21,7 @@ test.describe('US2: UMAP panel + lasso + model selector', () => {
 	test('opens map; lazy-loads Plotly; both 2D + 3D charts render side-by-side', async ({
 		page
 	}) => {
-		await page.goto('/');
+		await page.goto('./');
 		await expect(page.getByTestId('result-count')).toBeVisible({ timeout: 5000 });
 		await expect(page.getByTestId('umap-panel')).toHaveCount(0);
 
@@ -51,7 +51,7 @@ test.describe('US2: UMAP panel + lasso + model selector', () => {
 	});
 
 	test('rotate toggle pauses / resumes the 3D animation', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('toggle-map').click();
 		await expect(page.getByTestId('umap-chart-3d')).toBeVisible();
 		const btn = page.getByTestId('umap-rotate-toggle');
@@ -65,7 +65,7 @@ test.describe('US2: UMAP panel + lasso + model selector', () => {
 	});
 
 	test('lasso selection (simulated) updates the result list count', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('toggle-map').click();
 		await expect(page.getByTestId('umap-chart-2d')).toBeVisible();
 		await expect
