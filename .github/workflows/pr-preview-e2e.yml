@@ -1,0 +1,99 @@
+name: pr-preview-e2e
+
+# Run the Playwright e2e suite against the PR preview URL once the
+# preview deploy finishes. This is where Stage-10's parquet decoder
+# (and every other UI feature) gets validated end-to-end on the actual
+# bundle the reviewer will load — `pnpm preview` locally can't catch
+# CORS, CDN, or Dropbox-fetch issues. Failures land as a failed check
+# on the PR with the trace attached as a workflow artifact.
+
+on:
+  workflow_run:
+    workflows: ['pr-preview']
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  e2e:
+    # Only run if the preview deploy itself succeeded — otherwise the URL
+    # is stale and the run is meaningless.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The triggering workflow_run carries the head SHA; resolve the
+          # PR number from it. (`event.workflow_run.pull_requests` is
+          # often empty for fork PRs; using `gh pr list --search` is the
+          # robust path for in-repo PRs, which is what `pr-preview.yml`
+          # restricts to anyway.)
+          PR=$(gh pr list --repo "${{ github.repository }}" --search "${{ github.event.workflow_run.head_sha }}" --state open --json number --jq '.[0].number')
+          if [ -z "$PR" ] || [ "$PR" = "null" ]; then
+            echo "::error::Could not resolve PR number for SHA ${{ github.event.workflow_run.head_sha }}"
+            exit 1
+          fi
+          echo "number=$PR" >> $GITHUB_OUTPUT
+          echo "Resolved PR #$PR"
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+
+      - name: Set up Node 20 + pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Enable pnpm
+        run: npm install --global pnpm@10
+
+      - name: Install site deps
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: site
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Wait for PR preview to be live
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          # The pr-preview workflow's gh-pages push can lag behind the
+          # workflow_run completion event by ~30 s. Poll until the preview
+          # responds 200 OR until we give up (5 min).
+          URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${PR_NUMBER}/ohbm2026/"
+          echo "Probing $URL"
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "Preview live after ${i} polls."
+              break
+            fi
+            echo "  [$i/30] HTTP $code — sleeping 10s"
+            sleep 10
+          done
+
+      - name: Run Playwright e2e against the preview URL
+        working-directory: site
+        env:
+          PLAYWRIGHT_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ steps.pr.outputs.number }}
+          UI_DATA_AVAILABLE: '1'
+        run: pnpm exec playwright test --project=chromium
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-pr-${{ steps.pr.outputs.number }}
+          path: site/playwright-report/
+          retention-days: 14
