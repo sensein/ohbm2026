@@ -69,6 +69,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory holding the high-resolution figure files.",
     )
     p.add_argument(
+        "--standby-csv",
+        default="data/primary/032626 OHBM 2026 Poster Listing_FINAL.xlsx - Poster Listing.csv",
+        help=(
+            "Path to the authoritative OHBM 2026 poster standby CSV "
+            "(keyed by poster_id). Default points at the FINAL program "
+            "listing under data/primary/. Pass an empty string to omit "
+            "standby times from the rendered book."
+        ),
+    )
+    p.add_argument(
         "--output-root",
         default="data/outputs/book",
         help="Root for the produced book directory.",
@@ -130,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
     withdrawn_path = pathlib.Path(args.withdrawn)
     assets_root = pathlib.Path(args.assets_root)
     output_root = pathlib.Path(args.output_root)
+    standby_path = (
+        pathlib.Path(args.standby_csv) if args.standby_csv else None
+    )
 
     need_pdf = _format_needs_pdf(args.format)
     need_docx = _format_needs_docx(args.format)
@@ -157,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
             authors_path=authors_path,
             withdrawn_path=withdrawn_path,
             assets_root=assets_root,
+            standby_path=standby_path,
             sort_order=args.sort,
             format=args.format,
             style=args.style,

@@ -86,6 +86,18 @@ export interface AbstractRecord {
 	reference_dois: string[];
 	reference_urls: string[];
 	reference_titles?: string[];
+	/**
+	 * Poster stand-by times sourced from the FINAL OHBM 2026 poster-
+	 * listing CSV (keyed by poster_id). Both windows are exactly one
+	 * hour; values are UTC. `null` means the schedule row did not
+	 * carry that slot (rare — every accepted poster has both windows
+	 * in the FINAL listing). Local-time display lives in the UI; the
+	 * data layer keeps UTC for sortability + portability.
+	 */
+	poster_standby?: {
+		first: Date | number | null;
+		second: Date | number | null;
+	};
 }
 
 export interface AuthorRecord {

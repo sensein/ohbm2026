@@ -24,9 +24,12 @@ from ohbm2026.book.model import (
     BookEntry,
     FigureBlock,
     ReferencesBlock,
+    StandbySlot,
+    StandbyTimes,
 )
 from ohbm2026.book.sections import BODY_SECTION_NAMES
 from ohbm2026.exceptions import BookBuildError
+from ohbm2026 import standby as _standby
 
 _ACCEPTED_FOR = {"Poster", "Oral"}
 
@@ -246,12 +249,30 @@ def _derive_state_key(*paths: pathlib.Path) -> str:
     return h.hexdigest()[:12]
 
 
+def _standby_for(times: _standby.StandbyTimes | None) -> StandbyTimes | None:
+    """Translate parser dataclass → book model dataclass."""
+    if times is None:
+        return None
+
+    def _slot(w: _standby.StandbyWindow | None) -> StandbySlot | None:
+        if w is None:
+            return None
+        return StandbySlot(
+            label=w.label,
+            start_utc_iso=w.start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            end_utc_iso=w.end_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+
+    return StandbyTimes(first=_slot(times.first), second=_slot(times.second))
+
+
 def load_book(
     *,
     corpus_path: pathlib.Path,
     authors_path: pathlib.Path,
     withdrawn_path: pathlib.Path,
     assets_root: pathlib.Path | None = None,
+    standby_path: pathlib.Path | None = None,
     sort_order: str = "poster_id",
     format: str = "md",
     style: str = "plain",
@@ -284,7 +305,28 @@ def load_book(
 
     authors_by_sub = _build_authors_index(authors_doc)
 
+    # Load standby times (poster_id-keyed) when a path is provided.
+    standby_by_pid: dict[int, _standby.StandbyTimes] = {}
+    if standby_path is not None:
+        if not standby_path.exists():
+            raise BookBuildError(
+                f"standby CSV not found at {standby_path}"
+            )
+        standby_by_pid = _standby.load_standby_csv(standby_path)
+
     entries: list[BookEntry] = []
+    # Dedupe poster_id collisions — Oxford preserves all submission ids
+    # (unique), but the program-committee `poster_id` (Oxford
+    # `program_code`) can collide when an author resubmits the same
+    # abstract. Match the UI builder's policy (`ui_data.abstracts.
+    # iter_abstracts`): keep first-encountered record, drop later ones
+    # with the same poster_id. As of 2026-05-18 the known case is
+    # poster_id 2335 (submissions 1246466 + 1248744; identical title +
+    # lead author). The authoritative standby CSV is also keyed by
+    # poster_id and has a single row per number — so first-encountered
+    # is the right policy on both sides.
+    seen_poster_ids: set[int] = set()
+    deduped_oxford_ids: list[int] = []
     for raw in corpus_doc.get("abstracts", []) or []:
         sub_id = raw.get("id")
         poster_str = raw.get("poster_id")
@@ -299,11 +341,16 @@ def load_book(
             poster_id = int(poster_str)
         except (TypeError, ValueError):
             continue
+        if poster_id in seen_poster_ids:
+            deduped_oxford_ids.append(int(sub_id))
+            continue
+        seen_poster_ids.add(poster_id)
 
         authors = tuple(authors_by_sub.get(int(sub_id), []))
         body_sections = _build_body_sections(raw, list(include_sections))
         figures = _build_figures(raw, assets_root)
         references = _build_references(raw)
+        standby = _standby_for(standby_by_pid.get(poster_id))
 
         title = (raw.get("title") or "").strip()
         entries.append(
@@ -316,6 +363,7 @@ def load_book(
                 body_sections=body_sections,
                 figures=figures,
                 references=references,
+                standby=standby,
             )
         )
 
@@ -323,6 +371,18 @@ def load_book(
         raise BookBuildError(
             "zero entries after filter (every row is withdrawn / "
             "null-poster-id / non-Poster|Oral)"
+        )
+
+    if deduped_oxford_ids:
+        # CA-006 / Principle VI — visible logging, not a silent skip.
+        # Same wording shape as the UI builder so audit-grep finds both.
+        import sys as _sys
+        print(
+            f"book.corpus: dropped {len(deduped_oxford_ids)} duplicate-poster_id "
+            f"record(s) (Oxford submission ids: {deduped_oxford_ids}). "
+            f"First-encountered record per poster_id wins; check upstream "
+            f"Oxford `program_code` for stale assignments.",
+            file=_sys.stderr,
         )
 
     state_key = _derive_state_key(corpus_path, authors_path, withdrawn_path)

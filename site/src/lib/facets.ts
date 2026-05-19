@@ -1,4 +1,5 @@
 import type { AbstractRecord } from '$lib/shards';
+import { standbySummary } from '$lib/standby';
 
 /**
  * Facet recomputation per US4 / FR-013.
@@ -34,6 +35,7 @@ export type FacetKey =
 	| 'cluster'
 	| 'topic'
 	| 'subcategory'
+	| 'standby_block'
 	| (typeof FACETS_FROM_BLOCK)[number];
 
 export const FACET_KEYS_ORDERED: FacetKey[] = [
@@ -50,6 +52,7 @@ export const FACET_KEYS_ORDERED: FacetKey[] = [
 	'brain_regions',
 	'brain_networks',
 	'keywords',
+	'standby_block',
 	'accepted_for'
 ];
 
@@ -67,7 +70,8 @@ export const FACET_LABELS: Record<FacetKey, string> = {
 	species: 'Species',
 	recording_technology: 'Recording technology',
 	brain_regions: 'Brain regions',
-	brain_networks: 'Brain networks'
+	brain_networks: 'Brain networks',
+	standby_block: 'Stand-by time'
 };
 
 /**
@@ -98,6 +102,13 @@ function valuesFor(record: AbstractRecord, key: FacetKey, ctx: FacetCellContext)
 	if (key === 'cluster') {
 		const label = ctx.clusterLabelByPosterId.get(record.poster_id);
 		return label ? [label] : [];
+	}
+	if (key === 'standby_block') {
+		// Two-window union — a poster is reachable in EITHER of its
+		// stand-by slots, so checking a single block-key option matches
+		// when either of the abstract's two windows falls in that block.
+		if (!record.poster_standby) return [];
+		return standbySummary(record.poster_standby).keys;
 	}
 	// The Topic facet is the UNION of primary + secondary topic values per
 	// abstract (deduped). A selected Topic option matches if EITHER position

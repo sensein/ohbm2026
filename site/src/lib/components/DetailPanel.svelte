@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { focusedAbstract, authorChips } from '$lib/stores/selection';
 	import { cartStore } from '$lib/stores/cart';
+	import { standbySummary } from '$lib/standby';
 	import {
 		loadAllCellsWithTopics,
 		loadAllNeighbors,
@@ -357,6 +358,24 @@
 				{/if}
 			{/if}
 		</section>
+
+		{#if abstract.poster_standby}
+			{@const standby = standbySummary(abstract.poster_standby)}
+			{#if standby.firstLabel || standby.secondLabel}
+				<section class="standby" data-testid="detail-standby" data-zone="submitter">
+					<h2>Stand-by times <span class="hint-inline">when this poster is staffed</span></h2>
+					<ul class="standby-list">
+						{#if standby.firstLabel}
+							<li data-testid="standby-first">{standby.firstLabel}</li>
+						{/if}
+						{#if standby.secondLabel}
+							<li data-testid="standby-second">{standby.secondLabel}</li>
+						{/if}
+					</ul>
+					<p class="standby-tz-hint">All times Europe/Paris (venue local).</p>
+				</section>
+			{/if}
+		{/if}
 
 
 		<!--
@@ -963,6 +982,30 @@
 		color: var(--text-faint);
 		font-weight: 400;
 		margin-left: 0.4rem;
+	}
+	.standby {
+		margin: 0.4rem 0 0.6rem;
+	}
+	.standby-list {
+		list-style: none;
+		padding: 0;
+		margin: 0.2rem 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+	.standby-list li {
+		background: var(--chip-bg, rgba(0, 0, 0, 0.05));
+		border: 1px solid var(--border);
+		border-radius: 0.4rem;
+		padding: 0.2rem 0.55rem;
+		font-size: 0.82rem;
+		white-space: nowrap;
+	}
+	.standby-tz-hint {
+		margin: 0.15rem 0 0;
+		font-size: 0.7rem;
+		color: var(--text-faint);
 	}
 
 	.detail {

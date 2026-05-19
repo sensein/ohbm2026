@@ -13,9 +13,16 @@ the scientific-citation markup that plain CommonMark cannot express.
 from __future__ import annotations
 
 import re
+import sys
 
 from bs4 import BeautifulSoup
 from markdownify import markdownify
+
+# markdownify recurses through the BeautifulSoup tree; the Oxford
+# rich-text editor produces deeply-nested HTML (especially for
+# References/Citations <ol><li><p><span>... chains). Default 1000 is
+# too tight; 5000 is plenty for the observed corpus.
+_RECURSION_FLOOR = 5000
 
 
 def html_to_pandoc_md(html: str) -> str:
@@ -51,12 +58,19 @@ def html_to_pandoc_md(html: str) -> str:
     for tag in soup.find_all(style=True):
         del tag.attrs["style"]
 
-    md = markdownify(
-        str(soup),
-        heading_style="ATX",
-        bullets="-",
-        strip=["span"],
-    )
+    prior_limit = sys.getrecursionlimit()
+    if prior_limit < _RECURSION_FLOOR:
+        sys.setrecursionlimit(_RECURSION_FLOOR)
+    try:
+        md = markdownify(
+            str(soup),
+            heading_style="ATX",
+            bullets="-",
+            strip=["span"],
+        )
+    finally:
+        if prior_limit < _RECURSION_FLOOR:
+            sys.setrecursionlimit(prior_limit)
 
     # markdownify leaves trailing whitespace per line + collapses
     # multiple blank lines unevenly; tighten the output so re-runs

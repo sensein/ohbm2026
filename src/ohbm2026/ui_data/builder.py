@@ -106,6 +106,7 @@ def build_ui_data_package(
     conference_id: str = "ohbm2026",
     output_format: str = "parquet-single",
     proposal_listing_path: Path | None = None,
+    standby_final_csv_path: Path | None = None,
 ) -> int:
     """Run the full Stage 6 build.
 
@@ -164,6 +165,10 @@ def build_ui_data_package(
         build_info=build_info,
         author_id_remap=author_id_remap,
         standby_times_path=Path(proposal_listing_path) if proposal_listing_path else None,
+        standby_final_csv_path=(
+            Path(standby_final_csv_path) if standby_final_csv_path else None
+        ),
+        abstract_to_poster=abstract_to_poster,
     )
     abstract_records = abstracts_envelope["abstracts"]
     abstract_ids = [r["abstract_id"] for r in abstract_records]

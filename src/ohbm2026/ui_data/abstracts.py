@@ -386,6 +386,8 @@ def iter_abstracts(
     withdrawn_path: Path | None,
     author_id_remap: Mapping[int, int] | None = None,
     standby_times_path: Path | None = None,
+    standby_final_csv_path: Path | None = None,
+    abstract_to_poster: Mapping[int, int] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield per-abstract rows (accepted-only, poster_id-keyed).
 
@@ -403,7 +405,32 @@ def iter_abstracts(
     enriched_by_id = _load_enriched_by_id(enriched_path)
     refs_by_id = _load_references_by_id(references_path)
     withdrawn = _withdrawn_ids(withdrawn_path)
+
+    # Standby source resolution: the FINAL OHBM 2026 poster-listing CSV
+    # (keyed by poster_id) supersedes the legacy proposal-listing CSV
+    # (keyed by submission_id) when both are supplied. The new CSV is
+    # the program-committee FINAL schedule; the old CSV was a draft.
     standby_by_sid = _load_standby_times(standby_times_path)
+    if standby_final_csv_path is not None and abstract_to_poster is not None:
+        from ohbm2026.standby import key_by_submission_id, load_standby_csv
+
+        poster_to_sub = {pid: sid for sid, pid in abstract_to_poster.items()}
+        try:
+            authoritative = load_standby_csv(Path(standby_final_csv_path))
+        except (OSError, ValueError):
+            authoritative = {}
+        # Translate to submission_id-keyed and overlay over (or replace)
+        # the legacy map. The book-side shape is {first: StandbyWindow,
+        # second: StandbyWindow} but the UI shape expects
+        # `{first: datetime|None, second: datetime|None}` (start UTC).
+        translated_authoritative = key_by_submission_id(authoritative, poster_to_sub)
+        # Convert to the same `{first: datetime|None, second: datetime|None}`
+        # shape so downstream code (parquet emitter) doesn't change.
+        for sid, times in translated_authoritative.items():
+            standby_by_sid[sid] = {
+                "first": times.first.start_utc if times.first else None,
+                "second": times.second.start_utc if times.second else None,
+            }
 
     skipped_no_poster_id = 0
     # Dedupe poster_id collisions. Oxford ingest preserves all submission
@@ -531,6 +558,8 @@ def build_abstracts_records(
     withdrawn_path: Path | None,
     author_id_remap: Mapping[int, int] | None = None,
     standby_times_path: Path | None = None,
+    standby_final_csv_path: Path | None = None,
+    abstract_to_poster: Mapping[int, int] | None = None,
 ) -> list[dict[str, Any]]:
     """List-materialising wrapper around ``iter_abstracts`` for backward compat.
 
@@ -547,6 +576,8 @@ def build_abstracts_records(
             withdrawn_path=withdrawn_path,
             author_id_remap=author_id_remap,
             standby_times_path=standby_times_path,
+            standby_final_csv_path=standby_final_csv_path,
+            abstract_to_poster=abstract_to_poster,
         )
     )
 
@@ -560,6 +591,8 @@ def build_abstracts(
     build_info: Mapping[str, str],
     author_id_remap: Mapping[int, int] | None = None,
     standby_times_path: Path | None = None,
+    standby_final_csv_path: Path | None = None,
+    abstract_to_poster: Mapping[int, int] | None = None,
 ) -> dict[str, Any]:
     """Return the abstracts shard envelope per data-model.md §2.
 
@@ -574,6 +607,8 @@ def build_abstracts(
         withdrawn_path=withdrawn_path,
         author_id_remap=author_id_remap,
         standby_times_path=standby_times_path,
+        standby_final_csv_path=standby_final_csv_path,
+        abstract_to_poster=abstract_to_poster,
     )
     return {
         "schema_version": SCHEMA_VERSION,

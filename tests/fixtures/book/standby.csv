@@ -1,0 +1,8 @@
+"Synthetic fixture standby CSV — same shape as data/primary/032626 OHBM 2026 Poster Listing_FINAL.xlsx - Poster Listing.csv. Header rows mirror the real file so the parser exercises the real path."
+NEW POSTER NUMBER *USE THIS NUMBER FOR YOUR LOCATION IN THE POSTER HALL*,First Stand-by Time,Second Stand-by Time,Abstract Title,Primary Category,Last Name of First Author
+0001,"Monday, June 15 | 13:45-14:45","Tuesday, June 16 | 12:30-13:30",Test-retest reliability of sgACC-DLPFC connectivity,Methods Development,Smith
+0002,"Monday, June 15 | 14:45-15:45","Tuesday, June 16 | 13:30-14:30",Aging-related volume changes in cortex,Lifespan Development,Brown
+0003,"Wednesday, June 17 | 12:45-13:45","Thursday, June 18 | 13:45-14:45",A short note on multimodal preprocessing,Methods Development,Davis
+0004,"Monday, June 15 | 14:45-15:45","Tuesday, June 16 | 13:30-14:30",Two-figure abstract for index-suffix coverage,Methods Development,Lee
+0005,"Wednesday, June 17 | 13:45-14:45","Thursday, June 18 | 14:45-15:45",Abstract with a missing figure asset,Methods Development,Wilson
+9999,"Monday, June 15 | 13:45-14:45","Tuesday, June 16 | 12:30-13:30",Orphan slot (no matching accepted entry),Methods Development,Withdrawn

@@ -15,6 +15,13 @@ import pathlib
 
 from PIL import Image, UnidentifiedImageError
 
+# Pillow's `DecompressionBombError` default fires at ~179M px; some
+# corpus figures legitimately exceed that. The book treats local
+# files as trusted inputs (no random network sources), so we lift
+# the limit. Higher-resolution figures are what we WANT — they
+# clear the 300 DPI publication threshold more easily.
+Image.MAX_IMAGE_PIXELS = None
+
 # Standard print-publication threshold; configurable per FR-006b
 # when the renderer's body-width changes (e.g. tufte-book narrower
 # body column).

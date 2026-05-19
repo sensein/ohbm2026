@@ -127,6 +127,25 @@ def _figure_block_md(
     return f"![Figure — {label}](fig_assets/{filename}){{#{fid}}}\n"
 
 
+def _standby_md(entry: BookEntry) -> str | None:
+    """One-line standby summary, or None when no standby info exists.
+
+    Format: `**Standby**: <first label> · <second label>`
+    Uses the original CSV cell text verbatim so the reader sees the
+    local-time label they're used to seeing in OHBM communications.
+    """
+    if entry.standby is None:
+        return None
+    parts: list[str] = []
+    if entry.standby.first:
+        parts.append(entry.standby.first.label)
+    if entry.standby.second:
+        parts.append(entry.standby.second.label)
+    if not parts:
+        return None
+    return "**Standby**: " + " · ".join(parts)
+
+
 def _entry_md(entry: BookEntry, fig_filenames: list[str]) -> str:
     """Render one abstract section as markdown.
 
@@ -139,6 +158,10 @@ def _entry_md(entry: BookEntry, fig_filenames: list[str]) -> str:
     out.append("")
     out.append(_author_list_md(entry.authors))
     out.append("")
+    standby_line = _standby_md(entry)
+    if standby_line:
+        out.append(standby_line)
+        out.append("")
 
     # Counts per type so we know whether to apply the -1/-2 suffix.
     type_counts = collections.Counter(

@@ -72,6 +72,28 @@ class ReferencesBlock:
 
 
 @dataclass(frozen=True, slots=True)
+class StandbySlot:
+    """One stand-by window as displayed in the book.
+
+    `label` is the original CSV cell verbatim (e.g.
+    `Monday, June 15 | 13:45-14:45`) — that's what gets rendered to
+    the reader. `start_utc_iso` and `end_utc_iso` are present so
+    machine consumers (UI facets) get a sortable key without
+    re-parsing.
+    """
+
+    label: str
+    start_utc_iso: str
+    end_utc_iso: str
+
+
+@dataclass(frozen=True, slots=True)
+class StandbyTimes:
+    first: StandbySlot | None
+    second: StandbySlot | None
+
+
+@dataclass(frozen=True, slots=True)
 class BookEntry:
     submission_id: int
     poster_id: int
@@ -81,6 +103,7 @@ class BookEntry:
     body_sections: tuple[BodySection, ...]
     figures: tuple[FigureBlock, ...]
     references: ReferencesBlock | None
+    standby: StandbyTimes | None = None
 
 
 @dataclass(frozen=True, slots=True)

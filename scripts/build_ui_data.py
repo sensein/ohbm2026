@@ -51,11 +51,27 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "Optional CSV with the program-committee poster numbering "
-            "(`archive/proposals/.../proposal_listing.csv`). When given, each "
+            "Optional CSV with the program-committee proposal numbering "
+            "(`data/primary/proposal_listing_block_spread_soft.csv`). Each "
             "abstract record gets a `poster_standby: {first, second}` struct "
-            "with the two stand-by times from the CSV. These fields are not "
-            "in the Oxford GraphQL schema."
+            "with the two stand-by times from the CSV. Keyed by Oxford "
+            "submission_id. Superseded by --standby-final-csv when both are "
+            "provided."
+        ),
+    )
+    parser.add_argument(
+        "--standby-final-csv",
+        dest="standby_final_csv",
+        type=Path,
+        default=Path(
+            "data/primary/032626 OHBM 2026 Poster Listing_FINAL.xlsx "
+            "- Poster Listing.csv"
+        ),
+        help=(
+            "Path to the authoritative FINAL OHBM 2026 poster-listing CSV "
+            "(keyed by poster_id). When this file exists, it overrides "
+            "--proposal-listing for the poster_standby fields. Default points "
+            "at the FINAL listing under data/primary/."
         ),
     )
     parser.add_argument("--output", required=True, type=Path)
@@ -104,6 +120,11 @@ def main(argv: list[str] | None = None) -> int:
             conference_id=args.conference_id,
             output_format=args.output_format,
             proposal_listing_path=args.proposal_listing,
+            standby_final_csv_path=(
+                args.standby_final_csv
+                if args.standby_final_csv and args.standby_final_csv.exists()
+                else None
+            ),
         )
     except Stage6BuildError as exc:
         print(f"build_ui_data.py: {exc}", file=sys.stderr)
