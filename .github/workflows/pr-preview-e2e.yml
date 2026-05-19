@@ -95,7 +95,12 @@ jobs:
           # The pr-preview workflow's gh-pages push can lag behind the
           # workflow_run completion event by ~30 s. Poll until the preview
           # responds 200 OR until we give up (5 min).
-          URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${PR_NUMBER}/ohbm2026/"
+          # NOTE: gh-pages serves a CNAME redirect to the custom domain
+          # (abstractatlas.brainkb.org), so probe the CNAME directly —
+          # `<owner>.github.io/<repo>/...` 301s to it and pollutes the
+          # probe output. `curl -L` would also work but the CNAME-direct
+          # path is what Playwright will actually hit below.
+          URL="https://abstractatlas.brainkb.org/pr-${PR_NUMBER}/ohbm2026/"
           echo "Probing $URL"
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
@@ -110,7 +115,9 @@ jobs:
       - name: Run Playwright e2e against the preview URL
         working-directory: site
         env:
-          PLAYWRIGHT_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ steps.pr.outputs.number }}
+          # Use the CNAME directly so Playwright doesn't bounce through
+          # the github.io → abstractatlas.brainkb.org 301 on every nav.
+          PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org/pr-${{ steps.pr.outputs.number }}
           UI_DATA_AVAILABLE: '1'
         run: pnpm exec playwright test --project=chromium
 
