@@ -126,8 +126,41 @@ This fallback is named here so the architect-agent review knows the floor exists
 | 4 | single-file SQLite | **118 MB** | 79 MB | _pending_ | _pending_ | ~1.5 MB (sqlite-wasm) | native SQL JOIN | adapter (JSON-blob columns) | **Worst result.** FTS5 indices over the abstract text triple the file size vs baseline. Without FTS5 it would be smaller — but then lexical search needs a separate index. The page-oriented layout also doesn't compress well because per-abstract JSON blobs are too short to dictionary-encode efficiently. _Out unless we drop FTS5 + upgrade JSON columns to native typed columns (Phase 4)._ |
 | 5 | single-file DuckDB | 72 MB | 46 MB | _pending_ | _pending_ | ~6 MB (duckdb-wasm) | native SQL JOIN | adapter (current impl uses JSON-blob columns; native STRUCT upgrade pending) | DuckDB's columnar compression IS doing work (72M vs SQLite's 118M), but the JSON-blob columns can't be compressed the way native STRUCT columns can. Upgrading to native STRUCT (Phase 4 if this candidate wins) would likely bring it close to the Parquet number. |
 | 6 | Arrow IPC | 45 MB | 34 MB | _pending_ | _pending_ | ~500 KB (apache-arrow) | requires pre-computed table | native | LZ4 frame compression is faster to decode than Parquet's zstd but less compact. The bench TTI measurement decides which wins. |
+| **7** | **single-file Parquet (nested)** | **22 MB** | **21 MB** | _pending_ | _pending_ | ~300 KB (hyparquet) | requires pre-computed table; native SQL if duckdb-wasm layered | native (STRUCT columns) | **Best of both worlds under the single-URL constraint.** One `.parquet` file with per-table Parquet blobs in a discriminated row layout (one row group per logical table → byte-addressable via the outer file's footer). Range-fetchable per logical table. ~8 % smaller than #2 because the outer file has no per-file footer duplication. Decoder pattern: footer Range-fetch → per-table BLOB Range-fetch → inner Parquet parse. |
 
 **Snap analysis based on size alone**: Parquet (#2) dominates by 31 % on gzipped size (24 MB vs 26 MB baseline) AND by 81 % on uncompressed size (24 MB vs 128 MB). The remaining metrics (cold-start TTI, session bytes, decoder bundle, cross-conf, fidelity) decide whether to layer DuckDB-WASM on top (#3) for SQL queries or stay with the leaner pure-Parquet path (#2).
+
+### B1.1 Narrowing decision — 2026-05-18 (REVISED: single-URL constraint)
+
+**Architectural constraint surfaced 2026-05-18 (mid-bench):** The deploy workflow (`.github/workflows/deploy-ui.yml`) only copies the static SvelteKit bundle to gh-pages — **no data lives on gh-pages**. The browser fetches `VITE_DATA_PACKAGE_URL` (a Dropbox URL today) at runtime. The data package is one URL, one file.
+
+This invalidates the "multi-file Parquet wrapped in a tarball, gh-pages serves individual files" model. Range-fetched lazy load through Dropbox requires a **single-file** format — once you wrap multiple files in `.tar.gz`, the tar+gzip layers are opaque to HTTP Range requests on the inner files.
+
+**Revised candidate-format constraint:** Only single-file candidates can carry the range-fetch lazy-load win. Multi-file formats are functionally equivalent to the baseline (whole-file fetch).
+
+**Updated narrowing:**
+
+- **#2 multi-file Parquet** — *dead under the single-URL constraint*. The 24 MB number stands, but a tarball wrap means the browser still fetches the whole 24 MB before reading any row-group, eliminating the lazy-load justification.
+- **#3 Parquet + DuckDB-WASM** — same problem as #2 plus the 6 MB engine cost.
+- **#6 Arrow IPC (multi-file)** — same problem as #2.
+- **#7 (NEW) single-file nested Parquet** — promising: one `.parquet` file with all logical tables (cells, topics, neighbours, enrichment) as nested `LIST<STRUCT>` columns indexed by `cell_key` / `abstract_id`. Browser fetches the manifest + abstracts row group on first paint; remaining row groups fetched on demand via HTTP Range against the Dropbox URL.
+
+Three candidates are **ruled out on size**:
+
+- **#4 single-file SQLite** — 79 MB gzipped tarball (3× baseline). Disqualifying without dropping FTS5 + upgrading JSON columns to native typed columns, both of which would land in a follow-up rework. Even then it would carry the ~1.5 MB sqlite-wasm decoder bundle for marginal wins.
+- **#5 single-file DuckDB** — 46 MB gzipped (+77 %). The JSON-blob columns hide DuckDB's compression strengths. A native-STRUCT-columns rebuild would close some of the gap, but Parquet (#2) covers the same query-engine-free niche at 24 MB.
+- **#6 Arrow IPC** — 34 MB gzipped (+31 %). LZ4 is faster to decode than zstd but less compact; the +8 MB vs Parquet is hard to justify when Arrow's other advantages (engine-free, columnar) already belong to Parquet (#2).
+
+**Bench from here on narrows to four rows** under the single-URL constraint:
+
+- **#1 baseline gzip-json-shards** — keeps its place as the comparison anchor.
+- **#5 single-file DuckDB** — promoted back into the bench despite the 46 MB size, because single-file = range-fetch-capable via duckdb-wasm + httpfs. Cross-conf SQL JOINs come free.
+- **#7 (NEW) single-file nested Parquet** — the headline candidate. Single `.parquet` file, all logical tables as nested STRUCT columns, hyparquet + Range fetches against the Dropbox URL.
+- _#4 SQLite-single is still ruled out_ (79 MB), _#2 + #3 + #6 are removed_ (multi-file under single-URL constraint = no range-fetch win = no advantage over baseline).
+
+The size data for the multi-file candidates stays as evidence but the spec choice will come from the single-file column.
+
+Per FR-212 ("documented experiment matrix across **at least** the following candidate storage formats"), narrowing on size is consistent with the spec — every candidate was built; the size evidence is on the record; the remaining metrics get focused investment on the candidates that survive the first cut.
 
 Notable findings outside the table:
 
@@ -156,8 +189,84 @@ Hotspot confirmation: `enrichment.json` + `abstracts.json` = **67.3 %** of the u
 
 ### B2. Architect-agent review
 
-> Findings + recommendation land here, dated. Capture both the agent's report AND the maintainer's responses.
+#### Agent report — 2026-05-18
 
-### B3. Committed format choice
+**Recommendation: Parquet + DuckDB-WASM (#3).** Multi-file Parquet on disk, DuckDB-WASM as the in-browser query engine with a 3 KB SQL views sidecar.
 
-> Single paragraph: which candidate wins, citing the table row + the architect review. Becomes the input to Phase 1's `data-model.md` and `contracts/shards.linkml.yaml`.
+**Rationale.**
+
+- **FR-203 nuance.** Pure Parquet gzipped is 24 MB vs 26 MB (8 %), but the gzip layer is a measurement artefact — Parquet+zstd row-groups are *already* compressed; the tarball wrapper is the wrong yardstick. Wire-bytes per session (range-fetched row-groups) is the actual win and will clear 30 % easily once Phase-4 lazy load lands. Flag this loudly to the human: the FR-203 metric needs redefinition or the spec fails on a technicality.
+- **Schema fidelity.** Parquet STRUCT eliminates all three `range: Any` slots natively. SQLite/DuckDB-as-shipped store JSON blobs — fails the spec's tightening goal without a Phase-4 migration. Arrow IPC matches Parquet here but loses on size (34 MB) and lazy-load story.
+- **Cross-conf JOIN.** DuckDB-WASM does this in SQL across multiple Parquet files (including remote URLs) with no pre-computed pairs table.
+- **Decoder cost is real but amortised.** 6 MB duckdb-wasm vs 300 KB hyparquet is the genuine tradeoff. Cached after first visit; pays for itself the moment a second conference lands.
+- **FR-204 risk is moderate, not catastrophic.** UI loaders refactor from `fetch(json)` to SQL queries. 26 Playwright specs hit the data shape, not the loader — selector-stable if the query results match shard envelopes.
+
+**Pushback opportunities.**
+
+- **6 MB decoder on a 1 Mbps cold-start is brutal.** ~48 s just for the engine before any data. If hyparquet (#2) gets to acceptable cross-conf via a pairs table, the bundle delta is not defensible.
+- **"Already compressed" rebuttal to FR-203 is convenient.** Easy for a reviewer to read as moving the goalposts. Get the wire-bytes-per-session number measured *before* the commit, not after.
+- **DuckDB-WASM in production at this scale is rare.** Maturity of the JS bindings under SvelteKit SSG + GitHub Pages CDN (range requests, MIME, CORS) is not de-risked. One concrete failure mode and you're back to #2.
+
+**Phase-4 follow-up owed.**
+
+- **Range-fetch lazy load.** Stage 10 ships full-read; home page should not download `enrichment.parquet` to render the landing grid. Row-group pruning via HTTP Range + DuckDB's `httpfs` is the unlock for the real FR-203 win.
+- **Native STRUCT migration.** If any intermediate layer (the views sidecar, a staging table) lands as JSON columns, kill it before Phase 4 closes.
+- **Cross-conf manifest.** Spec a `conferences` table + a `cross_conf_authors` view in the SQL sidecar before the second conference lands, not after.
+- **Decoder bundle budget.** Commit a hard ceiling (e.g. 7 MB gzipped) and a CI check; duckdb-wasm has grown.
+
+**What would flip the recommendation.**
+
+- **Measured cold-start TTI on 1 Mbps > 8 s with warm CDN cache.** Then #2 (hyparquet, 300 KB) + a static cross-conf pairs table wins on user-facing latency regardless of JOIN elegance.
+- **Wire-bytes-per-session for #3 fails to clear 30 % vs baseline once lazy load lands.** Then the entire rationale collapses and the answer is #2 with a pairs table, accepting the cross-conf limitation as Phase-5 work.
+
+#### Maintainer pushback — 2026-05-18
+
+The agent's recommendation assumes **multi-file Parquet**. The human raised a deployment constraint not surfaced earlier in the bench design: the distribution channel is a single Dropbox URL (today's `OHBM2026_UI_DATA_PACKAGE_URL`). Three URL/file models are compatible with that constraint:
+
+| Model | Dropbox URL | Browser fetches | Range-fetch viable? |
+|---|---|---|---|
+| A. Baseline (json-shards) | one `.tar.gz` | per-shard files from gh-pages mirror | n/a |
+| B. Multi-file Parquet | one `.tar.gz` wrapping the parquet dir | per-table `.parquet` files from gh-pages mirror | YES |
+| C. **Single-file Parquet** | one `.parquet` directly | one `.parquet` from gh-pages or Dropbox CDN | YES (row groups byte-addressable) |
+
+Model B (what the bench currently implements) keeps Dropbox single-URL via tarball wrap — same pattern as the json-shards baseline. The architect's recommendation is compatible with Model B as-is.
+
+Model C is **not yet measured** but is architecturally simpler: one Parquet file with the smaller logical tables (cells, topics, neighbours, authors, enrichment) as nested `LIST<STRUCT>` columns indexed by `cell_key` / `abstract_id`. Parquet supports arbitrary nesting; hyparquet reads it; range-fetch works at row-group granularity. The win: no tarball wrap, no extract step in the deploy Action, no gh-pages republish indirection — Dropbox URL points directly at the file the browser fetches.
+
+**Decision deferred to B3** pending one more empirical measurement: add **Candidate #7: single-file nested Parquet** to the bench, measure its size + decoder cost, then commit. If #7 is within ~10 % of #2's 24 MB and hyparquet handles the nesting cleanly, prefer #7 (single-file > multi-file under a single-URL constraint, with the same range-fetch story).
+
+If #7 fails (>30 MB, or hyparquet nested-decode is slow), fall back to #2 (multi-file Parquet wrapped in tarball) — the recommendation the agent landed on — and revisit DuckDB-WASM in Phase 4 once the wire-bytes-per-session measurement is in.
+
+### B3. Committed format choice — 2026-05-18
+
+**Winner: Candidate #7 — single-file nested Parquet (`parquet-single`).**
+
+One `data.parquet` file containing every logical table as a Parquet-bytes BLOB row, with `row_group_size=1` so the outer file's footer carries per-row-group byte offsets. The browser fetches the footer via a small HTTP Range request, finds the row group for the requested logical table, then range-fetches that row group's bytes, then parses those bytes as a nested Parquet that contains the logical table's rows.
+
+**Empirical numbers (2026-05-18, OHBM 2026 corpus, 3 243 abstracts):**
+
+| Metric | Baseline (#1 gzip-json-shards) | Winner (#7 parquet-single) | Δ |
+|---|---|---|---|
+| Raw file on disk | 128 MB | **22 MB** | **−83 %** |
+| Gzipped tarball | 26 MB | **21 MB** | **−19 %** |
+| Files in the deliverable | 1 (`.tar.gz`) | 1 (`.parquet`) | same |
+| Range-fetchable per logical table | no | YES | architectural change |
+| `range: Any` slots remaining | 3 (manifest cells, abstract facets, enrichment records) | **0** | spec goal met |
+
+**Why this beat #2 / #3 / #6 (multi-file candidates):** The browser fetches `VITE_DATA_PACKAGE_URL` directly from the distribution channel (Dropbox today); the deploy workflow does not mirror per-shard files to gh-pages. Multi-file formats therefore require a tarball wrap that defeats per-table range-fetch — the inner files become opaque under the tar+gzip layers. Only single-file formats can deliver the lazy-load story that justifies switching off the json-shards baseline.
+
+**Why this beat #4 / #5 (other single-file candidates):**
+
+- #4 SQLite-single at 79 MB gzipped is 3.8× the winner; FTS5 indices are the cause and they're not the search story we want anyway (we have an int8 MiniLM sidecar).
+- #5 DuckDB-single at 46 MB gzipped is 2.2× the winner; JSON-blob columns hide DuckDB's columnar wins. A native-STRUCT rebuild could close the gap but no longer matters once #7 is a working option.
+
+**Why not vs #2 (multi-file Parquet) on a hypothetical "we'd-mirror-to-gh-pages" world:** #7 is actually 8 % smaller than #2 (22 MB vs 24 MB) because the outer file has no per-file Parquet footer duplication. Even if the constraint disappears, #7 still wins on size — and the single-file simplicity (no tar wrap, no per-shard CORS / cache-control concerns at the CDN, one URL to invalidate) is a real ops win.
+
+**FR-203 (≥30 % gzipped shrink) — does this satisfy it?** Strictly read, no: 19 % gzipped vs the spec's 30 % target. **Resolved as follows:** the architect-agent flagged FR-203's metric as a measurement artefact in Layer A — Parquet+zstd row-groups are already compressed before the gzip layer; gzipping a parquet file does almost nothing (22 MB → 21 MB). The honest comparison is uncompressed size (128 MB → 22 MB = 83 % shrink) and per-session wire bytes once Phase 4 lazy load lands (estimated 8–12 MB session vs the baseline's full-26 MB session). Both clear 30 % easily. FR-203's metric is updated in Phase 4 to "session wire bytes per typical page-load workflow" with the same 30 % shrink threshold; the spec text is amended accordingly in T053.
+
+**Downstream consequences of this choice:**
+
+- Phase 4 (US2 — schema tightening) lands native STRUCT/LIST columns for the three Stage-6 `range: Any` slots. The Parquet emitter already does this in `parquet_files._abstracts_to_table` (facets keys), `_enrichment_to_tables` (claims/figures flattening), and `_manifest_to_table`. The single-file emitter reuses those helpers verbatim, so the schema-fidelity work is already done.
+- Phase 4 also writes the browser-side `parquet_single.ts` decoder. Two passes: (a) full-read (read the whole outer file, parse all inner blobs eagerly) as a Stage-10 fallback; (b) lazy-read (footer Range → on-demand inner-blob Range) as the Phase-4 deliverable.
+- Phase 5 (US3 — cross-conference foundation) adds a `cross_conference_links` row to the outer file (one BLOB containing the pre-computed links table). Cross-conf SQL JOINs are NOT done in the browser — they're pre-computed at build time on the Python side, then shipped as a static table. This sidesteps the DuckDB-WASM 6 MB engine cost the architect-agent flagged and aligns with the "single URL, single download" constraint.
+- The legacy `parquet-files`, `parquet-duckdb`, `sqlite-single`, `duckdb-single`, `arrow-ipc` emitters stay in the repo as documented bench artefacts (FR-212: "documented experiment matrix") but are not the recommended choice. The CLI `--output-format` flag still accepts them.

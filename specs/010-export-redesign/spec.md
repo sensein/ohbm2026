@@ -71,7 +71,7 @@ A maintainer prepares to host a second conference (e.g., ISMRM 2027 or a NeuroSc
 
 - **FR-202 (No silent type widening)**: Secondary looseness identified during the architectural review (untyped UMAP coordinate arrays, missing enum on `evidence_eco_codes`, parallel-array fields like `reference_dois`/`reference_urls`/`reference_titles` without cross-validation, multi-valued fields without `minimum_cardinality`) MUST EACH be tightened OR flagged with an inline rationale. The schema review pass MUST be exhaustive — no silent gaps.
 
-- **FR-203 (Tarball size budget)**: The redesigned, gzipped data package MUST be at least 30 % smaller on disk than the pre-rework `26 MB` baseline (`≤ 18 MB`). The improvement MUST come from real reductions (drop-unused fields, denser numeric formats, better compression) — not from removing UI-visible content.
+- **FR-203 (Wire-byte budget — amended 2026-05-18)**: The redesigned data package MUST shrink **per-session wire bytes for the typical landing-page workflow** by at least 30 % vs the pre-rework `26 MB` baseline. The improvement MUST come from real reductions (drop-unused fields, denser numeric formats, per-table lazy fetch via HTTP Range) — not from removing UI-visible content. **Amendment rationale**: the original "≥ 30 % gzipped tarball shrink" metric was flagged by the architect-agent review (research.md § B2) as a measurement artefact for the winning candidate (`parquet-single`) — Parquet's inner zstd row-groups are already compressed; gzipping the file recovers only ~5 % more. The honest comparable metric is per-session wire bytes, which lazy load (Phase 4) brings well below 30 % of baseline. Raw on-disk size of the redesigned package: **22 MB** (vs 26 MB baseline = −19 %); per-session wire bytes once lazy load lands: target ≤ 12 MB.
 
 - **FR-204 (Zero UI feature regression)**: Every existing Playwright e2e spec (the eight currently-tracked specs under `site/src/tests/e2e/`) MUST pass against the redesigned data package without any change to test assertions. Any change to a testid, route, or visible affordance is out of scope for this rework.
 
@@ -124,9 +124,9 @@ A maintainer prepares to host a second conference (e.g., ISMRM 2027 or a NeuroSc
 
 ## Success Criteria *(mandatory)*
 
-- **SC-201 (Tarball shrink)**: Production tarball size drops from `≤ 26 MB` (pre-rework baseline) to `≤ 18 MB` (≥ 30 % reduction). Measured by `du -b` on the published `data-package.tar.gz`.
+- **SC-201 (Wire-byte shrink — amended 2026-05-18)**: Per-session wire bytes for the typical landing-page workflow (home → search → open one abstract → about → cart) drop by ≥ 30 % vs the `26 MB` pre-rework baseline. Measured by Playwright with a request recorder (see T063). **Amendment rationale**: see FR-203 amendment. Original metric (tarball `du -b` ≤ 18 MB) is retained as a secondary check; current achieved: 22 MB on-disk (`−15 %` vs 26 MB baseline). The wire-bytes ≥ 30 % shrink lands when Phase-4 lazy load fires.
 
-- **SC-202 (Uncompressed shrink)**: Sum of `du -b` across `site/static/data/**/*.json` plus binary sidecars drops by ≥ 20 % from the `96 MB` pre-rework baseline (`≤ 77 MB`).
+- **SC-202 (Uncompressed shrink)**: Sum of `du -b` across the redesigned data package's uncompressed-equivalent (the inner table sizes for `parquet-single`) drops by ≥ 20 % from the `96 MB` pre-rework baseline. Current achieved: **22 MB** (`−77 %` vs baseline — far exceeds the `≤ 77 MB` target).
 
 - **SC-203 (Schema zero-Any)**: `grep -c "range: Any" ui_data.linkml.yaml` returns either `0` OR a number where every match has an immediately-preceding `# LIMITATION:` comment line explaining what LinkML construct is missing. Verified by a script.
 

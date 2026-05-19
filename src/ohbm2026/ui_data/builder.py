@@ -98,6 +98,9 @@ def _get_writer(output_format: str):
     if output_format == "arrow-ipc":
         from ohbm2026.ui_data.formats import arrow_ipc
         return arrow_ipc
+    if output_format == "parquet-single":
+        from ohbm2026.ui_data.formats import parquet_single
+        return parquet_single
     raise Stage6BuildError(f"Unknown --output-format: {output_format!r}")
 
 

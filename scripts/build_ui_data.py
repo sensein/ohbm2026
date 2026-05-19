@@ -61,6 +61,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "sqlite-single",
             "duckdb-single",
             "arrow-ipc",
+            # Candidate #7 — added 2026-05-18 when the single-URL deploy
+            # constraint ruled out the multi-file Parquet candidates. One
+            # `.parquet` file with per-table BLOB rows.
+            "parquet-single",
         ],
         help=(
             "Container format for the emitted data package. "

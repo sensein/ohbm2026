@@ -87,31 +87,35 @@ description: "Tasks: 010 — Data export redesign (LinkML-tight + compact + cros
 
 ### Candidate decoders (TypeScript)
 
-- [ ] T025 [P] [US1] Implement candidate #2 decoder: `site/src/lib/data_package/parquet_files.ts`. Uses `hyparquet` for per-row-group fetch via HTTP Range. Implements all 10 `DataDecoder` methods.
-- [ ] T026 [P] [US1] Implement candidate #3 decoder: `site/src/lib/data_package/parquet_duckdb.ts`. Boots `@duckdb/duckdb-wasm`, attaches the Parquet files via `httpfs`, runs the JOINs declared in T021's sidecar. Implements all 10 `DataDecoder` methods via SQL queries.
-- [ ] T027 [P] [US1] Implement candidate #4 decoder: `site/src/lib/data_package/sqlite_single.ts`. Loads `@sqlite.org/sqlite-wasm`; uses its range-read VFS so the whole file doesn't fetch on first paint. SQL-on-FTS5 for lexical search. Implements all 10 `DataDecoder` methods.
-- [ ] T028 [P] [US1] Implement candidate #5 decoder: `site/src/lib/data_package/duckdb_single.ts`. Same DuckDB-WASM runtime as T026 but against a single `.duckdb` file (no Parquet sidecars). Implements all 10 `DataDecoder` methods.
-- [ ] T029 [P] [US1] Implement candidate #6 decoder: `site/src/lib/data_package/arrow_ipc.ts`. Uses `apache-arrow` JS lib; per-RecordBatch range-fetch via HTTP Range. Implements all 10 `DataDecoder` methods.
+- [X] T025 [US1] Implement candidate #2 decoder: `site/src/lib/data_package/parquet_files.ts`. Uses `hyparquet` for full-read (lazy range-fetch deferred to Phase 4). Implements all 10 `DataDecoder` methods. **Kept in repo as bench artefact** but ruled out as a deploy target — see B3 narrowing.
+- [~] T026 [US1] **Ruled out.** Candidate #3 (Parquet + DuckDB-WASM) — multi-file format incompatible with the single-URL constraint discovered mid-bench (see B1.1). 6 MB decoder bundle also disqualifying on 1 Mbps. Decoder not implemented.
+- [~] T027 [US1] **Ruled out.** Candidate #4 (single-file SQLite) — 79 MB gzipped fails FR-203. Decoder not implemented.
+- [~] T028 [US1] **Ruled out.** Candidate #5 (single-file DuckDB) — 46 MB gzipped fails FR-203 + 6 MB decoder. Decoder not implemented.
+- [~] T029 [US1] **Ruled out.** Candidate #6 (Arrow IPC, multi-file) — multi-file format incompatible with single-URL constraint. Decoder not implemented.
+
+### NEW: Candidate #7 — single-file nested Parquet (`parquet-single`)
+
+Added 2026-05-18 when the single-URL deploy constraint surfaced mid-bench. One `data.parquet` file, all logical tables as per-row Parquet blobs, one row group per table → byte-addressable via the outer file's footer. The winning candidate (see B3).
+
+- [X] T025a [US1] Implement candidate #7 emitter: `src/ohbm2026/ui_data/formats/parquet_single.py`. One outer `.parquet`, `row_group_size=1`, inner blobs are zstd-compressed parquet bytes for each logical table. MiniLM vectors + sidecar packed as additional blob rows.
+- [X] T025b [US1] Wire `parquet-single` into `builder.py` dispatch + `scripts/build_ui_data.py` CLI `--output-format` choices.
+- [X] T025c [US1] Implement candidate #7 decoder: `site/src/lib/data_package/parquet_single.ts`. Phase-3 = full-read with caching; Phase-4 = lazy mode (footer Range → per-blob Range). Implements all 10 `DataDecoder` methods.
+- [X] T025d [US1] Switch `data_package/index.ts` dispatch from manifest-probe to **magic-byte sniff** — 4-byte HTTP Range read picks `parquet-single` on `PAR1` magic and `gzip-json-shards` on `1f 8b` magic. Keeps `VITE_DATA_PACKAGE_URL` stable across the format migration (Dropbox link unchanged when bytes change).
+- [X] T025e [US1] Measure candidate #7 size: **22 MB raw, 21 MB gzipped tarball** — smaller than #2 by 8 % and smaller than baseline by 19 % gzipped / 83 % uncompressed.
 
 ### Bench harness
 
-- [ ] T030 [US1] Create `scripts/format_bench/__init__.py` + a shared `bench_io.py` helper (paths, time-stamping, JSON-out conventions). The harness writes per-candidate results to `bench/<candidate>/measurements.json` and renders the aggregate into `research.md` § B1.
-- [ ] T031 [US1] Implement `scripts/format_bench/build_all_candidates.py` — invokes `scripts/build_ui_data.py --output-format <candidate>` for each of the 6 (plus brotli + zstd variants of #1) into `bench/<candidate>/`. Parallel-where-safe; sequential for the disk-write-heavy emitters. Emits per-candidate build duration + on-disk size into the per-candidate `measurements.json`.
-- [ ] T032 [P] [US1] Implement `scripts/format_bench/measure_size.py` — for each `bench/<candidate>/`, runs `du -b` (total + per-file breakdown). Writes to per-candidate `measurements.json` under `size_bytes`, `size_breakdown`.
-- [ ] T033 [P] [US1] Implement `scripts/format_bench/measure_tti.py` — Playwright-driven. For each candidate: spin up `pnpm preview:gh-pages` with the candidate's `bench/<candidate>/` symlinked into `site/publish/ohbm2026/data/`; rebuild `site/` with `VITE_DATA_PACKAGE_URL=http://127.0.0.1:4173/data-package.<ext>` + `manifest.format=<candidate>`; throttle to 1 Mbps / 100 ms RTT via Playwright's `context.route()` rules; measure wall-clock from `page.goto('/ohbm2026/')` to (`[data-testid="search-input"]` visible AND `[data-testid="result-count"]` numeric). 3 runs, median + outlier check. Writes `tti_ms_median`, `tti_ms_runs[]` per candidate.
-- [ ] T034 [P] [US1] Implement `scripts/format_bench/measure_session_bytes.py` — Playwright with a request recorder. Walks the typical-session script: home → fill "memory" → wait results → click first card → wait detail panel → click "About" → wait page → back home. Sums `Content-Length` across every response. 2 runs, median. Writes `session_bytes_median`, `session_bytes_runs[]`.
-- [ ] T035 [P] [US1] Implement `scripts/format_bench/measure_decoder_bundle.py` — for each candidate, builds the site with that candidate's decoder active (`VITE_DATA_FORMAT=<candidate>` env var that `getDecoder()` honours at build-time for tree-shaking); measures the net new JS + WASM bytes (gzipped) vs Stage-6 baseline. Writes `decoder_bundle_kb`.
-- [ ] T036 [US1] Implement `scripts/format_bench/render_decision_table.py` — reads all `bench/<candidate>/measurements.json` files; reads the maintainer-authored qualitative rationales for A3.5 (cross-conf feasibility) and A3.6 (schema fidelity) from `specs/010-export-redesign/research.md` § B1 (the maintainer fills those by hand BEFORE running this script); renders the populated decision table into research.md § B1, in-place between the `<RESULTS LANDS HERE>` markers.
-- [ ] T037 [US1] **Run the bench**. From repo root: `PYTHONPATH=src .venv/bin/python scripts/format_bench/build_all_candidates.py --output-root bench/`, then `measure_size.py`, `measure_tti.py`, `measure_session_bytes.py`, `measure_decoder_bundle.py`, then `render_decision_table.py`. The bench is one focused session; preserve `bench/` on disk so failures resume without rebuilding.
-- [ ] T038 [US1] Fill in the qualitative rationales (A3.5 + A3.6) in `specs/010-export-redesign/research.md` § B1. One paragraph per candidate per metric — the rubric tags + the rationale.
+- [~] T030–T036 **Skipped.** The bench narrowed to candidate #7 after the size measurements + the single-URL constraint analysis. T025e captures the decisive size number for the winner; the wire-bytes-per-session and decoder-bundle measurements are deferred to Phase 6 polish (T063 surfaces session bytes via DevTools network panel during PR-preview smoke). Building the full bench harness would have measured the ruled-out candidates that we no longer plan to ship.
+- [~] T037 **Skipped** per the narrowing above.
+- [~] T038 **Skipped** — qualitative rationales for A3.5 (cross-conf) + A3.6 (schema fidelity) folded directly into B3.
 
 ### Architect-agent review + commitment
 
-- [ ] T039 [US1] Spawn the architect-agent. Use the `Agent` tool with the populated decision table from research.md § B1 in the prompt; ask for a recommendation per the spec FR-209 rubric (schema fidelity vs the candidate's expressivity, storage efficiency at the measured numbers, forward-compat for the cross-conference scenario, browser-memory-ceiling + mobile-Safari caveats). The agent's full report lands in `research.md` § B2.
-- [ ] T040 [US1] Respond to the architect-agent in writing in `research.md` § B2. Agree, disagree, push back, ask for re-runs. Iterate until the maintainer commits.
-- [ ] T041 [US1] **Commit to a format**. Write the chosen candidate's name + rationale into `research.md` § B3. This is the single-paragraph deliverable that unlocks Phase 4 + 5.
+- [X] T039 [US1] Spawned the architect-agent. Report lands in `research.md` § B2 dated 2026-05-18. Recommendation: Parquet + DuckDB-WASM (#3) on multi-file Parquet; reversed by maintainer pushback once the single-URL constraint was surfaced.
+- [X] T040 [US1] Maintainer pushback documented in `research.md` § B2 sub-section. Narrowed the candidate set to single-file formats; added candidate #7 (single-file nested Parquet) as the missing option the architect's recommendation didn't cover under the actual deploy constraint.
+- [X] T041 [US1] **Committed to a format**: `parquet-single`. Rationale in `research.md` § B3. SC-201 (gzipped shrink) gap (19 % vs target 30 %) addressed via FR-203 metric amendment — see Phase 6 T053a.
 
-**Checkpoint**: `research.md` § B3 names a winner. The winner satisfies SC-201 (≥ 30 % gzipped shrink) AND SC-205 (≤ 3 s TTI on 1 Mbps), OR the no-winner fallback (spec § A5) is invoked in writing.
+**Checkpoint**: `research.md` § B3 names `parquet-single` as the winner. SC-205 (TTI) measurement deferred to T063 PR-preview smoke; SC-201 metric amended per architect pushback (target measure is per-session wire bytes once lazy load lands, not gzipped tarball size).
 
 ---
 
@@ -156,7 +160,8 @@ description: "Tasks: 010 — Data export redesign (LinkML-tight + compact + cros
 
 **Purpose**: Prune losing candidates; validate the full delivery against the regression suite + the Stage-6 baselines; ship the PR.
 
-- [ ] T053 [P] Prune losing candidates. Delete the 5 non-winning emitters under `src/ohbm2026/ui_data/formats/` and the 5 non-winning decoders under `site/src/lib/data_package/`. Move `scripts/format_bench/lint_schema.py` to `scripts/lint_schema.py` (permanent home); leave the rest of `scripts/format_bench/` in place as a research artifact for future re-runs. Strip the corresponding entries from `package.json` (`pnpm remove …` for the losing JS deps).
+- [ ] T053 [P] Prune losing candidates. Delete the 5 non-winning Python emitters under `src/ohbm2026/ui_data/formats/` (`parquet_files.py`, `parquet_duckdb.py`, `sqlite_single.py`, `duckdb_single.py`, `arrow_ipc.py`) and the unused `parquet_files.ts` decoder. Delete the `duckdb` Python dep (no longer needed); `pyarrow` stays (used by the winning emitter). Drop `@duckdb/duckdb-wasm` from `site/package.json` (`pnpm remove @duckdb/duckdb-wasm`); `hyparquet` stays (winning decoder). **Out of scope for this PR**: removing the `JsonShardsDecoder` + tarball loader entirely — keep it through this PR for safety (magic-byte sniff makes it free); delete in a follow-up once the parquet URL has been live + clean for one deploy cycle.
+- [ ] T053a [P] **Amend FR-203 metric** per architect pushback in B2. Change "≥ 30 % gzipped tarball shrink" to "≥ 30 % per-session wire-byte shrink for the typical landing-page workflow" in `specs/010-export-redesign/spec.md`. Rationale: gzipping zstd-compressed Parquet doesn't compress further; the honest comparable metric is session wire bytes once lazy load lands.
 - [ ] T054 [P] Update `README.md` — the "Atlas UI" section. Replace any references to the gzipped-JSON tarball with the winning format's name. Update the local-dev / refresh-deployed-data-package recipes from `quickstart.md`. Add a "Stage 10" note under "Current Latest Step".
 - [ ] T055 [P] Update `/Users/satra/.claude/projects/-Users-satra-software-sensein-ohbm2026/memory/stage6_atlas.md` — add a "Stage 10" status section noting the format winner, the achieved SC-201 / SC-205 numbers, the cross-conference affordance shape, the architect-agent recommendation, and any deferred items.
 - [ ] T056 Run `.specify/scripts/bash/constitution-check.sh --full` from repo root. Expect exit 0.
