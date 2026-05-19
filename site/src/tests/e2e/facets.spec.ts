@@ -22,7 +22,7 @@ test.describe('US4: interactive facets', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
 	test('clicking a facet option narrows the result set', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('search-input').waitFor();
 		await page.getByTestId('result-card').first().waitFor({ timeout: 10_000 });
 		const before = await resultCount(page);
@@ -43,7 +43,7 @@ test.describe('US4: interactive facets', () => {
 	});
 
 	test('other facet counts recompute against the narrowed set', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('search-input').waitFor();
 		await page.getByTestId('result-card').first().waitFor({ timeout: 10_000 });
 		// Sample a count from a second facet group BEFORE filtering.
@@ -71,7 +71,7 @@ test.describe('US4: interactive facets', () => {
 	});
 
 	test('Clear releases every active facet at once', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('search-input').waitFor();
 		await page.getByTestId('result-card').first().waitFor({ timeout: 10_000 });
 		const before = await resultCount(page);

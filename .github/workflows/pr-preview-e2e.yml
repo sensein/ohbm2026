@@ -118,11 +118,11 @@ jobs:
           # `PLAYWRIGHT_BASE_URL` is the FULL URL of the conference home
           # for the PR preview — origin + per-PR prefix + `/ohbm2026/`.
           # workflow_run reads THIS file from main (not the PR head), so
-          # this env var is the bootstrap that lets the subpath-aware
-          # e2e refactor on the PR pick up the right URL. Specs in the
-          # refactored suite resolve `./about/` and `./abstract/<id>/`
-          # against it, so the PR preview is what gets tested instead of
-          # falling through to production.
+          # any future change to this env var needs to land via a
+          # bootstrap PR before the consuming spec refactor (see #25 →
+          # #24). Specs in the refactored suite resolve `./about/` and
+          # `./abstract/<id>/` against this baseURL, so the suite hits
+          # the PR deploy instead of silently falling through to prod.
           PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org/pr-${{ steps.pr.outputs.number }}/ohbm2026/
           UI_DATA_AVAILABLE: '1'
         run: pnpm exec playwright test --project=chromium

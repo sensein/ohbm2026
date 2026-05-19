@@ -18,7 +18,7 @@ test.describe('US5: saved-list cart + email export', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
 	test('add via card icon, reload, drawer still shows the item', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('search-input').waitFor();
 		const card = page.getByTestId('result-card').first();
 		await card.waitFor({ timeout: 10_000 });
@@ -42,7 +42,7 @@ test.describe('US5: saved-list cart + email export', () => {
 	});
 
 	test('clear empties the cart', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('search-input').waitFor();
 		await page
 			.getByTestId('result-card')
@@ -58,7 +58,7 @@ test.describe('US5: saved-list cart + email export', () => {
 	});
 
 	test('email-my-list opens a mailto: URL with the poster_ids', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await page.getByTestId('search-input').waitFor();
 		const card = page.getByTestId('result-card').first();
 		await card.waitFor({ timeout: 10_000 });

@@ -6,7 +6,7 @@ test.describe('US1: browse + search + detail (desktop)', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
 	test('search bar visible within 3s, result cards render, detail opens', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		await expect(page.getByTestId('search-input')).toBeVisible({ timeout: 3000 });
 
 		// Wait for the result list to hydrate (any non-zero card count).
@@ -54,7 +54,7 @@ test.describe('US1: mobile layout (360 × 640 — SC-004 minimum)', () => {
 		});
 		const page = await context.newPage();
 		try {
-			await page.goto('/');
+			await page.goto('./');
 			await expect(page.getByTestId('search-input')).toBeVisible({ timeout: 3000 });
 			const scroll = await page.evaluate(() => ({
 				scrollWidth: document.documentElement.scrollWidth,
@@ -69,7 +69,7 @@ test.describe('US1: mobile layout (360 × 640 — SC-004 minimum)', () => {
 
 test.describe('US1: build provenance (FR-022 / SC-011)', () => {
 	test('footer carries the build_info short SHA on every route', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		const footer = page.getByTestId('build-info-footer');
 		await expect(footer).toBeVisible();
 		const shortSha = await page.getByTestId('build-info-short-sha').textContent();
@@ -77,7 +77,7 @@ test.describe('US1: build provenance (FR-022 / SC-011)', () => {
 	});
 
 	test('placeholder route renders the canonical title', async ({ page }) => {
-		await page.goto('/');
+		await page.goto('./');
 		expect(await page.title()).toBe('OHBM 2026 Atlas (beta)');
 	});
 });

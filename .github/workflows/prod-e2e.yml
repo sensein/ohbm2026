@@ -1,9 +1,13 @@
 name: prod-e2e
 
 # Run the Playwright e2e suite against the production URL after every
-# main-branch deploy. If it fails, file a GitHub issue tagged
-# `prod-e2e-fail` so the regression isn't silent — production failures
-# can otherwise sit undetected for days.
+# production deploy. Sandbox deploys are exercised by humans and tested
+# by the PR-preview e2e job on each PR before merge — this workflow is
+# purely the post-prod regression guard.
+#
+# If e2e fails, file a GitHub issue tagged `prod-e2e-fail` so the
+# regression isn't silent — production failures can otherwise sit
+# undetected for days.
 
 on:
   workflow_run:
@@ -18,8 +22,44 @@ permissions:
   actions: read
 
 jobs:
-  e2e:
+  resolve-target:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.read.outputs.target }}
+    steps:
+      - name: Download deploy target artifact (workflow_run path)
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-target
+          path: deploy-meta
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        continue-on-error: true
+      - name: Read deploy target
+        id: read
+        run: |
+          # workflow_dispatch runs are always treated as production —
+          # the operator triggered this on purpose to re-run prod
+          # regression. workflow_run runs read the artifact written by
+          # deploy-ui (sandbox vs production). If the artifact is
+          # missing (e.g. older deploy-ui run that pre-dates this
+          # change), default to skipping rather than testing the wrong
+          # URL.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            target=production
+          elif [ -f deploy-meta/target.txt ]; then
+            target=$(tr -d '[:space:]' < deploy-meta/target.txt)
+          else
+            target=skip
+          fi
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "Resolved target: $target"
+
+  e2e:
+    needs: resolve-target
+    if: needs.resolve-target.outputs.target == 'production'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -62,7 +102,10 @@ jobs:
         id: e2e
         working-directory: site
         env:
-          PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org
+          # `PLAYWRIGHT_BASE_URL` terminates at the conference home so
+          # specs that use relative paths (`./about/`, `./abstract/...`)
+          # don't accidentally land on the root redirect island.
+          PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org/ohbm2026/
           UI_DATA_AVAILABLE: '1'
         run: pnpm exec playwright test --project=chromium
 
