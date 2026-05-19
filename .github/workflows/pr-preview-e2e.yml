@@ -30,6 +30,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # The triggering workflow_run carries the head SHA; resolve the
+          # PR number from it. (`event.workflow_run.pull_requests` is
+          # often empty for fork PRs; using `gh pr list --search` is the
+          # robust path for in-repo PRs, which is what `pr-preview.yml`
+          # restricts to anyway.)
           PR=$(gh pr list --repo "${{ github.repository }}" --search "${{ github.event.workflow_run.head_sha }}" --state open --json number --jq '.[0].number')
           if [ -z "$PR" ] || [ "$PR" = "null" ]; then
             echo "::error::Could not resolve PR number for SHA ${{ github.event.workflow_run.head_sha }}"
