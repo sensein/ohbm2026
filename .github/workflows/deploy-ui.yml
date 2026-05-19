@@ -66,16 +66,31 @@ jobs:
               // an open PR whose head branch happens to contain this
               // commit (rare, but possible after a force-push) MUST
               // NOT promote a push to production.
+              //
+              // The PR-association index lags the merge by a few
+              // seconds — squash-merges arriving at `push:main` often
+              // hit `listPullRequestsAssociatedWithCommit` BEFORE the
+              // index has caught up, returning an empty array and
+              // demoting the deploy to sandbox. Retry on empty for up
+              // to ~30 s with linear backoff before falling through.
               const sha = context.sha;
-              const { data: prs } =
-                await github.rest.repos.listPullRequestsAssociatedWithCommit({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  commit_sha: sha,
-                });
-              const pr = prs.find(
-                (p) => p.merge_commit_sha === sha && p.merged_at,
-              );
+              let pr = null;
+              for (let attempt = 0; attempt < 6; attempt++) {
+                const { data: prs } =
+                  await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    commit_sha: sha,
+                  });
+                pr = prs.find(
+                  (p) => p.merge_commit_sha === sha && p.merged_at,
+                );
+                if (pr) break;
+                core.info(
+                  `PR-association lookup attempt ${attempt + 1}/6 returned no match for ${sha.slice(0, 7)}; retrying in 5 s…`,
+                );
+                await new Promise((r) => setTimeout(r, 5000));
+              }
               const labels = (pr?.labels || []).map((l) => l.name);
               target = labels.includes('deploy-production') ? 'production' : 'sandbox';
               core.info(
