@@ -25,6 +25,62 @@ from markdownify import markdownify
 _RECURSION_FLOOR = 5000
 
 
+# Unicode superscript / subscript characters that authors paste in
+# directly (instead of using `<sup>N</sup>`). Latin Modern lacks
+# these glyphs and Tectonic refuses to fall through to a substitute
+# font — so we normalise them BEFORE pandoc emits LaTeX. Each cluster
+# of contiguous super/sub chars maps to a single `^...^` / `~...~`
+# pandoc token; non-contiguous occurrences stay independent.
+_SUPER_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+_SUB_DIGITS = "₀₁₂₃₄₅₆₇₈₉"
+_SUPER_SIGNS = {
+    "⁺": "+",  # SUPERSCRIPT PLUS SIGN
+    "⁻": "-",  # SUPERSCRIPT MINUS
+    "⁼": "=",  # SUPERSCRIPT EQUALS SIGN
+    "⁽": "(",
+    "⁾": ")",
+    "ⁿ": "n",  # SUPERSCRIPT LATIN SMALL LETTER N
+}
+_SUB_SIGNS = {
+    "₊": "+",
+    "₋": "-",
+    "₌": "=",
+    "₍": "(",
+    "₎": ")",
+}
+
+_SUPER_RE = re.compile(
+    "([" + _SUPER_DIGITS + "".join(_SUPER_SIGNS.keys()) + "]+)"
+)
+_SUB_RE = re.compile(
+    "([" + _SUB_DIGITS + "".join(_SUB_SIGNS.keys()) + "]+)"
+)
+
+_SUPER_TRANS = str.maketrans(
+    {ch: a for ch, a in zip(_SUPER_DIGITS, "0123456789")} | _SUPER_SIGNS
+)
+_SUB_TRANS = str.maketrans(
+    {ch: a for ch, a in zip(_SUB_DIGITS, "0123456789")} | _SUB_SIGNS
+)
+
+
+def _normalise_unicode_super_sub(text: str) -> str:
+    """Replace contiguous Unicode super/subscript runs with pandoc
+    `^...^` / `~...~` literals so the LaTeX renderer never sees a
+    glyph its font can't represent (Latin Modern lacks U+2074, etc.).
+    """
+
+    def _super(m: "re.Match[str]") -> str:
+        return "^" + m.group(0).translate(_SUPER_TRANS) + "^"
+
+    def _sub(m: "re.Match[str]") -> str:
+        return "~" + m.group(0).translate(_SUB_TRANS) + "~"
+
+    text = _SUPER_RE.sub(_super, text)
+    text = _SUB_RE.sub(_sub, text)
+    return text
+
+
 def html_to_pandoc_md(html: str) -> str:
     """Convert an Oxford-corpus HTML fragment to pandoc markdown.
 
@@ -71,6 +127,12 @@ def html_to_pandoc_md(html: str) -> str:
     finally:
         if prior_limit < _RECURSION_FLOOR:
             sys.setrecursionlimit(prior_limit)
+
+    # Normalise direct Unicode super/subscript glyphs into pandoc
+    # `^...^` / `~...~` literals. Run AFTER markdownify so we operate
+    # on plain text — any `<sup>`/`<sub>` already became `^...^` /
+    # `~...~` in the BeautifulSoup pre-pass above.
+    md = _normalise_unicode_super_sub(md)
 
     # markdownify leaves trailing whitespace per line + collapses
     # multiple blank lines unevenly; tighten the output so re-runs

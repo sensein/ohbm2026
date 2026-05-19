@@ -49,6 +49,18 @@ class TestHtmlToMd(unittest.TestCase):
         md = html_to_pandoc_md("<p>x&plusmn;y</p>")
         self.assertIn("±", md)
 
+    def test_unicode_superscript_normalised(self) -> None:
+        # Authors sometimes paste literal Unicode super/subscript
+        # glyphs instead of using <sup>/<sub>. Latin Modern lacks the
+        # codepoints, so we coerce them to pandoc literals before
+        # LaTeX sees the input.
+        md = html_to_pandoc_md("<p>fMRI⁴ data is processed in H₂O</p>")
+        self.assertIn("^4^", md)
+        self.assertIn("~2~", md)
+        # Multi-char run collapses into a single pandoc token.
+        md = html_to_pandoc_md("<p>x²⁰²⁶ years</p>")
+        self.assertIn("^2026^", md)
+
     def test_deterministic(self) -> None:
         html = (
             '<p style="x" id="isPasted">A<sup>1</sup></p>'

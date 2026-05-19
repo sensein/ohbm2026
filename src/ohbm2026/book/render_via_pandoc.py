@@ -129,7 +129,13 @@ def to_pdf(
     argv = [
         pandoc,
         str(md_path),
-        "--from=markdown+raw_tex+pandoc_title_block",
+        # `-strikeout` disables pandoc's `~~strikethrough~~` markdown
+        # extension — that's the writer that emits `\sout{}` calls,
+        # which fail under the `soul` LaTeX package on complex content
+        # (e.g. citations + math + accented chars in the strikeout
+        # span). A book of abstracts has no legitimate strikethrough,
+        # so dropping the extension is purely defensive.
+        "--from=markdown+raw_tex+pandoc_title_block-strikeout",
         "--to=pdf",
         f"--pdf-engine={engine_binary}",
         "-H",
