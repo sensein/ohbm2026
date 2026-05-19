@@ -1,0 +1,131 @@
+name: prod-e2e
+
+# Run the Playwright e2e suite against the production URL after every
+# main-branch deploy. If it fails, file a GitHub issue tagged
+# `prod-e2e-fail` so the regression isn't silent — production failures
+# can otherwise sit undetected for days.
+
+on:
+  workflow_run:
+    workflows: ['deploy-ui']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  e2e:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Set up Node 20 + pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Enable pnpm
+        run: npm install --global pnpm@10
+
+      - name: Install site deps
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        working-directory: site
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Wait for production deploy to be live
+        run: |
+          # gh-pages CDN propagation lags the deploy workflow.
+          URL="https://abstractatlas.brainkb.org/ohbm2026/"
+          echo "Probing $URL"
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
+            if [ "$code" = "200" ]; then
+              echo "Prod live after ${i} polls."
+              break
+            fi
+            echo "  [$i/30] HTTP $code — sleeping 10s"
+            sleep 10
+          done
+
+      - name: Run Playwright e2e against production
+        id: e2e
+        working-directory: site
+        env:
+          PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org
+          UI_DATA_AVAILABLE: '1'
+        run: pnpm exec playwright test --project=chromium
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        id: report
+        with:
+          name: playwright-report-prod-${{ github.run_id }}
+          path: site/playwright-report/
+          retention-days: 30
+
+      - name: File issue on prod e2e failure
+        if: failure()
+        uses: actions/github-script@v7
+        env:
+          REPORT_NAME: playwright-report-prod-${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        with:
+          script: |
+            const runUrl = process.env.RUN_URL;
+            const deploySha = (process.env.DEPLOY_SHA || '').slice(0, 7);
+            const title = `prod e2e regression on ${deploySha}`;
+            const body = [
+              `Playwright e2e suite failed against production after the latest main-branch deploy.`,
+              ``,
+              `**Workflow run:** ${runUrl}`,
+              `**Deploy SHA:** \`${process.env.DEPLOY_SHA}\``,
+              `**Production URL:** https://abstractatlas.brainkb.org/ohbm2026/`,
+              ``,
+              `The Playwright report is attached as the \`${process.env.REPORT_NAME}\` artifact on the workflow run (30-day retention).`,
+              ``,
+              `Triage:`,
+              `1. Open the workflow run, download the report artifact, and inspect the failed traces.`,
+              `2. Determine whether the failure reflects a real regression or an environmental flake (CDN, Dropbox 5xx, etc.).`,
+              `3. If real: open a fix PR. If transient: close this issue with the rationale recorded.`,
+            ].join('\n');
+            // De-dupe: if there's already an open `prod-e2e-fail` issue
+            // for the same SHA, comment instead of opening a duplicate.
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'prod-e2e-fail',
+              state: 'open',
+              per_page: 50,
+            });
+            const dup = existing.find((iss) => iss.title.endsWith(deploySha));
+            if (dup) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: dup.number,
+                body: `Another failed run on the same deploy SHA: ${runUrl}`,
+              });
+              core.info(`Commented on existing issue #${dup.number}`);
+              return;
+            }
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['prod-e2e-fail', 'priority:high'],
+            });
+            core.info(`Filed issue #${issue.number}: ${issue.html_url}`);
