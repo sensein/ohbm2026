@@ -81,10 +81,43 @@ function bytesAsAsyncBuffer(bytes: Uint8Array) {
 	};
 }
 
+/**
+ * Walk decoded Parquet rows and coerce any BigInt values to Number.
+ * pyarrow stores integer columns as INT64 by default; hyparquet returns
+ * INT64 columns as BigInt for safety. Stage-6 UI consumers expect plain
+ * Numbers (abstract_ids, cluster_ids, neighbour_ids) — BigInts break
+ * `===` joins against Number-typed IDs from other shards and can't be
+ * JSON-serialised.
+ *
+ * Our IDs all fit in float64 (max abstract_id ~10^6); the coercion is
+ * loss-free for this dataset. If a future corpus grows past 2^53, the
+ * fix is to cast columns to INT32 in the Python emitter explicitly.
+ */
+function coerceBigInts(value: unknown): unknown {
+	if (typeof value === 'bigint') return Number(value);
+	if (Array.isArray(value)) {
+		for (let i = 0; i < value.length; i++) value[i] = coerceBigInts(value[i]);
+		return value;
+	}
+	if (value !== null && typeof value === 'object') {
+		for (const k of Object.keys(value)) {
+			(value as Record<string, unknown>)[k] = coerceBigInts(
+				(value as Record<string, unknown>)[k]
+			);
+		}
+		return value;
+	}
+	return value;
+}
+
 async function decodeBlob(blob: Uint8Array): Promise<unknown[]> {
 	// `utf8: true` (default) is what we want for the inner tables — string
 	// columns come back as JS strings.
-	return parquetReadObjects({ file: bytesAsAsyncBuffer(blob), compressors });
+	const rows = (await parquetReadObjects({
+		file: bytesAsAsyncBuffer(blob),
+		compressors
+	})) as unknown[];
+	return coerceBigInts(rows) as unknown[];
 }
 
 async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknown>> {
