@@ -150,7 +150,77 @@ def to_docx(
     *,
     strip_metadata: bool = True,
 ) -> None:
-    """US3 (T033). Stubbed for now so the CLI can lazy-import."""
-    raise NotImplementedError(
-        "DOCX rendering lands in US3 (T033); use --format md or --format pdf for now"
+    """Run pandoc against `md_path`, writing a `.docx` to `output_path`.
+
+    Strips `docProps/core.xml` timestamps for determinism (R6) unless
+    `strip_metadata` is False. Pandoc's docx writer doesn't emit
+    PAGEREF field codes, so the author index in the resulting docx
+    uses clickable anchor cross-references — documented limitation
+    in `contracts/cli.md § Known limitations`.
+    """
+    pandoc = shutil.which("pandoc") or _which_or_raise(
+        "pandoc", "see quickstart.md step 2"
     )
+    resource_path = md_path.parent
+    argv = [
+        pandoc,
+        str(md_path),
+        "--from=markdown+raw_tex",
+        "--to=docx",
+        f"--resource-path={resource_path}",
+        "--standalone",
+        "-o",
+        str(output_path),
+    ]
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise BookBuildError(
+            f"pandoc returned non-zero ({proc.returncode}) building DOCX",
+            details=(proc.stderr or "").strip(),
+        )
+
+    if strip_metadata:
+        _strip_docx_metadata(output_path)
+
+
+def _strip_docx_metadata(docx_path: pathlib.Path) -> None:
+    """Rewrite docProps/core.xml created/modified to a fixed epoch +
+    rebuild the zip with sorted entries and zeroed mtimes (R6).
+    """
+    import io
+    import re
+    import zipfile
+
+    fixed_iso = "1970-01-01T00:00:00Z"
+    payload: dict[str, bytes] = {}
+    with zipfile.ZipFile(docx_path, "r") as zin:
+        for name in zin.namelist():
+            payload[name] = zin.read(name)
+
+    core_xml = payload.get("docProps/core.xml")
+    if core_xml is not None:
+        text = core_xml.decode("utf-8", errors="replace")
+        # Both dcterms:created and dcterms:modified carry an ISO-8601
+        # value. Replace them in-place; pattern is permissive (no DTD
+        # validation required).
+        text = re.sub(
+            r"(<dcterms:created[^>]*>)[^<]*(</dcterms:created>)",
+            rf"\g<1>{fixed_iso}\g<2>",
+            text,
+        )
+        text = re.sub(
+            r"(<dcterms:modified[^>]*>)[^<]*(</dcterms:modified>)",
+            rf"\g<1>{fixed_iso}\g<2>",
+            text,
+        )
+        payload["docProps/core.xml"] = text.encode("utf-8")
+
+    # Re-zip with sorted entry order + zeroed mtimes + deterministic
+    # compression so two runs produce byte-identical .docx files.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zout:
+        for name in sorted(payload):
+            info = zipfile.ZipInfo(filename=name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zout.writestr(info, payload[name])
+    docx_path.write_bytes(buf.getvalue())

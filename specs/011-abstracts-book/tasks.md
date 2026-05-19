@@ -94,12 +94,12 @@ Single-project layout (per `plan.md § Project Structure`): production code unde
 
 ### Tests for User Story 2 ⚠️ Write FIRST and watch fail
 
-- [ ] T029 [P] [US2] `tests/test_book_sort.py` — build a `Book` from the fixture corpus three times (once per sort strategy); assert (a) `poster_id` order is numeric ascending, (b) `title` order is case-insensitive lexicographic with poster_id tie-break, (c) `first_author` order is by `(last.casefold(), first.casefold(), title.casefold())`; (d) each sort produces the SAME set of entries (no entries dropped/added across sort strategies).
+- [X] T029 [P] [US2] `tests/test_book_sort.py` — build a `Book` from the fixture corpus three times (once per sort strategy); assert (a) `poster_id` order is numeric ascending, (b) `title` order is case-insensitive lexicographic with poster_id tie-break, (c) `first_author` order is by `(last.casefold(), first.casefold(), title.casefold())`; (d) each sort produces the SAME set of entries (no entries dropped/added across sort strategies).
 
 ### Implementation for User Story 2
 
-- [ ] T030 [US2] Extend `src/ohbm2026/book/sort.py` with `by_title(entries)` and `by_first_author(entries)` following the sort-key rules in `data-model.md § Layer 2 § Construction rules § 7`.
-- [ ] T031 [US2] Extend `src/ohbm2026/book/cli.py` — broaden `--sort` choices to `{poster_id, title, first_author}`; dispatch to the appropriate strategy by name; ensure `--state-key` derivation incorporates the sort choice (it already does per T025, just verify).
+- [X] T030 [US2] Extend `src/ohbm2026/book/sort.py` with `by_title(entries)` and `by_first_author(entries)` following the sort-key rules in `data-model.md § Layer 2 § Construction rules § 7`.
+- [X] T031 [US2] Extend `src/ohbm2026/book/cli.py` — broaden `--sort` choices to `{poster_id, title, first_author}`; dispatch to the appropriate strategy by name; ensure `--state-key` derivation incorporates the sort choice (it already does per T025, just verify).
 
 **Checkpoint**: All three sort orders work independently. User Stories 1 + 2 both functional.
 
@@ -113,12 +113,12 @@ Single-project layout (per `plan.md § Project Structure`): production code unde
 
 ### Tests for User Story 3 ⚠️ Write FIRST and watch fail
 
-- [ ] T032 [P] [US3] `tests/test_book_render_docx.py` — `unittest.skipUnless(shutil.which("pandoc"), …)`; render fixture corpus to DOCX; assert (a) pandoc exit code 0, (b) `python-docx.Document(path).paragraphs` includes a Heading-1 per abstract, (c) the embedded inline-shape count matches the fixture's figure count, (d) re-running produces a `book.docx` whose `pandoc -t plain` output is byte-identical (SC-007b).
+- [X] T032 [P] [US3] `tests/test_book_render_docx.py` — `unittest.skipUnless(shutil.which("pandoc"), …)`; render fixture corpus to DOCX; assert (a) pandoc exit code 0, (b) `python-docx.Document(path).paragraphs` includes a Heading-1 per abstract, (c) the embedded inline-shape count matches the fixture's figure count, (d) re-running produces a `book.docx` whose `pandoc -t plain` output is byte-identical (SC-007b).
 
 ### Implementation for User Story 3
 
-- [ ] T033 [US3] Extend `src/ohbm2026/book/render_via_pandoc.py` — add `to_docx(md_path, output_path)` with the pandoc argv from `research.md § R3` (`--to=docx`, no LaTeX flags). After pandoc, call `_strip_docx_metadata(output_path)`: open the `.docx` as a `zipfile.ZipFile`; rewrite `docProps/core.xml` to set `dcterms:created` + `dcterms:modified` to `1970-01-01T00:00:00Z`; re-zip with sorted entries + zeroed mtimes + `ZIP_DEFLATED` level 9 (R6).
-- [ ] T034 [US3] Extend `src/ohbm2026/book/cli.py` — broaden `--format` choices to `{md, pdf, docx, all}`; when `all`, orchestrate `emit_book_md` → `to_pdf` → `to_docx` in sequence (md first since pdf/docx both depend on it); preflight checks both pandoc (always) and xelatex (only when `pdf` or `all`).
+- [X] T033 [US3] Extend `src/ohbm2026/book/render_via_pandoc.py` — add `to_docx(md_path, output_path)` with the pandoc argv from `research.md § R3` (`--to=docx`, no LaTeX flags). After pandoc, call `_strip_docx_metadata(output_path)`: open the `.docx` as a `zipfile.ZipFile`; rewrite `docProps/core.xml` to set `dcterms:created` + `dcterms:modified` to `1970-01-01T00:00:00Z`; re-zip with sorted entries + zeroed mtimes + `ZIP_DEFLATED` level 9 (R6).
+- [X] T034 [US3] Extend `src/ohbm2026/book/cli.py` — broaden `--format` choices to `{md, pdf, docx, all}`; when `all`, orchestrate `emit_book_md` → `to_pdf` → `to_docx` in sequence (md first since pdf/docx both depend on it); preflight checks both pandoc (always) and xelatex (only when `pdf` or `all`).
 
 **Checkpoint**: All three user stories independently functional. Feature is feature-complete for the spec's three priorities.
 
