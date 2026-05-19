@@ -95,6 +95,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "default six (repeatable).",
     )
     p.add_argument(
+        "--max-image-width",
+        type=int,
+        default=1800,
+        help=(
+            "Cap embedded figure pixel width at this value (Pillow LANCZOS "
+            "resize, aspect ratio preserved). 1800 px ≈ 277 DPI at 6.5\" "
+            "display — publication quality. Default 1800 keeps the corpus "
+            "docx under ~1 GB; without resize the real-corpus docx hits "
+            "~6 GB which Word refuses to open. Set to 0 to disable "
+            "resizing (byte-copy from source)."
+        ),
+    )
+    p.add_argument(
         "--no-determinism-strip",
         action="store_true",
         help="Skip the PDF/DOCX metadata-strip post-process (debug only).",
@@ -217,7 +230,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # Emit the canonical markdown bundle (always).
-    emit_book_md(book, staging_dir)
+    max_w: int | None = args.max_image_width if args.max_image_width > 0 else None
+    emit_book_md(book, staging_dir, max_image_width=max_w)
 
     strip_metadata = not args.no_determinism_strip
 

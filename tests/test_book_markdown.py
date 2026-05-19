@@ -118,5 +118,70 @@ class TestMarkdownBundle(unittest.TestCase):
         self.assertIn("#abstract-0004", block)
 
 
+class TestFigureResize(unittest.TestCase):
+    """`emit_book_md`'s `max_image_width` controls a Pillow downsize
+    pass during the figure-copy step. Fixture PNGs are 2400×2400; a
+    1000 px cap yields 1000×1000 copies. A 0/None cap byte-copies."""
+
+    def setUp(self) -> None:
+        try:
+            from dataclasses import replace
+            from ohbm2026.book.author_index import build_author_index
+            from ohbm2026.book.corpus import load_book
+            from ohbm2026.book.render_markdown import emit_book_md
+            from ohbm2026.book.sort import by_poster_id
+        except ImportError:
+            self.skipTest("renderers not yet implemented")
+        self.replace = replace
+        self.build_author_index = build_author_index
+        self.load_book = load_book
+        self.emit_book_md = emit_book_md
+        self.by_poster_id = by_poster_id
+
+    def _build_book(self):
+        book = self.load_book(
+            corpus_path=_FIX / "abstracts.json",
+            authors_path=_FIX / "authors.json",
+            withdrawn_path=_FIX / "abstracts_withdrawn.json",
+            assets_root=_FIX / "assets",
+        )
+        entries = self.by_poster_id(book.entries)
+        return self.replace(
+            book, entries=entries, author_index=self.build_author_index(entries)
+        )
+
+    def test_resize_when_max_width_below_source(self) -> None:
+        from PIL import Image as _Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            self.emit_book_md(self._build_book(), out, max_image_width=1000)
+            sample = next((out / "fig_assets").iterdir())
+            with _Image.open(sample) as img:
+                self.assertEqual(img.width, 1000)
+                self.assertEqual(img.height, 1000)  # 2400×2400 square
+
+    def test_byte_copy_when_max_width_none(self) -> None:
+        from PIL import Image as _Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            self.emit_book_md(self._build_book(), out, max_image_width=None)
+            sample = next((out / "fig_assets").iterdir())
+            with _Image.open(sample) as img:
+                self.assertEqual(img.width, 2400)
+
+    def test_no_resize_when_source_smaller_than_max(self) -> None:
+        from PIL import Image as _Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = pathlib.Path(tmp)
+            # 5000 > 2400 → source already small enough; expect byte-copy.
+            self.emit_book_md(self._build_book(), out, max_image_width=5000)
+            sample = next((out / "fig_assets").iterdir())
+            with _Image.open(sample) as img:
+                self.assertEqual(img.width, 2400)
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

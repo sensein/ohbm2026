@@ -274,13 +274,26 @@ def _read_template() -> str:
     return pkg.joinpath("book.md.template").read_text(encoding="utf-8")
 
 
-def emit_book_md(book: Book, output_dir: pathlib.Path) -> None:
+def emit_book_md(
+    book: Book,
+    output_dir: pathlib.Path,
+    *,
+    max_image_width: int | None = 1800,
+) -> None:
     """Write `book.md` + the flat `fig_assets/` directory.
 
     Idempotent: the same `book` produces byte-identical output on
     re-run (SC-007a). The `built_at_date` field in the header is a
     fixed string (`1970-01-01`) so the markdown is byte-identical;
     the canonical run-time timestamp lives in `provenance.json`.
+
+    `max_image_width` (default 1800 px ≈ 277 DPI at 6.5" display —
+    publication-quality print) caps the figure dimensions written
+    into ``fig_assets/``. Set to None to copy figures byte-for-byte
+    from the original `local_path`. Resizing keeps PNG bit-depth +
+    JPEG quality at sensible defaults; aspect ratio preserved.
+    Without resize the OHBM corpus produces a 6 GB pandoc docx that
+    Word refuses to open.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     fig_dir = output_dir / "fig_assets"
@@ -330,4 +343,51 @@ def emit_book_md(book: Book, output_dir: pathlib.Path) -> None:
             )
             dest = fig_dir / filename
             if fig.local_path.exists() and not dest.exists():
-                shutil.copy2(fig.local_path, dest)
+                _copy_figure(fig.local_path, dest, max_image_width)
+
+
+def _copy_figure(
+    src: pathlib.Path, dest: pathlib.Path, max_width: int | None
+) -> None:
+    """Copy `src` to `dest`, optionally downsizing if its pixel width
+    exceeds `max_width`. Preserves format (PNG → PNG, JPEG → JPEG).
+    Falls back to byte-copy when Pillow can't open the source.
+    """
+    if max_width is None:
+        shutil.copy2(src, dest)
+        return
+    # Lazy import — keeps Pillow off the startup path for callers
+    # that don't render figures (e.g. unit tests on the markdown
+    # composer only).
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(src) as img:
+            if img.width <= max_width:
+                # Already small enough; byte-copy.
+                shutil.copy2(src, dest)
+                return
+            scale = max_width / img.width
+            new_size = (max_width, max(1, round(img.height * scale)))
+            resized = img.resize(new_size, Image.Resampling.LANCZOS)
+            # Format-preserving save. PNG keeps full quality; JPEG
+            # uses q=85 (standard print/web threshold, matches the
+            # Stage-2 figure-analysis pipeline's compression policy).
+            fmt = (img.format or "").upper()
+            save_kwargs: dict[str, object] = {"optimize": True}
+            if fmt == "JPEG":
+                save_kwargs["quality"] = 85
+                save_kwargs["progressive"] = True
+            elif fmt == "PNG":
+                save_kwargs["compress_level"] = 9
+            # If RGBA → RGB conversion is needed for JPEG.
+            save_image = resized
+            if fmt == "JPEG" and save_image.mode in ("RGBA", "P", "LA"):
+                save_image = save_image.convert("RGB")
+            save_image.save(dest, format=fmt or "PNG", **save_kwargs)
+    except (UnidentifiedImageError, OSError):
+        # Anything Pillow refuses to open — fall back to a raw copy
+        # so the figure still appears in the bundle. The figure-
+        # resolution probe at corpus load will already have flagged
+        # it; emit_book_md doesn't second-guess.
+        shutil.copy2(src, dest)
