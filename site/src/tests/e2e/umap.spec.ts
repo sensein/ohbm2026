@@ -5,6 +5,19 @@ const DATA_AVAILABLE = process.env.UI_DATA_AVAILABLE !== '0';
 test.describe('US2: UMAP panel + lasso + model selector', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
 
+	// The `showMap` store defaults to true (new users land with the map
+	// open). Reset it on every test in this file so the "click toggle to
+	// open" sequences below test the open transition deterministically.
+	test.beforeEach(async ({ context }) => {
+		await context.addInitScript(() => {
+			try {
+				window.localStorage.setItem('ohbm2026.ui.showMap.v1', '0');
+			} catch {
+				/* private mode / sandboxed about:blank — best effort */
+			}
+		});
+	});
+
 	test('opens map; lazy-loads Plotly; both 2D + 3D charts render side-by-side', async ({
 		page
 	}) => {
