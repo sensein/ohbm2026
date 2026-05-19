@@ -30,6 +30,7 @@
 		'brain_regions',
 		'brain_networks',
 		'keywords',
+		'standby_block',
 		'accepted_for'
 	];
 
