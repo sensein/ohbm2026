@@ -321,6 +321,34 @@ def _validate_invariants(
             f"(ids: {leaked[:5]}{'...' if len(leaked) > 5 else ''})"
         )
 
+    # 3a. Poster-id uniqueness — warn-only. The Oxford ingest preserves
+    # all submission IDs (unique), but poster_id is assigned downstream
+    # by the program committee and can collide (one known collision on
+    # `2335` between Oxford submissions 1246466 + 1248744). The UI's
+    # `loadAbstractByPosterId('<dup>')` resolves to whichever record
+    # appears first — surfacing the collision here keeps it visible
+    # until an organizer reassigns one of the IDs upstream.
+    from collections import Counter as _Counter
+
+    poster_id_counts = _Counter(
+        r.get("poster_id") for r in abstract_records if r.get("poster_id")
+    )
+    duplicates = {pid: c for pid, c in poster_id_counts.items() if c > 1}
+    if duplicates:
+        # Map each duplicate poster_id back to its Oxford submission ids so
+        # an organizer can chase the fix at the source.
+        groups: dict[str, list[Any]] = {pid: [] for pid in duplicates}
+        for r in abstract_records:
+            pid = r.get("poster_id")
+            if pid in groups:
+                groups[pid].append(r.get("abstract_id") or r.get("id"))
+        print(
+            f"warning: {len(duplicates)} poster_id collision(s) — "
+            f"poster_id is not unique in the accepted corpus. "
+            f"Upstream Oxford submissions sharing a poster_id: "
+            + "; ".join(f"poster_id={pid} → {ids}" for pid, ids in groups.items())
+        )
+
     # 4. Author referential integrity (now enforced — see US1 remap in
     #    abstracts.build_abstracts_records).
     author_ids = {a["author_id"] for a in authors["authors"]}
