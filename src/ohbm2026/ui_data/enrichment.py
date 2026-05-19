@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import zlib
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +61,51 @@ def _iter_enriched_rows(sqlite_path: Path) -> Iterable[tuple[int, dict[str, Any]
         con.close()
 
 
+def iter_enrichment(
+    *,
+    enriched_path: Path | None,
+    abstract_ids: Iterable[int],
+) -> Iterator[tuple[dict[str, Any], dict[str, set[str]]]]:
+    """Yield per-abstract enrichment rows AND the accumulating model_ids set.
+
+    Stage-10 entry point. Each yielded tuple is:
+    ``({abstract_id, claims, figures}, {"claims": {…model_ids}, "figures": {…}})``
+
+    The model_ids set is shared mutable state across yields — it builds up
+    as records are consumed. After the iterator exhausts, the caller has
+    the full ``ai_provenance`` set to write into a `meta` table / envelope.
+
+    Records with no claims AND no figures are skipped (Stage-6 semantics:
+    the UI treats a missing key as 'no enrichment available').
+
+    Stage-10 promotes ``abstract_id`` to a column on the row, eliminating
+    the Stage-6 ``{str(id): record}`` `range: Any` (FR-201 / FR-202).
+    """
+    keep_ids = set(abstract_ids)
+    model_ids: dict[str, set[str]] = {"claims": set(), "figures": set()}
+    if enriched_path is None or not Path(enriched_path).exists():
+        return
+    for abstract_id, payload in _iter_enriched_rows(Path(enriched_path)):
+        if abstract_id not in keep_ids:
+            continue
+        claims_raw = payload.get("claims") or []
+        figures_raw = payload.get("figure_interpretation") or []
+        if not claims_raw and not figures_raw:
+            continue
+        claims = [_trim_claim(c) for c in claims_raw if isinstance(c, dict)]
+        figures = [_trim_figure(f) for f in figures_raw if isinstance(f, dict)]
+        for c in claims_raw:
+            if isinstance(c, dict) and c.get("model_id"):
+                model_ids["claims"].add(c["model_id"])
+        for f in figures_raw:
+            if isinstance(f, dict) and f.get("model_id"):
+                model_ids["figures"].add(f["model_id"])
+        yield (
+            {"abstract_id": int(abstract_id), "claims": claims, "figures": figures},
+            model_ids,
+        )
+
+
 def build_enrichment(
     *,
     enriched_path: Path | None,
@@ -71,28 +116,22 @@ def build_enrichment(
 
     Records with no claims AND no figures are omitted from the records dict
     entirely (the UI treats a missing key as "no enrichment available").
-    """
 
-    keep_ids = set(abstract_ids)
+    Wraps ``iter_enrichment`` to preserve the Stage-6 envelope shape (used
+    by the json_shards candidate emitter). The Stage-10 row stream lives
+    in ``iter_enrichment``; this function is the backward-compat list-then-
+    envelope wrapper.
+    """
     records: dict[str, dict[str, Any]] = {}
-    model_ids = {"claims": set(), "figures": set()}
-    if enriched_path is not None and Path(enriched_path).exists():
-        for abstract_id, payload in _iter_enriched_rows(Path(enriched_path)):
-            if abstract_id not in keep_ids:
-                continue
-            claims_raw = payload.get("claims") or []
-            figures_raw = payload.get("figure_interpretation") or []
-            if not claims_raw and not figures_raw:
-                continue
-            claims = [_trim_claim(c) for c in claims_raw if isinstance(c, dict)]
-            figures = [_trim_figure(f) for f in figures_raw if isinstance(f, dict)]
-            for c in claims_raw:
-                if isinstance(c, dict) and c.get("model_id"):
-                    model_ids["claims"].add(c["model_id"])
-            for f in figures_raw:
-                if isinstance(f, dict) and f.get("model_id"):
-                    model_ids["figures"].add(f["model_id"])
-            records[str(abstract_id)] = {"claims": claims, "figures": figures}
+    model_ids_final: dict[str, set[str]] = {"claims": set(), "figures": set()}
+    for row, accumulated in iter_enrichment(
+        enriched_path=enriched_path, abstract_ids=abstract_ids
+    ):
+        records[str(row["abstract_id"])] = {
+            "claims": row["claims"],
+            "figures": row["figures"],
+        }
+        model_ids_final = accumulated  # last value carries the full set
     return {
         "schema_version": SCHEMA_VERSION,
         "build_info": dict(build_info),
@@ -100,8 +139,8 @@ def build_enrichment(
         # them with "+" so the AI-attribution pill can still cite a string. The
         # set is usually a singleton.
         "ai_provenance": {
-            "claims_model_id": "+".join(sorted(model_ids["claims"])) or None,
-            "figures_model_id": "+".join(sorted(model_ids["figures"])) or None,
+            "claims_model_id": "+".join(sorted(model_ids_final["claims"])) or None,
+            "figures_model_id": "+".join(sorted(model_ids_final["figures"])) or None,
         },
         "records": records,
     }

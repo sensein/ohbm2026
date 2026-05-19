@@ -1,0 +1,29 @@
+# Stage-10 LinkML schema — STUB pending bench commitment.
+#
+# This file replaces `specs/008-ui-rewrite/contracts/ui_data.linkml.yaml`
+# once the Phase-0 bench (see `../research.md`) commits to a storage
+# format. The schema's class hierarchy and slot definitions are derived
+# from the format-agnostic entities in `../data-model.md` Layer 1; the
+# format-specific type ranges (per-column types, blob columns, JOIN
+# views) are filled in from the chosen format's per-table layout in
+# `../data-model.md` Layer 2.
+#
+# Validation gates the schema must satisfy when committed (per spec
+# 010-export-redesign, FR-201 + FR-202 + SC-203 + SC-204):
+#
+#   1. `grep -c "range: Any" shards.linkml.yaml` returns either 0 OR
+#      every match has a leading `# LIMITATION:` comment naming the
+#      LinkML construct whose absence forces the looseness.
+#   2. Every Stage-6 `range: Any` slot from `ui_data.linkml.yaml`
+#      (Manifest.topic_shards, Abstract.facets, Enrichment.records)
+#      is either replaced by a concrete inner class OR carries the
+#      `# LIMITATION:` annotation.
+#   3. Secondary looseness identified in the Explore survey
+#      (untyped UMAP arrays, missing ECO-code enum, parallel-array
+#      fields without cross-validation, missing `minimum_cardinality`)
+#      is each tightened OR annotated.
+#   4. `scripts/validate_ui_data.sh` reports 68/68 (or the equivalent
+#      table count for the chosen format) PASS.
+#
+# Until the bench commits, this file stays a stub. Implementation
+# tasks in `tasks.md` block on it.

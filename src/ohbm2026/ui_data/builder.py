@@ -71,6 +71,39 @@ def _resolve_rollup(
     )
 
 
+def _get_writer(output_format: str):
+    """Resolve the format-specific writer module.
+
+    Each writer exposes a ``write(...)`` function with the same signature
+    (see ``formats/gzip_json_shards.py`` for the canonical shape).
+    Adding a new candidate = adding a new module under ``formats/`` and
+    one branch here.
+    """
+    from ohbm2026.ui_data.formats import gzip_json_shards
+
+    if output_format == "gzip-json-shards":
+        return gzip_json_shards
+    if output_format == "parquet-files":
+        from ohbm2026.ui_data.formats import parquet_files
+        return parquet_files
+    if output_format == "parquet-duckdb":
+        from ohbm2026.ui_data.formats import parquet_duckdb
+        return parquet_duckdb
+    if output_format == "sqlite-single":
+        from ohbm2026.ui_data.formats import sqlite_single
+        return sqlite_single
+    if output_format == "duckdb-single":
+        from ohbm2026.ui_data.formats import duckdb_single
+        return duckdb_single
+    if output_format == "arrow-ipc":
+        from ohbm2026.ui_data.formats import arrow_ipc
+        return arrow_ipc
+    if output_format == "parquet-single":
+        from ohbm2026.ui_data.formats import parquet_single
+        return parquet_single
+    raise Stage6BuildError(f"Unknown --output-format: {output_format!r}")
+
+
 def build_ui_data_package(
     *,
     corpus_path: Path,
@@ -84,11 +117,18 @@ def build_ui_data_package(
     output_dir: Path,
     build_info: Mapping[str, str] | None = None,
     minilm_root: Path | None = None,
+    conference_id: str = "ohbm2026",
+    output_format: str = "gzip-json-shards",
 ) -> int:
     """Run the full Stage 6 build.
 
     Returns 0 on success, non-zero on any invariant failure (per
     contracts/data-package.md exit codes).
+
+    Stage-10 (spec 010-export-redesign FR-206) stamps ``conference_id``
+    into the ``build_info`` envelope of every emitted shard so a future
+    multi-conference deploy can disambiguate records by conference
+    without consulting the URL path.
     """
 
     rollup_db = _resolve_rollup(
@@ -103,6 +143,10 @@ def build_ui_data_package(
             rollup_db=rollup_db,
             analysis_root=Path(analysis_root) if analysis_root else None,
         )
+    # Stage-10 stamp: every shard's `build_info` carries `conference_id`.
+    # Stage-6 emitters consume `build_info` as `dict(build_info)` so the
+    # new field propagates without per-emitter changes.
+    build_info = {**build_info, "conference_id": conference_id}
 
     # Build authors first to derive the raw→synthetic id remap; the abstracts
     # builder uses it so `author_ids` references match the authors shard
@@ -165,86 +209,76 @@ def build_ui_data_package(
         build_info=build_info,
     )
 
-    # --- In-place write -------------------------------------------------
-    # Write each shard directly into the output dir. Files that already
-    # exist are truncated in place (preserves inode + Dropbox file_id);
-    # new files are created. After writing, prune any stale shards left
-    # over from prior builds (e.g. cells/topics from a removed cell_key).
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-
-    expected: set[Path] = set()
-
-    def _emit(rel: str, payload: Mapping[str, Any]) -> None:
-        target = output / rel
-        _write_json(target, payload)
-        expected.add(target)
-
-    _emit("manifest.json", manifest)
-    _emit("abstracts.json", abstracts_envelope)
-    _emit("authors.json", authors_envelope)
-    # Claims + figure interpretations live in a separate shard so that the
-    # main abstracts.json stays small enough for first paint. The detail
-    # panel reads `data/enrichment.json` lazily on focus.
+    # --- Compute envelopes ----------------------------------------------
+    # Stage-10 split: the envelope-computation logic (this block, below)
+    # is format-agnostic. The actual on-disk writing is delegated to a
+    # candidate-specific writer module under `formats/` so the bench can
+    # measure Parquet / SQLite / DuckDB / Arrow IPC alongside the
+    # baseline gzip-json-shards path.
     enrichment_envelope = build_enrichment(
         enriched_path=Path(enriched_path) if enriched_path else None,
         abstract_ids=abstract_ids,
         build_info=build_info,
     )
-    _emit("enrichment.json", enrichment_envelope)
-    for cell_key, envelope in cells_envelopes.items():
-        _emit(f"cells/{cell_key}.json", envelope)
-    for (model, inp, kind), envelope in topics_envelopes.items():
-        _emit(f"topics/{model}_{inp}_{kind}.json", envelope)
-    for cell_key, envelope in neighbors_envelopes.items():
-        _emit(f"neighbors/{cell_key}.json", envelope)
-    # MiniLM semantic-search vectors — quantized int8 buffer + sidecar.
-    # When the MiniLM bundle isn't available the builder emits just a sidecar
-    # placeholder so the manifest's pointed-at URL still 200s.
+    minilm_bin: bytes | None = None
     if minilm_root is not None and Path(minilm_root).exists():
         try:
-            bin_bytes, sidecar = build_minilm_vectors(
+            minilm_bin, minilm_sidecar = build_minilm_vectors(
                 embeddings_root=Path(minilm_root),
                 abstract_ids=abstract_ids,
                 build_info=build_info,
             )
-            bin_path = output / "search" / "minilm_vectors.bin"
-            bin_path.parent.mkdir(parents=True, exist_ok=True)
-            with bin_path.open("wb") as fh:
-                fh.write(bin_bytes)
-            # Pin mtime same as JSON shards for tarball reproducibility.
-            os.utime(bin_path, (DETERMINISTIC_MTIME, DETERMINISTIC_MTIME))
-            expected.add(bin_path)
-            _emit("search/minilm_vectors.build_info.json", sidecar)
         except FileNotFoundError as exc:
             print(f"WARNING: MiniLM vectors skipped: {exc}")
-            _emit(
-                "search/minilm_vectors.build_info.json",
-                {
-                    "schema_version": "minilm_vectors.v1",
-                    "build_info": dict(build_info),
-                    "shape": [len(abstract_ids), 384],
-                    "dtype": "int8",
-                    "byte_offset_url": "data/search/minilm_vectors.bin",
-                    "note": "vectors not built (MiniLM bundle missing)",
-                },
-            )
-    else:
-        _emit(
-            "search/minilm_vectors.build_info.json",
-            {
+            minilm_sidecar = {
                 "schema_version": "minilm_vectors.v1",
                 "build_info": dict(build_info),
                 "shape": [len(abstract_ids), 384],
                 "dtype": "int8",
                 "byte_offset_url": "data/search/minilm_vectors.bin",
-                "note": "vectors not built (no --minilm-root)",
-            },
-        )
+                "note": "vectors not built (MiniLM bundle missing)",
+            }
+    else:
+        minilm_sidecar = {
+            "schema_version": "minilm_vectors.v1",
+            "build_info": dict(build_info),
+            "shape": [len(abstract_ids), 384],
+            "dtype": "int8",
+            "byte_offset_url": "data/search/minilm_vectors.bin",
+            "note": "vectors not built (no --minilm-root)",
+        }
 
-    # Drop stale shards from prior runs that weren't re-emitted this build.
-    # Keep the `.fetched-from-package` marker that fetch_ui_inputs.sh drops.
-    for path in list(output.rglob("*.json")) + list(output.rglob("*.bin")):
+    # --- Dispatch to the format-specific writer -------------------------
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    expected = _get_writer(output_format).write(
+        output_dir=output,
+        build_info=build_info,
+        conference_id=conference_id,
+        manifest=manifest,
+        abstracts_envelope=abstracts_envelope,
+        authors_envelope=authors_envelope,
+        cells_envelopes=cells_envelopes,
+        topics_envelopes=topics_envelopes,
+        neighbors_envelopes=neighbors_envelopes,
+        enrichment_envelope=enrichment_envelope,
+        minilm_bin=minilm_bin,
+        minilm_sidecar=minilm_sidecar,
+    )
+
+    # Drop stale files from prior runs that weren't re-emitted this build.
+    # Only applies to formats that write multiple files; single-container
+    # formats (sqlite_single, duckdb_single, arrow_ipc as one file) handle
+    # this by overwriting the single file.
+    for path in (
+        list(output.rglob("*.json"))
+        + list(output.rglob("*.bin"))
+        + list(output.rglob("*.parquet"))
+        + list(output.rglob("*.arrow"))
+        + list(output.rglob("*.sqlite"))
+        + list(output.rglob("*.duckdb"))
+        + list(output.rglob("*.sql"))
+    ):
         if path in expected:
             continue
         path.unlink()

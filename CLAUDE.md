@@ -168,28 +168,36 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/009-conference-subpath/plan.md`. The companion design
-artifacts under the same directory — `research.md`, `data-model.md`,
-`contracts/urls.md`, and `quickstart.md` — pin the Stage-9 conference
-subpath rework: every OHBM-2026 surface (home, About, abstract
-permalink) moves under `/ohbm2026/` so the same Atlas can later host
-other conferences without URL-space collision. Root `<cname>/` issues
-a static meta-refresh + JS `location.replace` to `/ohbm2026/`
-(gh-pages can't serve real 301s); legacy URLs (`<cname>/abstract/*`,
-`<cname>/about`) are intentionally NOT preserved (Q2 = accept the
-breakage); PR previews mirror production at `<cname>/pr-<N>/ohbm2026/`.
-Primary mechanism: SvelteKit `kit.paths.base` with a `BASE_PATH`
-env override (already used by the Stage-6 PR-preview workflow — the
-override just widens to include the conference id). No data-shard
-changes; `build_info` envelope is byte-identical; no `conference`
-field is added to any JSON shard (FR-109 + SC-105). One new
-e2e spec (`subpath.spec.ts`); two existing files need base-aware
-edits (`cart_email.ts` permalink composer, `Tour.svelte`'s
-`detectKind` route classifier); a small static "root-redirect island"
-under `site/static/conference-root-redirect/` is copied to the
-gh-pages publish root.
+at `specs/010-export-redesign/plan.md`. The companion design artifacts
+under the same directory — `research.md`, `data-model.md`,
+`contracts/decoder.md`, `contracts/shards.linkml.yaml` (stub pending
+the bench), and `quickstart.md` — pin the Stage-10 data export
+redesign: LinkML-tight schema (eliminate or annotate every `range:
+Any`), compact storage (target ≥ 30 % gzipped-tarball shrink), and a
+cross-conference foundation (a `conference_id` affordance + a cross-
+conference linking surface that doesn't require regenerating either
+conference's base shards). **The on-disk format choice is empirical,
+not pre-committed**: Phase 0 runs a documented bench matrix across
+six candidate containers (status-quo-tightened gzipped JSON,
+multi-file Parquet, Parquet + DuckDB-WASM, single-file SQLite,
+single-file DuckDB, Arrow IPC), measuring six metrics each (on-disk
+size, cold-start TTI on 1 Mbps, session wire bytes, decoder bundle,
+cross-conf feasibility, schema fidelity). An LLM architect-agent
+reviews the populated decision table; the human commits to a format
+AFTER the numbers land, not before. Phase 1 design artifacts
+(data-model.md Layer 2, contracts/shards.linkml.yaml) are
+format-conditional and finalised post-bench. If no candidate clears
+the SC-201 + SC-205 thresholds, the rework downgrades to schema
+tightening only.
 
 Previous-stage plans:
+- Stage 9 conference subpath rework: `specs/009-conference-subpath/plan.md`
+  (every OHBM-2026 surface under `/ohbm2026/`; static meta-refresh
+  root-redirect island via `<meta http-equiv="refresh">` + JS
+  `location.replace` because gh-pages can't serve real 301s; legacy
+  URLs not preserved per Q2; PR previews mirror production at
+  `/pr-<N>/ohbm2026/`; primary mechanism is SvelteKit `kit.paths.base`
+  with a `BASE_PATH` env override). Shipped in PR #19.
 - Stage 6 UI rewrite (US1–US8): `specs/008-ui-rewrite/plan.md` (static
   SvelteKit site on gh-pages; `site/` + `src/ohbm2026/ui_data/`;
   typo-tolerant lexical + semantic search; 3D UMAP + lasso; cart +

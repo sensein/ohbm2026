@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +161,26 @@ def build_authors_records(
     if return_remap:
         return records, remap
     return records
+
+
+def iter_authors(
+    *,
+    corpus_path: Path,
+    authors_path: Path,
+) -> Iterator[dict[str, Any]]:
+    """Yield per-author rows.
+
+    Stage-10 entry point. The dedup step (R6) inherently materialises the
+    full list (we need to see every record to dedup by name+affiliation),
+    so this is just a list-then-yield wrapper. The candidate emitters get
+    a uniform interface; the memory cost is identical to the existing
+    ``build_authors_records`` call.
+    """
+    records = build_authors_records(
+        corpus_path=corpus_path, authors_path=authors_path, return_remap=False
+    )
+    # build_authors_records returns list when return_remap=False
+    yield from records  # type: ignore[misc]
 
 
 def build_authors(

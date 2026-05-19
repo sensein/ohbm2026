@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -255,21 +255,24 @@ def _withdrawn_ids(withdrawn_path: Path | None) -> set[int]:
     return {int(a["id"]) for a in iterable if isinstance(a, dict) and a.get("id") is not None}
 
 
-def build_abstracts_records(
+def iter_abstracts(
     *,
     corpus_path: Path,
     enriched_path: Path | None,
     references_path: Path | None,
     withdrawn_path: Path | None,
     author_id_remap: Mapping[int, int] | None = None,
-) -> list[dict[str, Any]]:
-    """Return the per-abstract list (accepted-only, poster_id-keyed).
+) -> Iterator[dict[str, Any]]:
+    """Yield per-abstract rows (accepted-only, poster_id-keyed).
 
-    When ``author_id_remap`` is provided, the raw GraphQL author ids on each
-    record are translated to the synthetic ids assigned by the authors
-    builder. Raw ids that don't appear in the remap (e.g. authors whose
-    only submission was withdrawn) are dropped silently to keep the cross-
-    shard invariant clean. Missing remap = legacy raw-id passthrough.
+    Stage-10 entry point: the format-agnostic row stream every candidate
+    emitter under ``ohbm2026.ui_data.formats`` consumes. Rows match the
+    ``AbstractRow`` shape in ``types.py``. Identical record contents to
+    ``build_abstracts_records()`` — that wrapper is now ``list(iter_abstracts(...))``.
+
+    Streaming benefits: Parquet RecordBatch builders + SQLite INSERT
+    sequences both prefer row-at-a-time consumption to a fully-materialised
+    list (saves a ~30 MB allocation for the OHBM corpus).
     """
 
     corpus = _load_corpus(corpus_path)
@@ -277,7 +280,6 @@ def build_abstracts_records(
     refs_by_id = _load_references_by_id(references_path)
     withdrawn = _withdrawn_ids(withdrawn_path)
 
-    records: list[dict[str, Any]] = []
     skipped_no_poster_id = 0
     for raw in corpus:
         if raw.get("accepted_for") == "Withdrawn":
@@ -314,7 +316,7 @@ def build_abstracts_records(
         else:
             author_ids = raw_author_ids
 
-        record = {
+        yield {
             "abstract_id": int(abstract_id),
             "poster_id": str(raw.get("poster_id")),
             "title": cleaned_abstract_title(raw.get("title")) or "",
@@ -336,13 +338,37 @@ def build_abstracts_records(
             "reference_urls": urls,
             "reference_titles": ref_titles,
         }
-        records.append(record)
     if skipped_no_poster_id:
         print(
             f"abstracts: skipped {skipped_no_poster_id} accepted record(s) without poster_id "
             f"(FR-002 requires the program-assigned poster_id as the user-facing identifier)"
         )
-    return records
+
+
+def build_abstracts_records(
+    *,
+    corpus_path: Path,
+    enriched_path: Path | None,
+    references_path: Path | None,
+    withdrawn_path: Path | None,
+    author_id_remap: Mapping[int, int] | None = None,
+) -> list[dict[str, Any]]:
+    """List-materialising wrapper around ``iter_abstracts`` for backward compat.
+
+    Pre-Stage-10 callers (the json-shards emitter, every test fixture, the
+    Stage-6 ``build_abstracts`` envelope below) consume the records as a
+    list. Stage-10 candidate emitters (Parquet, SQLite, etc.) call
+    ``iter_abstracts`` directly.
+    """
+    return list(
+        iter_abstracts(
+            corpus_path=corpus_path,
+            enriched_path=enriched_path,
+            references_path=references_path,
+            withdrawn_path=withdrawn_path,
+            author_id_remap=author_id_remap,
+        )
+    )
 
 
 def build_abstracts(

@@ -25,7 +25,7 @@ in the cell shard, then reads the same row of the neighbors shard.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +70,38 @@ def _load_per_cell_neighbors(
         "farthest_distances": [_round_floats(row) for row in farthest_dist.tolist()],
         "k": int(nearest_ids.shape[1]) if nearest_ids.ndim == 2 else 0,
     }
+
+
+def iter_neighbours(
+    *,
+    analysis_root: Path,
+    cell_keys: Iterable[str],
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield ``(cell_key, payload)`` per cell with parallel-array neighbours.
+
+    Stage-10 entry point. Payload shape:
+    ``{k, abstract_ids, nearest_ids, nearest_distances,
+        farthest_ids, farthest_distances}``.
+
+    Candidate emitters that want row-shaped (abstract_id, …) per-row tuples
+    rather than parallel arrays can transpose locally — this iterator
+    yields the source-of-truth parallel-array shape to avoid forcing the
+    layout decision on every consumer.
+    """
+    if not Path(analysis_root).exists():
+        raise Stage6BuildError(f"analysis root not found: {analysis_root}")
+    for cell_key in cell_keys:
+        payload = _load_per_cell_neighbors(analysis_root, cell_key)
+        if payload is None:
+            continue
+        yield cell_key, {
+            "k": payload["k"],
+            "abstract_ids": payload["ids"],
+            "nearest_ids": payload["nearest_ids"],
+            "nearest_distances": payload["nearest_distances"],
+            "farthest_ids": payload["farthest_ids"],
+            "farthest_distances": payload["farthest_distances"],
+        }
 
 
 def build_neighbors(

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +175,26 @@ def build_cells_shards(
             for aid in ordered_ids
         ]
     return out
+
+
+def iter_cells(
+    *,
+    rollup_db: Path,
+    abstract_ids: Iterable[int],
+    analysis_root: Path | None = None,
+) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    """Yield ``(cell_key, [row, ...])`` for every discovered cell.
+
+    Stage-10 entry point: candidate emitters (Parquet, SQLite, …) consume
+    one cell at a time so per-cell table files can be written without
+    holding all 15 cells in memory simultaneously. The row list is still
+    materialised per-cell because the rollup table is queried in bulk
+    (one DB read per cell); per-row iteration there would be wasteful.
+    """
+    shards = build_cells_shards(
+        rollup_db=rollup_db, abstract_ids=abstract_ids, analysis_root=analysis_root
+    )
+    yield from shards.items()
 
 
 def build_cells(
