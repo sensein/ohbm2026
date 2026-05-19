@@ -255,6 +255,49 @@ def _withdrawn_ids(withdrawn_path: Path | None) -> set[int]:
     return {int(a["id"]) for a in iterable if isinstance(a, dict) and a.get("id") is not None}
 
 
+def _load_standby_times(path: Path | None) -> dict[int, dict[str, str]]:
+    """Load poster stand-by times from the proposal-listing CSV.
+
+    Returns a `{submission_id: {first: "<day | hh:mm-hh:mm>", second: "..."}}`
+    map. The CSV is the only place these times exist — they are not in
+    the Oxford GraphQL schema. Lookup is by Oxford submission id (column
+    "Abstract ID Number"), not poster_id, so the dedup upstream of this
+    call still produces a valid lookup key for the surviving record.
+    Returns an empty dict if no path is given or the CSV cannot be read.
+    """
+    if path is None:
+        return {}
+    import csv
+
+    out: dict[int, dict[str, str]] = {}
+    try:
+        with Path(path).open() as f:
+            lines = f.readlines()
+        # The CSV has a multi-line preamble; the real header starts at
+        # the row whose first cell reads "Abstract ID Number".
+        header_idx = next(
+            (i for i, ln in enumerate(lines) if ln.startswith("Abstract ID Number")),
+            None,
+        )
+        if header_idx is None:
+            return {}
+        reader = csv.DictReader(lines[header_idx:])
+        first_col = "First Stand-by Time"
+        second_col = "Second Stand-by Time"
+        for row in reader:
+            sid_raw = (row.get("Abstract ID Number") or "").strip()
+            if not sid_raw.isdigit():
+                continue
+            sid = int(sid_raw)
+            out[sid] = {
+                "first": (row.get(first_col) or "").strip(),
+                "second": (row.get(second_col) or "").strip(),
+            }
+    except (OSError, csv.Error):
+        return {}
+    return out
+
+
 def iter_abstracts(
     *,
     corpus_path: Path,
@@ -262,6 +305,7 @@ def iter_abstracts(
     references_path: Path | None,
     withdrawn_path: Path | None,
     author_id_remap: Mapping[int, int] | None = None,
+    standby_times_path: Path | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield per-abstract rows (accepted-only, poster_id-keyed).
 
@@ -279,6 +323,7 @@ def iter_abstracts(
     enriched_by_id = _load_enriched_by_id(enriched_path)
     refs_by_id = _load_references_by_id(references_path)
     withdrawn = _withdrawn_ids(withdrawn_path)
+    standby_by_sid = _load_standby_times(standby_times_path)
 
     skipped_no_poster_id = 0
     # Dedupe poster_id collisions. Oxford ingest preserves all submission
@@ -333,6 +378,11 @@ def iter_abstracts(
         else:
             author_ids = raw_author_ids
 
+        # Stand-by times are sourced from the proposal-listing CSV (not in
+        # Oxford GraphQL). Two empty strings if the CSV wasn't supplied or
+        # this submission isn't in it; the UI suppresses the block until
+        # the values are confirmed correct end-to-end.
+        standby = standby_by_sid.get(int(abstract_id), {})
         yield {
             "abstract_id": int(abstract_id),
             "poster_id": str(raw.get("poster_id")),
@@ -354,6 +404,10 @@ def iter_abstracts(
             "reference_dois": dois,
             "reference_urls": urls,
             "reference_titles": ref_titles,
+            "poster_standby": {
+                "first": standby.get("first", ""),
+                "second": standby.get("second", ""),
+            },
         }
     if skipped_no_poster_id:
         print(
@@ -375,6 +429,7 @@ def build_abstracts_records(
     references_path: Path | None,
     withdrawn_path: Path | None,
     author_id_remap: Mapping[int, int] | None = None,
+    standby_times_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """List-materialising wrapper around ``iter_abstracts`` for backward compat.
 
@@ -390,6 +445,7 @@ def build_abstracts_records(
             references_path=references_path,
             withdrawn_path=withdrawn_path,
             author_id_remap=author_id_remap,
+            standby_times_path=standby_times_path,
         )
     )
 
@@ -402,6 +458,7 @@ def build_abstracts(
     withdrawn_path: Path | None,
     build_info: Mapping[str, str],
     author_id_remap: Mapping[int, int] | None = None,
+    standby_times_path: Path | None = None,
 ) -> dict[str, Any]:
     """Return the abstracts shard envelope per data-model.md §2.
 
@@ -415,6 +472,7 @@ def build_abstracts(
         references_path=references_path,
         withdrawn_path=withdrawn_path,
         author_id_remap=author_id_remap,
+        standby_times_path=standby_times_path,
     )
     return {
         "schema_version": SCHEMA_VERSION,

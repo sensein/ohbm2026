@@ -94,6 +94,7 @@ def _facets_to_arrow(facets: Mapping[str, Any]) -> dict[str, list[str]]:
 def _abstracts_to_table(envelope: Mapping[str, Any]) -> pa.Table:
     rows = []
     for r in envelope["abstracts"]:
+        standby = r.get("poster_standby") or {}
         rows.append(
             {
                 "abstract_id": int(r["abstract_id"]),
@@ -108,6 +109,15 @@ def _abstracts_to_table(envelope: Mapping[str, Any]) -> pa.Table:
                 "reference_dois": list(r.get("reference_dois", [])),
                 "reference_urls": list(r.get("reference_urls", [])),
                 "reference_titles": list(r.get("reference_titles", [])),
+                # Poster stand-by times sourced from the proposal-listing
+                # CSV (not in Oxford GraphQL). Empty strings when the CSV
+                # wasn't passed or didn't list this submission. The UI
+                # suppresses display of these until they're confirmed
+                # correct end-to-end.
+                "poster_standby": {
+                    "first": str(standby.get("first", "")),
+                    "second": str(standby.get("second", "")),
+                },
             }
         )
     return pa.Table.from_pylist(rows)

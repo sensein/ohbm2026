@@ -45,6 +45,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minilm-bundle", dest="minilm_bundle", type=Path, default=None,
                         help="Deprecated single-bundle alias; use --minilm-root.")
     parser.add_argument("--references-yaml", dest="references_yaml", type=Path, default=None)
+    parser.add_argument(
+        "--proposal-listing",
+        dest="proposal_listing",
+        type=Path,
+        default=None,
+        help=(
+            "Optional CSV with the program-committee poster numbering "
+            "(`archive/proposals/.../proposal_listing.csv`). When given, each "
+            "abstract record gets a `poster_standby: {first, second}` struct "
+            "with the two stand-by times from the CSV. These fields are not "
+            "in the Oxford GraphQL schema."
+        ),
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
         "--output-format",
@@ -90,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             minilm_root=args.minilm_root,
             conference_id=args.conference_id,
             output_format=args.output_format,
+            proposal_listing_path=args.proposal_listing,
         )
     except Stage6BuildError as exc:
         print(f"build_ui_data.py: {exc}", file=sys.stderr)

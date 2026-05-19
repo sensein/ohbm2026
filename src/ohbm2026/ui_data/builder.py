@@ -105,6 +105,7 @@ def build_ui_data_package(
     minilm_root: Path | None = None,
     conference_id: str = "ohbm2026",
     output_format: str = "parquet-single",
+    proposal_listing_path: Path | None = None,
 ) -> int:
     """Run the full Stage 6 build.
 
@@ -151,6 +152,7 @@ def build_ui_data_package(
         withdrawn_path=Path(withdrawn_path) if withdrawn_path else None,
         build_info=build_info,
         author_id_remap=author_id_remap,
+        standby_times_path=Path(proposal_listing_path) if proposal_listing_path else None,
     )
     abstract_records = abstracts_envelope["abstracts"]
     abstract_ids = [r["abstract_id"] for r in abstract_records]
