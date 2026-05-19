@@ -290,7 +290,7 @@
 				{#if abstract.poster_id && compact}
 					<a
 						class="permalink permalink-top"
-						href={`${base}/abstract/${abstract.poster_id}/`}
+						href={`${base}/abstract/${String(abstract.poster_id).padStart(4, '0')}/`}
 						data-testid="detail-permalink"
 						title="Open the full-detail page for this abstract"
 					>
@@ -667,7 +667,7 @@
 										>
 											<span class="related-rank">#{i + 1}</span>
 											<span class="related-poster-pile">
-												<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+												<span class="related-poster">{entry.abstract.poster_id ? String(entry.abstract.poster_id).padStart(4, '0') : '—'}</span>
 												<span class="related-distance" title="min cosine distance across maps">
 													d={entry.minDistance.toFixed(3)}
 												</span>
@@ -757,7 +757,7 @@
 										>
 											<span class="related-rank">#{i + 1}</span>
 											<span class="related-poster-pile">
-												<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+												<span class="related-poster">{entry.abstract.poster_id ? String(entry.abstract.poster_id).padStart(4, '0') : '—'}</span>
 												<span class="related-distance" title="mean cosine distance across maps">
 													d={entry.meanDistance.toFixed(3)}
 												</span>

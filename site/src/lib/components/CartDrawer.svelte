@@ -85,7 +85,7 @@
 							on:click={() => openDetail(record.poster_id)}
 							data-testid="cart-item"
 						>
-							<span class="poster">{record.poster_id}</span>
+							<span class="poster">{String(record.poster_id).padStart(4, '0')}</span>
 							<span class="title">{record.title}</span>
 						</button>
 						<button
