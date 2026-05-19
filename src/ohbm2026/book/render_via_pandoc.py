@@ -30,12 +30,27 @@ def _which_or_raise(binary: str, hint: str) -> str:
     return path
 
 
+def resolve_pdf_engine() -> tuple[str, str] | None:
+    """Return `(binary_name, version_line)` of the first LaTeX engine
+    on PATH that pandoc accepts as `--pdf-engine`.
+
+    Preference order: `xelatex` (TeX Live / MacTeX) → `tectonic`
+    (lighter, on-demand-fetch). Returns None when neither is available.
+    """
+    for binary in ("xelatex", "tectonic"):
+        path = shutil.which(binary)
+        if path:
+            return binary, _first_line(subprocess.check_output([path, "--version"]))
+    return None
+
+
 def preflight(*, need_xelatex: bool) -> dict[str, str]:
-    """Verify pandoc + (optionally) xelatex are on PATH.
+    """Verify pandoc + (optionally) a LaTeX engine are on PATH.
 
     Returns a dict of `{name: version_line}` for provenance capture.
     Raises BookBuildError with an operator-actionable install hint
-    when a binary is absent.
+    when a binary is absent. `xelatex` and `tectonic` are accepted
+    interchangeably — pandoc handles both as a `--pdf-engine`.
     """
     versions: dict[str, str] = {}
     pandoc = _which_or_raise(
@@ -45,14 +60,20 @@ def preflight(*, need_xelatex: bool) -> dict[str, str]:
     )
     versions["pandoc"] = _first_line(subprocess.check_output([pandoc, "--version"]))
     if need_xelatex:
-        xelatex = _which_or_raise(
-            "xelatex",
-            "install Tectonic via `brew install tectonic` or full TeX Live "
-            "via `apt-get install texlive-xetex`. See quickstart.md step 2.",
-        )
-        versions["xelatex"] = _first_line(
-            subprocess.check_output([xelatex, "--version"])
-        )
+        engine = resolve_pdf_engine()
+        if engine is None:
+            raise BookBuildError(
+                "neither `xelatex` nor `tectonic` is on PATH; install one "
+                "(Tectonic recommended for lightness: `brew install tectonic` "
+                "or full TeX Live `apt-get install texlive-xetex`). "
+                "See quickstart.md step 2.",
+                details=f"shutil.which('xelatex')={shutil.which('xelatex')!r}, "
+                f"shutil.which('tectonic')={shutil.which('tectonic')!r}",
+            )
+        binary, version_line = engine
+        # The provenance schema field stays `xelatex_version` to keep
+        # the contract stable — value records which engine actually ran.
+        versions["xelatex"] = f"{binary}: {version_line}"
     return versions
 
 
@@ -86,10 +107,13 @@ def to_pdf(
     pandoc = shutil.which("pandoc") or _which_or_raise(
         "pandoc", "see quickstart.md step 2"
     )
-    # xelatex is required as the pdf-engine but pandoc invokes it
-    # for us — we only assert it's on PATH so the failure mode is
-    # clear before we burn time composing.
-    _which_or_raise("xelatex", "see quickstart.md step 2")
+    engine = resolve_pdf_engine()
+    if engine is None:
+        raise BookBuildError(
+            "neither `xelatex` nor `tectonic` is on PATH; install one. "
+            "See quickstart.md step 2.",
+        )
+    engine_binary = engine[0]
 
     header_includes = _header_includes_path(style)
     if not header_includes.exists():
@@ -104,7 +128,7 @@ def to_pdf(
         str(md_path),
         "--from=markdown+raw_tex+pandoc_title_block",
         "--to=pdf",
-        "--pdf-engine=xelatex",
+        f"--pdf-engine={engine_binary}",
         "-H",
         str(header_includes),
         f"--resource-path={resource_path}",

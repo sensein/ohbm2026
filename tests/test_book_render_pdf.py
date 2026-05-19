@@ -13,10 +13,16 @@ _FIX = pathlib.Path(__file__).parent / "fixtures" / "book"
 
 
 def _pandoc_ok() -> bool:
-    return bool(shutil.which("pandoc")) and bool(shutil.which("xelatex"))
+    """True when pandoc and at least one LaTeX engine are on PATH."""
+    if not shutil.which("pandoc"):
+        return False
+    return bool(shutil.which("xelatex")) or bool(shutil.which("tectonic"))
 
 
-@unittest.skipUnless(_pandoc_ok(), "pandoc + xelatex not on PATH; skipping PDF render test")
+@unittest.skipUnless(
+    _pandoc_ok(),
+    "pandoc + a LaTeX engine (xelatex or tectonic) not on PATH; skipping PDF render test",
+)
 class TestBookRenderPdf(unittest.TestCase):
     def setUp(self) -> None:
         try:

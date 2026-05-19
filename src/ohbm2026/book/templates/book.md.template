@@ -4,8 +4,6 @@ date: "{built_at_date}"
 sort: "{sort_order}"
 ---
 
-\makeindex
-
 # OHBM 2026 — Book of Abstracts
 
 > Built from corpus state-key `{corpus_state_key}`.
