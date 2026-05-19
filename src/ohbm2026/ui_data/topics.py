@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +69,19 @@ def build_topics_shards(
                 }
             )
     return out
+
+
+def iter_topics(
+    *,
+    rollup_db: Path,
+) -> Iterator[tuple[tuple[str, str, str], list[dict[str, Any]]]]:
+    """Yield ``((model, input, kind), [topic_record, ...])`` per triple.
+
+    Stage-10 entry point. Same materialisation cost as ``build_topics_shards``
+    (one DB query, all rows in memory), but exposes per-triple iteration so
+    candidate emitters can write one topic file/table at a time.
+    """
+    yield from build_topics_shards(rollup_db=rollup_db).items()
 
 
 def build_topics(

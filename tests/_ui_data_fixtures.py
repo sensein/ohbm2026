@@ -13,7 +13,7 @@ CORPUS_PAYLOAD = {
     "abstracts": [
         {
             "id": 1001,
-            "poster_id": "M-AM-101",
+            "poster_id": "0101",
             "title": "Memory fMRI in aging",
             "accepted_for": "Poster",
             "authors": [{"author_order": 0, "id": 5000}, {"author_order": 1, "id": 5001}],
@@ -26,7 +26,7 @@ CORPUS_PAYLOAD = {
         },
         {
             "id": 1002,
-            "poster_id": "M-AM-102",
+            "poster_id": "0102",
             "title": "Withdrawn study",
             "accepted_for": "Withdrawn",
             "authors": [{"author_order": 0, "id": 5002}],
@@ -34,7 +34,7 @@ CORPUS_PAYLOAD = {
         },
         {
             "id": 1003,
-            "poster_id": "M-AM-103",
+            "poster_id": "0103",
             "title": "fMRI of default mode network",
             "accepted_for": "Oral",
             "authors": [{"author_order": 0, "id": 5000}],
@@ -51,7 +51,7 @@ WITHDRAWN_PAYLOAD = {
     "fetched_at": "2026-05-17T00:00:00Z",
     "abstract_count": 1,
     "abstracts": [
-        {"id": 1002, "poster_id": "M-AM-102", "accepted_for": "Withdrawn"},
+        {"id": 1002, "poster_id": "0102", "accepted_for": "Withdrawn"},
     ],
 }
 

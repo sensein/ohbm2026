@@ -50,13 +50,12 @@ const author: AuthorRecord = {
 	author_id: 0,
 	name: 'José García',
 	affiliations: ['UAM'],
-	abstract_ids: [1001]
+	poster_ids: [1001]
 };
 
 const abstracts: AbstractRecord[] = [
 	{
-		abstract_id: 1001,
-		poster_id: 'M-AM-101',
+		poster_id: 1001,
 		title: 'Memory fMRI in aging',
 		accepted_for: 'Poster',
 		sections: { introduction: '', methods: '', results: '', conclusion: '', references: '' },
@@ -73,8 +72,7 @@ const abstracts: AbstractRecord[] = [
 		reference_urls: []
 	},
 	{
-		abstract_id: 1003,
-		poster_id: 'M-AM-103',
+		poster_id: 1003,
 		title: 'Default mode network in fMRI',
 		accepted_for: 'Oral',
 		sections: { introduction: '', methods: '', results: '', conclusion: '', references: '' },

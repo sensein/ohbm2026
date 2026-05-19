@@ -43,6 +43,10 @@ class TestDeterministicBuild(unittest.TestCase):
                     discover_rollup=False,
                     output_dir=output,
                     build_info=BUILD_INFO,  # pinned timestamp for determinism
+                    # Pin to JSON-shards so the byte-identical comparison
+                    # walks discrete files; the parquet-single emitter
+                    # has its own deterministic test path.
+                    output_format="gzip-json-shards",
                 )
                 self.assertEqual(rc, 0)
             sums1 = _sha256_dir(out1)
@@ -76,6 +80,11 @@ class TestEveryShardCarriesBuildInfo(unittest.TestCase):
                 discover_rollup=False,
                 output_dir=output,
                 build_info=BUILD_INFO,
+                # Stage-10 flipped the default emitter to `parquet-single`
+                # (one `.parquet` file). The shard-level assertions below
+                # walk JSON files, so pin to the legacy emitter for this
+                # invariant test.
+                output_format="gzip-json-shards",
             )
             self.assertEqual(rc, 0)
 

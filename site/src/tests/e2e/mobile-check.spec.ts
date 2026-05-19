@@ -11,28 +11,19 @@ const probes = [
   { label: 'desktop-landscape', viewport: { width: 1440, height: 900 }, mobile: false }
 ];
 
-const BASE = 'https://abstractatlas.brainkb.org/pr-9';
-
-async function waitForRecentDeploy(page: any, expectedSha: string) {
-  for (let i = 0; i < 30; i++) {
-    const sha = await page.locator('[data-testid="build-info-short-sha"]').first().textContent().catch(() => null);
-    if (sha && sha.trim() === expectedSha) return true;
-    await page.waitForTimeout(2000);
-    await page.reload({ waitUntil: 'load' });
-  }
-  return false;
-}
+// Was hardcoded to the PR-9 preview (long since closed). Default to
+// local; honour PLAYWRIGHT_BASE_URL for CI runs against PR preview /
+// production. The mobile-check probe is geometry-only, so any deploy
+// that renders the same DOM passes.
+const BASE = process.env.PLAYWRIGHT_BASE_URL || process.env.TARGET_BASE || 'http://127.0.0.1:4173';
 
 test('multi-viewport overflow probe', async () => {
   const browser = await chromium.launch();
-  const expectedSha = process.env.EXPECTED_SHA || 'c408504';
   for (const probe of probes) {
     const ctx = await browser.newContext({ viewport: probe.viewport, isMobile: probe.mobile, deviceScaleFactor: probe.mobile ? 2 : 1 });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/`, { waitUntil: 'load' });
     await page.waitForSelector('[data-testid="search-input"]', { timeout: 30000 });
-    // Wait until deploy SHA matches (or timeout silently)
-    await waitForRecentDeploy(page, expectedSha);
     await page.waitForSelector('[data-testid="result-card"]', { timeout: 30000 });
     await page.waitForTimeout(2000);
 
@@ -69,8 +60,11 @@ test('multi-viewport overflow probe', async () => {
     await page.screenshot({ path: `/tmp/probe-${probe.label}-detail.png`, fullPage: false });
 
     if (posterId && !probe.mobile) {
+      // Stage 9: the abstract permalink lives under /ohbm2026/, not /
+      // (FR-104). Test was hardcoded to the pre-rework `/abstract/<id>/`
+      // shape and would 404 under the conference subpath.
       const dp = await ctx.newPage();
-      await dp.goto(`${BASE}/abstract/${encodeURIComponent(posterId)}/`, { waitUntil: 'load' });
+      await dp.goto(`${BASE}/ohbm2026/abstract/${encodeURIComponent(posterId)}/`, { waitUntil: 'load' });
       await dp.waitForSelector('[data-testid="detail-panel"]', { timeout: 30000 });
       await dp.waitForTimeout(1500);
       await dp.screenshot({ path: `/tmp/probe-${probe.label}-permalink.png`, fullPage: false });

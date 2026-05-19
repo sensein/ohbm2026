@@ -76,9 +76,8 @@ test.describe('US1: build provenance (FR-022 / SC-011)', () => {
 		expect(shortSha).toMatch(/^[0-9a-f]{7}$/);
 	});
 
-	test('placeholder route also surfaces the build short SHA in the title', async ({ page }) => {
+	test('placeholder route renders the canonical title', async ({ page }) => {
 		await page.goto('/');
-		const title = await page.title();
-		expect(title).toMatch(/OHBM 2026 Atlas · [0-9a-f]{7}/);
+		expect(await page.title()).toBe('OHBM 2026 Atlas (beta)');
 	});
 });

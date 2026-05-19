@@ -33,7 +33,17 @@ import { test, expect, chromium, devices } from '@playwright/test';
 
 test.setTimeout(180_000);
 
-const BASE = (process.env.TARGET_BASE || 'https://abstractatlas.brainkb.org').replace(/\/$/, '');
+// Prefer `PLAYWRIGHT_BASE_URL` (used by CI when targeting a deployed
+// preview/prod URL); fall back to `TARGET_BASE` for backward compat
+// with the original sc-sweep invocation; default to the local preview
+// server matching `playwright.config.ts`'s baseURL so a bare
+// `pnpm exec playwright test` runs against the just-built site, not
+// stale production data.
+const BASE = (
+	process.env.PLAYWRIGHT_BASE_URL ||
+	process.env.TARGET_BASE ||
+	'http://127.0.0.1:4173'
+).replace(/\/$/, '');
 
 test.describe('SC sweep', () => {
 	test('SC-002 — search latency: typing returns a filtered count in < 500 ms (warm path)', async () => {

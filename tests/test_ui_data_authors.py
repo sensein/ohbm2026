@@ -17,19 +17,23 @@ class TestAuthorsDedup(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             paths = write_fixtures(Path(tmp))
             records = build_authors_records(
-                corpus_path=paths["corpus"], authors_path=paths["authors"]
+                corpus_path=paths["corpus"],
+                authors_path=paths["authors"],
+                abstract_to_poster={1001: 101, 1003: 103},
             )
         # Jane Smith appears twice in the fixture (submission 1001 + 1003) with
         # the same primary affiliation → one record.
         smiths = [r for r in records if r["name"] == "Jane Smith"]
         self.assertEqual(len(smiths), 1, msg=f"Expected single Smith record; got {smiths}")
-        self.assertEqual(sorted(smiths[0]["abstract_ids"]), [1001, 1003])
+        self.assertEqual(sorted(smiths[0]["poster_ids"]), [101, 103])
 
     def test_withdrawn_only_authors_dropped(self) -> None:
         with TemporaryDirectory() as tmp:
             paths = write_fixtures(Path(tmp))
             records = build_authors_records(
-                corpus_path=paths["corpus"], authors_path=paths["authors"]
+                corpus_path=paths["corpus"],
+                authors_path=paths["authors"],
+                abstract_to_poster={1001: 101, 1003: 103},
             )
         # Foo Bar's only submission is the withdrawn one (1002) → must drop.
         names = {r["name"] for r in records}
@@ -41,6 +45,7 @@ class TestAuthorsDedup(unittest.TestCase):
             envelope = build_authors(
                 corpus_path=paths["corpus"],
                 authors_path=paths["authors"],
+                abstract_to_poster={1001: 101, 1003: 103},
                 build_info=BUILD_INFO,
             )
         self.assertEqual(envelope["schema_version"], "authors.v1")
@@ -68,7 +73,9 @@ class TestReferentialIntegrity(unittest.TestCase):
                 withdrawn_path=paths["withdrawn"],
             )
             authors = build_authors_records(
-                corpus_path=paths["corpus"], authors_path=paths["authors"]
+                corpus_path=paths["corpus"],
+                authors_path=paths["authors"],
+                abstract_to_poster={1001: 101, 1003: 103},
             )
         # In the fixture, every author who appears on an accepted abstract
         # survives dedup (Foo Bar's only submission was withdrawn so they're

@@ -43,6 +43,30 @@ jobs:
           echo "number=$PR" >> $GITHUB_OUTPUT
           echo "Resolved PR #$PR"
 
+      - name: Open PR check run
+        id: check
+        # workflow_run-triggered runs don't surface as PR checks
+        # automatically; the GitHub Actions UI only links the in-progress
+        # job to the workflow_run that fired it. Creating an explicit
+        # check_run on the PR head SHA gives reviewers a visible status
+        # entry under the PR's "Checks" tab while the job runs.
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: cr } = await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'pr-preview-e2e',
+              head_sha: '${{ github.event.workflow_run.head_sha }}',
+              status: 'in_progress',
+              details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              output: {
+                title: 'Playwright e2e against PR preview',
+                summary: `Running the suite against the deployed PR preview URL. [Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).`,
+              },
+            });
+            core.setOutput('id', cr.id);
+
       - name: Checkout PR head
         uses: actions/checkout@v4
         with:
@@ -71,7 +95,12 @@ jobs:
           # The pr-preview workflow's gh-pages push can lag behind the
           # workflow_run completion event by ~30 s. Poll until the preview
           # responds 200 OR until we give up (5 min).
-          URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${PR_NUMBER}/ohbm2026/"
+          # NOTE: gh-pages serves a CNAME redirect to the custom domain
+          # (abstractatlas.brainkb.org), so probe the CNAME directly —
+          # `<owner>.github.io/<repo>/...` 301s to it and pollutes the
+          # probe output. `curl -L` would also work but the CNAME-direct
+          # path is what Playwright will actually hit below.
+          URL="https://abstractatlas.brainkb.org/pr-${PR_NUMBER}/ohbm2026/"
           echo "Probing $URL"
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || true)
@@ -86,7 +115,9 @@ jobs:
       - name: Run Playwright e2e against the preview URL
         working-directory: site
         env:
-          PLAYWRIGHT_BASE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ steps.pr.outputs.number }}
+          # Use the CNAME directly so Playwright doesn't bounce through
+          # the github.io → abstractatlas.brainkb.org 301 on every nav.
+          PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org/pr-${{ steps.pr.outputs.number }}
           UI_DATA_AVAILABLE: '1'
         run: pnpm exec playwright test --project=chromium
 
@@ -97,3 +128,21 @@ jobs:
           name: playwright-report-pr-${{ steps.pr.outputs.number }}
           path: site/playwright-report/
           retention-days: 14
+
+      - name: Close PR check run
+        if: always() && steps.check.outputs.id
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conclusion = '${{ job.status }}' === 'success' ? 'success' : 'failure';
+            await github.rest.checks.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              check_run_id: ${{ steps.check.outputs.id }},
+              status: 'completed',
+              conclusion,
+              output: {
+                title: `Playwright e2e: ${conclusion}`,
+                summary: `[Workflow run](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}). On failure the Playwright report is attached as a workflow artifact.`,
+              },
+            });

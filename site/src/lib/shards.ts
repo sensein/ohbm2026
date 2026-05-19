@@ -1,5 +1,5 @@
 import { base } from '$app/paths';
-import { loadDataPackage } from './data_package';
+import { loadDataPackage } from './data_package/loader';
 
 export interface BuildInfo {
 	corpus_state_key: string;
@@ -55,8 +55,16 @@ export interface Manifest {
 }
 
 export interface AbstractRecord {
-	abstract_id: number;
-	poster_id: string;
+	/**
+	 * Stage 10: the user-facing poster id is the sole identifier across
+	 * the export. Stored as INT16 in the parquet (range 1–3333),
+	 * surfaces as `number` here. The Oxford submission id no longer
+	 * appears in the data package; the canonical reverse map lives in
+	 * `data/primary/abstracts.json` for traceability.
+	 *
+	 * For display, zero-pad to 4 digits with `String(poster_id).padStart(4, '0')`.
+	 */
+	poster_id: number;
 	title: string;
 	accepted_for: string;
 	sections: {
@@ -84,7 +92,7 @@ export interface AuthorRecord {
 	author_id: number;
 	name: string;
 	affiliations: string[];
-	abstract_ids: number[];
+	poster_ids: number[];
 }
 
 export interface AbstractsShard {
@@ -100,7 +108,7 @@ export interface AuthorsShard {
 }
 
 export interface CellRow {
-	abstract_id: number;
+	poster_id: number;
 	umap2d: [number, number];
 	umap3d: [number, number, number];
 	community_id: number;
@@ -158,7 +166,7 @@ export interface EnrichmentShard {
 	schema_version: string;
 	build_info: BuildInfo;
 	ai_provenance: { claims_model_id: string | null; figures_model_id: string | null };
-	// key = string(abstract_id)
+	// key = String(poster_id)
 	records: Record<string, EnrichmentRecord>;
 }
 
@@ -167,7 +175,7 @@ export interface NeighborsShard {
 	build_info: BuildInfo;
 	cell_key: string;
 	k: number;
-	abstract_ids: number[];
+	poster_ids: number[];
 	nearest_ids: number[][];
 	nearest_distances: number[][];
 	farthest_ids: number[][];
@@ -274,7 +282,7 @@ export interface MinilmVectorsSidecar {
 	max_abs_original: number;
 	components: string[];
 	component_state_keys: string[];
-	missing_abstract_ids: number[];
+	missing_poster_ids: number[];
 	cosine_recovery_mae: number;
 	byte_offset_url: string;
 	note?: string;

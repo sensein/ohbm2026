@@ -6,13 +6,12 @@ const author: AuthorRecord = {
 	author_id: 0,
 	name: 'José García',
 	affiliations: ['UAM Madrid'],
-	abstract_ids: [1001]
+	poster_ids: [101]
 };
 
 const abstracts: AbstractRecord[] = [
 	{
-		abstract_id: 1001,
-		poster_id: 'M-AM-101',
+		poster_id: 101,
 		title: 'Memory fMRI in aging',
 		accepted_for: 'Poster',
 		sections: {
@@ -35,8 +34,7 @@ const abstracts: AbstractRecord[] = [
 		reference_urls: []
 	},
 	{
-		abstract_id: 1003,
-		poster_id: 'M-AM-103',
+		poster_id: 103,
 		title: 'Default mode network in fMRI',
 		accepted_for: 'Oral',
 		sections: {
@@ -69,30 +67,29 @@ describe('searchAbstracts', () => {
 	});
 
 	it('matches title substring', () => {
-		// "memory" appears in the title of 1001 ("Memory fMRI in aging") and in the
-		// secondary topic of 1003 ("Memory") — both are reachable from the haystack.
 		const ids = searchAbstracts(abstracts, authorsById, 'memory fmri');
-		expect(ids).toEqual(new Set([1001]));
+		expect(ids).toEqual(new Set([101]));
 	});
 
 	it('matches poster_id', () => {
-		const ids = searchAbstracts(abstracts, authorsById, 'AM-103');
-		expect(ids).toEqual(new Set([1003]));
+		// poster_id is a number now; the haystack stringifies it.
+		const ids = searchAbstracts(abstracts, authorsById, '103');
+		expect(ids).toEqual(new Set([103]));
 	});
 
 	it('matches author name', () => {
 		const ids = searchAbstracts(abstracts, authorsById, 'García');
-		expect(ids).toEqual(new Set([1001]));
+		expect(ids).toEqual(new Set([101]));
 	});
 
 	it('is diacritic-insensitive (FR-010)', () => {
 		const ids = searchAbstracts(abstracts, authorsById, 'Garcia');
-		expect(ids).toEqual(new Set([1001]));
+		expect(ids).toEqual(new Set([101]));
 	});
 
 	it('matches facet values', () => {
 		const ids = searchAbstracts(abstracts, authorsById, 'DMN');
-		expect(ids).toEqual(new Set([1003]));
+		expect(ids).toEqual(new Set([103]));
 	});
 
 	it('empty result set when no match', () => {

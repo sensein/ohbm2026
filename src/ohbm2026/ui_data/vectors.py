@@ -50,6 +50,7 @@ def build_minilm_vectors(
     *,
     embeddings_root: Path,
     abstract_ids: Iterable[int],
+    abstract_to_poster: Mapping[int, int],
     build_info: Mapping[str, str],
     components: tuple[str, ...] = COMPONENT_NAMES,
 ) -> tuple[bytes, dict[str, Any]]:
@@ -59,6 +60,10 @@ def build_minilm_vectors(
     buffer is positionally joined to that ordering so the browser can index
     row *i* directly. Abstracts whose embedding is missing get a zero vector
     (which yields cosine 0 — they're never top-K matches).
+
+    Stage 10: the sidecar reports `missing_poster_ids` (translated via
+    *abstract_to_poster*) — the Oxford submission id is not exposed in the
+    UI data package.
     """
 
     import numpy as np  # noqa: I001
@@ -131,7 +136,7 @@ def build_minilm_vectors(
         "max_abs_original": max_abs,
         "components": list(components),
         "component_state_keys": used_state_keys,
-        "missing_abstract_ids": missing,
+        "missing_poster_ids": [abstract_to_poster[aid] for aid in missing if aid in abstract_to_poster],
         "cosine_recovery_mae": recovery_error,
         "byte_offset_url": "data/search/minilm_vectors.bin",
     }

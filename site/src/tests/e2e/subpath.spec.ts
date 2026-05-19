@@ -15,6 +15,13 @@
 import { test, expect } from '@playwright/test';
 
 const DATA_AVAILABLE = process.env.UI_DATA_AVAILABLE !== '0';
+// The root-redirect island lives at the *origin* root of the deploy
+// (CNAME root `/`, or local-preview `127.0.0.1:4173/`). When the suite
+// is pointed at a PR-preview URL like `<origin>/pr-N/`, the redirect
+// island sits at `<origin>/pr-N/` — but a `browser.newContext` with a
+// hardcoded localhost baseURL can't reach it. These three tests need
+// the local preview harness; skip when running against a remote URL.
+const REMOTE_BASE_URL = process.env.PLAYWRIGHT_BASE_URL;
 
 test.describe('US1 — subpath canonical', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
@@ -154,6 +161,10 @@ test.describe('US2 — direct-load deep-link', () => {
 
 test.describe('US3 — root URL redirects', () => {
 	test.skip(!DATA_AVAILABLE, 'Data package not deployed in this run');
+	test.skip(
+		!!REMOTE_BASE_URL,
+		'Root-redirect island is origin-rooted; the local preview harness is required to exercise it'
+	);
 
 	test('root path bounces to the conference subpath', async ({ browser }) => {
 		// Use a fresh context so we can navigate to a URL OUTSIDE the

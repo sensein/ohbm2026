@@ -7,7 +7,7 @@
 
 	export let abstracts: AbstractRecord[] = [];
 	/**
-	 * Set of abstract_ids the rest of the app considers "currently selected"
+	 * Set of poster_ids the rest of the app considers "currently selected"
 	 * — i.e. the intersection of search ∩ lasso ∩ facets. The UMAP dims
 	 * everything outside this set so picking a cluster or facet visually
 	 * narrows the map alongside the result list. `null` = no narrowing
@@ -121,12 +121,12 @@
 		}
 		return map;
 	})();
-	// abstract_id of the user-focused abstract (the one whose detail panel is
+	// poster_id of the user-focused abstract (the one whose detail panel is
 	// open). Highlighted on both charts with a halo marker.
 	$: focusedAbstractId = (() => {
 		if (!$focusedAbstract) return null;
 		const rec = abstracts.find((a) => a.poster_id === $focusedAbstract);
-		return rec ? rec.abstract_id : null;
+		return rec ? rec.poster_id : null;
 	})();
 	$: void renderChart2D(plotly, chart2dEl, cellShard, abstracts, selection, mobile, theme, topicByCluster, focusedAbstractId);
 	$: void renderChart3D(plotly, chart3dEl, cellShard, abstracts, selection, theme, topicByCluster, focusedAbstractId);
@@ -200,8 +200,8 @@
 			markerColors.push(colorFor(row.community_id));
 			markerSymbols2D.push(symbol2DFor(row.community_id));
 			markerSymbols3D.push(symbol3DFor(row.community_id));
-			idx2dByAbstract.set(row.abstract_id, xs2.length - 1);
-			if (selected !== null && selected.has(row.abstract_id)) selectedIdx.push(xs2.length - 1);
+			idx2dByAbstract.set(row.poster_id, xs2.length - 1);
+			if (selected !== null && selected.has(row.poster_id)) selectedIdx.push(xs2.length - 1);
 		}
 		return {
 			xs2,
@@ -246,7 +246,7 @@
 			let visibleIdx = 0;
 			for (const row of shard.rows) {
 				if (row.umap_missing) continue;
-				if (row.abstract_id === focusedId) {
+				if (row.poster_id === focusedId) {
 					focusedIdx = visibleIdx;
 					break;
 				}
@@ -347,7 +347,7 @@
 					for (let i = 0; i < shardNow.rows.length; i++) {
 						const row = shardNow.rows[i];
 						if (row.umap_missing) continue;
-						visibleIds.push(row.abstract_id);
+						visibleIds.push(row.poster_id);
 					}
 					const ids: Set<number> = new Set();
 					for (const p of ev.points) {
@@ -372,7 +372,7 @@
 						const commId = row.community_id;
 						const ids: Set<number> = new Set();
 						for (const r of shardNow.rows) {
-							if (!r.umap_missing && r.community_id === commId) ids.add(r.abstract_id);
+							if (!r.umap_missing && r.community_id === commId) ids.add(r.poster_id);
 						}
 						$lassoSelection = ids;
 					}
@@ -404,7 +404,7 @@
 			let visIdx = 0;
 			for (const row of shard.rows) {
 				if (row.umap_missing) continue;
-				if (row.abstract_id === focusedId) {
+				if (row.poster_id === focusedId) {
 					focusedIdx3 = visIdx;
 					break;
 				}
@@ -512,7 +512,7 @@
 			// uirevision pinned constant so camera (rotation, zoom) survives
 			// re-renders triggered by selection / theme / cell switches.
 			// Per US2 acceptance scenario 2, the lasso selection is by
-			// abstract_id and should persist across cell switches anyway, so
+			// poster_id and should persist across cell switches anyway, so
 			// keeping the camera too feels right.
 			uirevision: 'umap-3d'
 		};

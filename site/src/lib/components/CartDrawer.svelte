@@ -19,13 +19,13 @@
 	$: items = [...$cartStore]
 		.map((pid) => byPosterId.get(pid))
 		.filter((r): r is AbstractRecord => r !== undefined);
-	$: leadAuthorByAbstractId = (() => {
+	$: leadAuthorByPosterId = (() => {
 		const m = new Map<number, string>();
 		for (const rec of items) {
 			const id = rec.author_ids[0];
 			if (id === undefined) continue;
 			const name = authorsById.get(id)?.name;
-			if (name) m.set(rec.abstract_id, name);
+			if (name) m.set(rec.poster_id, name);
 		}
 		return m;
 	})();
@@ -40,15 +40,15 @@
 	function close() {
 		open = false;
 	}
-	function emailList() {
-		if (items.length === 0) return;
-		const url = buildMailtoLink(items, leadAuthorByAbstractId, { siteUrl });
-		window.location.href = url;
-	}
+	// Reactive mailto: href for the cart-email anchor. Empty `#` when the
+	// cart is empty so the anchor remains valid HTML but a click is a
+	// no-op (anchor also carries aria-disabled).
+	$: mailtoHref =
+		items.length > 0 ? buildMailtoLink(items, leadAuthorByPosterId, { siteUrl }) : '#';
 	async function copyList() {
 		if (items.length === 0) return;
 		try {
-			const text = buildPlainTextList(items, leadAuthorByAbstractId, siteUrl);
+			const text = buildPlainTextList(items, leadAuthorByPosterId, siteUrl);
 			await navigator.clipboard.writeText(text);
 			clipboardStatus = 'copied';
 			setTimeout(() => (clipboardStatus = 'idle'), 2000);
@@ -77,7 +77,7 @@
 			</p>
 		{:else}
 			<ul class="items" tabindex="0" aria-label="Your saved abstracts">
-				{#each items as record (record.abstract_id)}
+				{#each items as record (record.poster_id)}
 					<li class="item">
 						<button
 							type="button"
@@ -85,7 +85,7 @@
 							on:click={() => openDetail(record.poster_id)}
 							data-testid="cart-item"
 						>
-							<span class="poster">{record.poster_id}</span>
+							<span class="poster">{String(record.poster_id).padStart(4, '0')}</span>
 							<span class="title">{record.title}</span>
 						</button>
 						<button
@@ -103,14 +103,19 @@
 			</ul>
 
 			<footer class="cart-footer">
-				<button
-					type="button"
+				<!-- Anchor instead of button: the href is part of the visible
+					 contract (e2e tests + accessibility tools read the mailto:
+					 URL without simulating a click). The browser opens the
+					 user's mail client on activation, same UX as the prior
+					 button + `window.location.href = ...` handler. -->
+				<a
 					class="cart-action primary"
-					on:click={emailList}
+					href={mailtoHref}
+					aria-disabled={items.length === 0}
 					data-testid="cart-email"
 				>
 					✉ Email my list
-				</button>
+				</a>
 				<button
 					type="button"
 					class="cart-action secondary"

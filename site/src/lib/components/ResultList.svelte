@@ -6,11 +6,11 @@
 	export let abstracts: AbstractRecord[];
 	export let authorsById: Map<number, AuthorRecord>;
 	/**
-	 * If set, only abstracts whose `abstract_id` is in this set are rendered.
+	 * If set, only abstracts whose `poster_id` is in this set are rendered.
 	 * `null` means "show all" (no filter).
 	 */
 	export let filteredIds: Set<number> | null = null;
-	/** When semantic search is active, a map `abstract_id → cosine similarity` so
+	/** When semantic search is active, a map `poster_id → cosine similarity` so
 	 * we can show a per-card score badge and sort by score. */
 	export let semanticScores: Map<number, number> | null = null;
 	/** Abstracts the lexical evaluator considers matches. Used to gate the ✨
@@ -19,13 +19,13 @@
 	 * stay unmarked. `null` = no lexical search active (badge falls back to
 	 * the original "any semantic hit" behaviour). */
 	export let lexicalIds: Set<number> | null = null;
-	/** When lexical search is active, a map `abstract_id → number of EXACT
+	/** When lexical search is active, a map `poster_id → number of EXACT
 	 * query-token matches`. Used as the primary sort key so an abstract that
 	 * literally contains the user's query (e.g. "pydra") surfaces above
 	 * fuzzy/proximal matches (hydra, pydry, etc.). */
 	export let lexicalExactness: Map<number, number> | null = null;
 	/** Per-abstract default rank — applied only when no search/semantic
-	 * ranking is active. The parent shuffles abstract_ids on every page load
+	 * ranking is active. The parent shuffles poster_ids on every page load
 	 * so the home grid surfaces a different sample each visit. The semantic
 	 * worker still indexes by the original positional order in
 	 * `abstracts.json`, so we MUST NOT shuffle the underlying array. */
@@ -36,7 +36,7 @@
 	let revealed = initialWindow;
 
 	$: visible = (() => {
-		const matched = abstracts.filter((a) => filteredIds === null || filteredIds.has(a.abstract_id));
+		const matched = abstracts.filter((a) => filteredIds === null || filteredIds.has(a.poster_id));
 		const hasExactness = lexicalExactness !== null && lexicalExactness.size > 0;
 		const hasSemantic = semanticScores !== null && semanticScores.size > 0;
 		if (!hasExactness && !hasSemantic) {
@@ -44,7 +44,7 @@
 			if (!defaultRank) return matched;
 			return matched
 				.slice()
-				.sort((a, b) => (defaultRank!.get(a.abstract_id) ?? 0) - (defaultRank!.get(b.abstract_id) ?? 0));
+				.sort((a, b) => (defaultRank!.get(a.poster_id) ?? 0) - (defaultRank!.get(b.poster_id) ?? 0));
 		}
 		// Sort key: primary = lexical exactness (higher first), secondary =
 		// semantic score (higher first). Exactness wins because the user's
@@ -52,11 +52,11 @@
 		// actual abstract containing the word lands at the top, not buried
 		// among fuzzy proximal matches.
 		return matched.slice().sort((a, b) => {
-			const ea = (hasExactness ? lexicalExactness!.get(a.abstract_id) : undefined) ?? 0;
-			const eb = (hasExactness ? lexicalExactness!.get(b.abstract_id) : undefined) ?? 0;
+			const ea = (hasExactness ? lexicalExactness!.get(a.poster_id) : undefined) ?? 0;
+			const eb = (hasExactness ? lexicalExactness!.get(b.poster_id) : undefined) ?? 0;
 			if (ea !== eb) return eb - ea;
-			const sa = hasSemantic ? semanticScores!.get(a.abstract_id) : undefined;
-			const sb = hasSemantic ? semanticScores!.get(b.abstract_id) : undefined;
+			const sa = hasSemantic ? semanticScores!.get(a.poster_id) : undefined;
+			const sb = hasSemantic ? semanticScores!.get(b.poster_id) : undefined;
 			if (sa === undefined && sb === undefined) return 0;
 			if (sa === undefined) return 1;
 			if (sb === undefined) return -1;
@@ -69,7 +69,7 @@
 		revealed = Math.min(revealed + initialWindow, visible.length);
 	}
 
-	function focus(posterId: string) {
+	function focus(posterId: number) {
 		$focusedAbstract = posterId;
 	}
 
@@ -125,7 +125,7 @@
 		<p class="empty">No abstracts match the current search.</p>
 	{:else}
 		<ul class="cards">
-			{#each pageItems as record (record.abstract_id)}
+			{#each pageItems as record (record.poster_id)}
 				{@const lead = leadAuthor(record)}
 				<li class="card" class:focused={$focusedAbstract === record.poster_id}>
 					<!-- The card-body used to be a single <button>, which prevented
@@ -147,8 +147,8 @@
 						data-poster-id={record.poster_id}
 					>
 						<div class="card-top">
-							<span class="poster-id">{record.poster_id || `id ${record.abstract_id}`}</span>
-							{#if semanticScores && semanticScores.has(record.abstract_id) && (lexicalIds === null || !lexicalIds.has(record.abstract_id))}
+							<span class="poster-id">{String(record.poster_id).padStart(4, '0')}</span>
+							{#if semanticScores && semanticScores.has(record.poster_id) && (lexicalIds === null || !lexicalIds.has(record.poster_id))}
 								<!--
 									✨ badge marks SEMANTIC-ONLY hits — abstracts surfaced by
 									MiniLM's neighbour pass that the lexical evaluator did NOT
@@ -159,10 +159,10 @@
 								-->
 								<span
 									class="semantic-badge"
-									title={`Semantic-only hit · cosine similarity ${semanticScores.get(record.abstract_id)?.toFixed(3)} (distance ${(1 - (semanticScores.get(record.abstract_id) ?? 0)).toFixed(3)})`}
+									title={`Semantic-only hit · cosine similarity ${semanticScores.get(record.poster_id)?.toFixed(3)} (distance ${(1 - (semanticScores.get(record.poster_id) ?? 0)).toFixed(3)})`}
 									data-testid="semantic-score"
 								>
-									✨ d={(1 - (semanticScores.get(record.abstract_id) ?? 0)).toFixed(3)}
+									✨ d={(1 - (semanticScores.get(record.poster_id) ?? 0)).toFixed(3)}
 								</span>
 							{/if}
 						</div>

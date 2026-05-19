@@ -50,8 +50,9 @@ function renderItemLine(
 	siteUrl: string,
 	index: number
 ): string {
-	const id = record.poster_id || `id ${record.abstract_id}`;
-	const url = record.poster_id ? permalinkFor(siteUrl, record.poster_id) : '';
+	// poster_id is the sole identifier; format as zero-padded 4-digit for display
+	const id = record.poster_id ? String(record.poster_id).padStart(4, '0') : '';
+	const url = record.poster_id ? permalinkFor(siteUrl, id) : '';
 	const lines: string[] = [`${index}. [${id}] ${record.title}`];
 	if (leadAuthor) lines.push(`   — ${leadAuthor}`);
 	if (url) lines.push(`   → Open: ${url}`);
@@ -62,13 +63,13 @@ function renderItemLine(
  * Build the mailto: URL for a cart of abstracts.
  *
  * @param items   Records the user has saved (already filtered to those in cart).
- * @param leadAuthorByAbstractId  Maps abstract_id → first-author display string.
+ * @param leadAuthorByPosterId  Maps poster_id → first-author display string.
  *                                Empty string if unknown. Caller computes this.
  * @param options Site URL + optional subject override.
  */
 export function buildMailtoLink(
 	items: AbstractRecord[],
-	leadAuthorByAbstractId: Map<number, string>,
+	leadAuthorByPosterId: Map<number, string>,
 	options: CartEmailOptions
 ): string {
 	const subject = options.subject ?? 'My OHBM 2026 abstract list';
@@ -84,7 +85,7 @@ export function buildMailtoLink(
 	let included = 0;
 	let truncated = false;
 	for (const rec of items) {
-		const lead = leadAuthorByAbstractId.get(rec.abstract_id) ?? '';
+		const lead = leadAuthorByPosterId.get(rec.poster_id) ?? '';
 		const line = renderItemLine(rec, lead, options.siteUrl, included + 1);
 		const tentativeBody = header + [...lines, line].join('\n\n') + truncationSuffix + footer;
 		const tentativeUrlLength = subjectPart.length + encodeURIComponent(tentativeBody).length;
@@ -104,7 +105,7 @@ export function buildMailtoLink(
 /** Plain-text rendering (for the clipboard fallback). */
 export function buildPlainTextList(
 	items: AbstractRecord[],
-	leadAuthorByAbstractId: Map<number, string>,
+	leadAuthorByPosterId: Map<number, string>,
 	siteUrl: string
 ): string {
 	const siteHome = trimSlash(siteUrl);
@@ -113,7 +114,7 @@ export function buildPlainTextList(
 		`Each entry below has an "Open:" link that lands directly on its full-detail page.\n\n`;
 	const body = items
 		.map((rec, i) =>
-			renderItemLine(rec, leadAuthorByAbstractId.get(rec.abstract_id) ?? '', siteUrl, i + 1)
+			renderItemLine(rec, leadAuthorByPosterId.get(rec.poster_id) ?? '', siteUrl, i + 1)
 		)
 		.join('\n\n');
 	return header + body + `\n\n— Browse the rest at ${siteHome}/`;

@@ -55,7 +55,7 @@
 	const envBuildInfo: BuildInfo | null = buildInfoFromEnv();
 
 	function buildRandomRank(records: AbstractRecord[]): Map<number, number> {
-		const ids = records.map((r) => r.abstract_id);
+		const ids = records.map((r) => r.poster_id);
 		// Fisher-Yates shuffle.
 		for (let i = ids.length - 1; i > 0; i--) {
 			const j = Math.floor(Math.random() * (i + 1));
@@ -76,7 +76,7 @@
 			abstractsByPosterId = new Map(
 				a.abstracts.filter((x) => x.poster_id).map((x) => [x.poster_id, x])
 			);
-			abstractsById = new Map(a.abstracts.map((x) => [x.abstract_id, x]));
+			abstractsById = new Map(a.abstracts.map((x) => [x.poster_id, x]));
 			// Test-only debug global used by Playwright accepted-only invariant guard.
 			if (typeof window !== 'undefined') {
 				(window as unknown as { __abstracts: AbstractRecord[] }).__abstracts = abstracts;
@@ -145,12 +145,12 @@
 			const mod = await import('$lib/search/semantic');
 			const hits = await mod.semanticSearch(forSemantic, 50);
 			if (my !== semanticQuerySerial) return;
-			// Translate worker indices (positional in abstracts.json) → abstract_id
+			// Translate worker indices (positional in abstracts.json) → poster_id
 			// AND preserve the per-hit cosine similarity so the card can show it.
 			const scores = new Map<number, number>();
 			for (const h of hits) {
 				const rec = abstracts[h.index];
-				if (rec) scores.set(rec.abstract_id, h.score);
+				if (rec) scores.set(rec.poster_id, h.score);
 			}
 			semanticScores = scores;
 		} catch {
@@ -184,7 +184,7 @@
 	$: facetCtx = buildFacetCtx(cellShard, cellTopics);
 	$: facetIds = filterByFacets(abstracts, $activeFilters, facetCtx);
 	$: cartIds = $cartOnly ? cartIdsFromStore(abstractsByPosterId, $cartStore) : null;
-	// Build a Map<author_name, abstract_ids> on the fly when the chip set
+	// Build a Map<author_name, poster_ids> on the fly when the chip set
 	// changes, then intersect. Empty chip set → null (no filter).
 	$: authorChipIds = computeAuthorChipIds($authorChips, abstracts, authorsById);
 	// Saved-only is a DOMINANT filter — when ON, it overrides the search /
@@ -209,13 +209,13 @@
 		const out = new Set<number>();
 		for (const pid of cart) {
 			const rec = byPid.get(pid);
-			if (rec) out.add(rec.abstract_id);
+			if (rec) out.add(rec.poster_id);
 		}
 		return out;
 	}
 
 	/**
-	 * Given the active author chips, return the union of abstract_ids
+	 * Given the active author chips, return the union of poster_ids
 	 * whose author list contains any chip name. Empty chip set returns
 	 * null (= no filter). Names match via case-insensitive + NFD-folded
 	 * comparison so "García" and "Garcia" are equivalent.
@@ -234,7 +234,7 @@
 			for (const aid of rec.author_ids) {
 				const name = byId.get(aid)?.name;
 				if (name && wanted.has(norm(name))) {
-					out.add(rec.abstract_id);
+					out.add(rec.poster_id);
 					break;
 				}
 			}
@@ -269,14 +269,14 @@
 				labelByCluster.set(t.cluster_id, label);
 			}
 		}
-		const clusterLabelByAbstractId = new Map<number, string>();
+		const clusterLabelByPosterId = new Map<number, string>();
 		if (shard) {
 			for (const row of shard.rows) {
 				const label = labelByCluster.get(row.community_id);
-				if (label) clusterLabelByAbstractId.set(row.abstract_id, label);
+				if (label) clusterLabelByPosterId.set(row.poster_id, label);
 			}
 		}
-		return { clusterLabelByAbstractId };
+		return { clusterLabelByPosterId };
 	}
 
 	function mergeSearch(

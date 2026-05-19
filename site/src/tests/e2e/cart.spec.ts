@@ -24,8 +24,10 @@ test.describe('US5: saved-list cart + email export', () => {
 		await card.waitFor({ timeout: 10_000 });
 		const posterId = await card.getAttribute('data-poster-id');
 		expect(posterId).toBeTruthy();
-		// Click the card-level add button.
-		await card.getByTestId('card-cart-add').click();
+		// The card-level add button is a sibling of `.card-body` (the
+		// element that carries `result-card`); both live under `<li.card>`,
+		// so we scope the cart-add lookup to the parent <li>.
+		await card.locator('xpath=..').getByTestId('card-cart-add').click();
 		// Open the cart drawer and let Playwright auto-wait for the first
 		// item — web-first assertions retry until the UI converges, no
 		// hand-rolled `waitForTimeout` needed.
@@ -42,7 +44,12 @@ test.describe('US5: saved-list cart + email export', () => {
 	test('clear empties the cart', async ({ page }) => {
 		await page.goto('/');
 		await page.getByTestId('search-input').waitFor();
-		await page.getByTestId('result-card').first().getByTestId('card-cart-add').click();
+		await page
+			.getByTestId('result-card')
+			.first()
+			.locator('xpath=..')
+			.getByTestId('card-cart-add')
+			.click();
 		await page.getByTestId('toggle-cart').click();
 		await expect(page.getByTestId('cart-drawer')).toBeVisible();
 		await expect(page.getByTestId('cart-item').first()).toBeVisible();
@@ -56,7 +63,7 @@ test.describe('US5: saved-list cart + email export', () => {
 		const card = page.getByTestId('result-card').first();
 		await card.waitFor({ timeout: 10_000 });
 		const posterId = (await card.getAttribute('data-poster-id')) ?? '';
-		await card.getByTestId('card-cart-add').click();
+		await card.locator('xpath=..').getByTestId('card-cart-add').click();
 		await page.getByTestId('toggle-cart').click();
 		// Wait for at least one cart item to render — the email anchor's
 		// href is recomputed reactively from the cart contents.

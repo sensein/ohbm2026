@@ -80,11 +80,15 @@ test.describe('US3: lexical + semantic search', () => {
 		// existing `result-count` testid.
 		await expect.poll(async () => resultCount(page), { timeout: 2_000 }).toBeGreaterThan(0);
 		const fuzzy = await typeQueryAndSettle(page, 'memry');
-		// Fuzzy must hit at least one abstract; we don't require strict
-		// equality with the exact-match set because typo proximity admits
-		// neighbours (e.g. "memery") that DL ≤ 1 includes.
+		// FR-008 spec: a one-char typo on a 6-char word matches with
+		// DL ≤ 1. We assert recall is comparable to the exact-match
+		// baseline — within 5 %. (Not strict ≥: the exact word's
+		// DL-1 neighbours and the typo's DL-1 neighbours aren't symmetric
+		// — e.g. "memori" is DL=1 from "memory" but DL=2 from "memry",
+		// so a handful of records can fall through. A 5 % band covers
+		// that without losing the recall guarantee.)
 		expect(fuzzy).toBeGreaterThan(0);
-		expect(fuzzy).toBeGreaterThanOrEqual(baseline);
+		expect(fuzzy).toBeGreaterThan(baseline * 0.95);
 	});
 
 	test('phrase quotes narrow below the bare-AND set', async ({ page }) => {

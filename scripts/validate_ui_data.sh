@@ -11,7 +11,18 @@ set -euo pipefail
 
 ROOT="${1:-site/static/data}"
 SCH="specs/008-ui-rewrite/contracts/ui_data.linkml.yaml"
+STAGE10_SCH="specs/010-export-redesign/contracts/shards.linkml.yaml"
 LINKML="${LINKML:-.venv/bin/linkml-validate}"
+PYTHON="${PYTHON:-.venv/bin/python}"
+
+# Stage-10 lint gate (FR-201 + FR-202). Runs first so a malformed
+# Stage-10 schema fails fast before the per-shard JSON validation
+# (which still validates against the Stage-6 schema for the legacy
+# json-shards format).
+if [[ -f "$STAGE10_SCH" ]] && [[ -x "$PYTHON" ]]; then
+  echo "lint: $STAGE10_SCH"
+  "$PYTHON" scripts/lint_schema.py "$STAGE10_SCH"
+fi
 
 if [[ ! -d "$ROOT" ]]; then
   echo "no data dir at $ROOT" >&2

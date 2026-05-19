@@ -73,14 +73,14 @@ export const FACET_LABELS: Record<FacetKey, string> = {
 /**
  * Per-(model, input) cell-specific context for facets that derive their
  * options from the active UMAP layout rather than the abstract record alone.
- * Currently just the cluster facet — `clusterLabelByAbstractId` maps each
+ * Currently just the cluster facet — `clusterLabelByPosterId` maps each
  * abstract to the community label that the UMAP color-codes it under.
  */
 export interface FacetCellContext {
-	clusterLabelByAbstractId: Map<number, string>;
+	clusterLabelByPosterId: Map<number, string>;
 }
 
-const EMPTY_CTX: FacetCellContext = { clusterLabelByAbstractId: new Map() };
+const EMPTY_CTX: FacetCellContext = { clusterLabelByPosterId: new Map() };
 
 function dedupe(values: string[]): string[] {
 	const out: string[] = [];
@@ -96,7 +96,7 @@ function dedupe(values: string[]): string[] {
 function valuesFor(record: AbstractRecord, key: FacetKey, ctx: FacetCellContext): string[] {
 	if (key === 'accepted_for') return record.accepted_for ? [record.accepted_for] : [];
 	if (key === 'cluster') {
-		const label = ctx.clusterLabelByAbstractId.get(record.abstract_id);
+		const label = ctx.clusterLabelByPosterId.get(record.poster_id);
 		return label ? [label] : [];
 	}
 	// The Topic facet is the UNION of primary + secondary topic values per
@@ -150,7 +150,7 @@ export function filterByFacets(
 	if (!active) return null;
 	const out = new Set<number>();
 	for (const a of abstracts) {
-		if (passesFilters(a, filters, ctx)) out.add(a.abstract_id);
+		if (passesFilters(a, filters, ctx)) out.add(a.poster_id);
 	}
 	return out;
 }
@@ -179,7 +179,7 @@ export function recomputeFacets(
 	for (const key of FACET_KEYS_ORDERED) {
 		const counts = new Map<string, number>();
 		for (const record of abstracts) {
-			if (preFilteredIds && !preFilteredIds.has(record.abstract_id)) continue;
+			if (preFilteredIds && !preFilteredIds.has(record.poster_id)) continue;
 			if (!passesFilters(record, filters, ctx, key)) continue;
 			for (const v of valuesFor(record, key, ctx)) {
 				counts.set(v, (counts.get(v) ?? 0) + 1);

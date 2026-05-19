@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +74,7 @@ def _load_annotations(rollup_db: Path) -> dict[int, dict[str, Any]]:
 
 def _row_to_cell_record(
     abstract_id: int,
+    poster_id: int,
     row: Mapping[str, Any] | None,
     model: str,
     input_key: str,
@@ -116,7 +117,7 @@ def _row_to_cell_record(
     # lacked claim embeddings).
     has_projection = coord2d is not None
     record: dict[str, Any] = {
-        "abstract_id": int(abstract_id),
+        "poster_id": int(poster_id),
         "umap2d": umap2d,
         "umap3d": umap3d,
         "umap_missing": not has_projection if (umap2d_by_id is not None or umap3d_by_id is not None) else False,
@@ -137,6 +138,7 @@ def build_cells_shards(
     *,
     rollup_db: Path,
     abstract_ids: Iterable[int],
+    abstract_to_poster: Mapping[int, int],
     analysis_root: Path | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return ``{cell_key: [row, ...]}`` for every discovered cell.
@@ -146,6 +148,11 @@ def build_cells_shards(
     supplied each cell's UMAP coordinates are read from its own
     ``projections__*`` bundle (per-(model, input) layout); otherwise the
     builder falls back to the wide ``annotations`` table (per-model only).
+
+    Stage 10: row records emit ``poster_id`` (string) instead of
+    ``abstract_id`` (Oxford submission id). The annotation lookups still
+    happen by abstract_id (the rollup DB's join key), but the output
+    shape uses the user-facing identifier.
     """
 
     rollup_path = Path(rollup_db)
@@ -166,6 +173,7 @@ def build_cells_shards(
         out[cell_key] = [
             _row_to_cell_record(
                 aid,
+                abstract_to_poster[aid],
                 annotations.get(aid),
                 model,
                 input_key,
@@ -177,10 +185,28 @@ def build_cells_shards(
     return out
 
 
+def iter_cells(
+    *,
+    rollup_db: Path,
+    abstract_ids: Iterable[int],
+    abstract_to_poster: Mapping[int, int],
+    analysis_root: Path | None = None,
+) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    """Yield ``(cell_key, [row, ...])`` for every discovered cell."""
+    shards = build_cells_shards(
+        rollup_db=rollup_db,
+        abstract_ids=abstract_ids,
+        abstract_to_poster=abstract_to_poster,
+        analysis_root=analysis_root,
+    )
+    yield from shards.items()
+
+
 def build_cells(
     *,
     rollup_db: Path,
     abstract_ids: Iterable[int],
+    abstract_to_poster: Mapping[int, int],
     build_info: Mapping[str, str],
     analysis_root: Path | None = None,
 ) -> dict[str, dict[str, Any]]:
@@ -189,6 +215,7 @@ def build_cells(
     shards = build_cells_shards(
         rollup_db=rollup_db,
         abstract_ids=abstract_ids,
+        abstract_to_poster=abstract_to_poster,
         analysis_root=analysis_root,
     )
     return {

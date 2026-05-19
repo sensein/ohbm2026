@@ -27,8 +27,7 @@ function mkAbstract(
 	overrides: Partial<AbstractRecord> = {}
 ): AbstractRecord {
 	return {
-		abstract_id: id,
-		poster_id: `M-AM-${id}`,
+		poster_id: id,
 		title: `Abstract ${id}`,
 		accepted_for: 'Poster',
 		sections: { introduction: '', methods: '', results: '', conclusion: '', references: '' },

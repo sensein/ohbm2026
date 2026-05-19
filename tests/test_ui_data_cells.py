@@ -18,11 +18,12 @@ class TestCellsPositionalJoin(unittest.TestCase):
             shards = build_cells_shards(
                 rollup_db=paths["rollup"],
                 abstract_ids=[1001, 1003],
+                abstract_to_poster={1001: 101, 1003: 103},
             )
         for cell_key, rows in shards.items():
             self.assertEqual(len(rows), 2, msg=f"cell {cell_key} length")
-            self.assertEqual(rows[0]["abstract_id"], 1001)
-            self.assertEqual(rows[1]["abstract_id"], 1003)
+            self.assertEqual(rows[0]["poster_id"], 101)
+            self.assertEqual(rows[1]["poster_id"], 103)
 
     def test_neuroscape_cells_carry_extra_fields(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -30,6 +31,7 @@ class TestCellsPositionalJoin(unittest.TestCase):
             shards = build_cells_shards(
                 rollup_db=paths["rollup"],
                 abstract_ids=[1001, 1003],
+                abstract_to_poster={1001: 101, 1003: 103},
             )
         ns = shards["neuroscape_abstract"]
         self.assertIn("neuroscape_cluster_id", ns[0])
@@ -44,6 +46,7 @@ class TestCellsPositionalJoin(unittest.TestCase):
             envelopes = build_cells(
                 rollup_db=paths["rollup"],
                 abstract_ids=[1001, 1003],
+                abstract_to_poster={1001: 101, 1003: 103},
                 build_info=BUILD_INFO,
             )
         for envelope in envelopes.values():

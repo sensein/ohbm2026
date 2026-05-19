@@ -16,7 +16,10 @@
 	let loaded = false;
 	let unknown = false;
 
-	$: posterId = $page.params.poster_id;
+	// URL slug is a string; the data shape stores poster_id as a number.
+	// Number("0503") === 503 — strips the leading zeros the URL may carry.
+	$: posterIdParam = $page.params.poster_id;
+	$: posterIdInt = Number(posterIdParam);
 
 	onMount(async () => {
 		const [a, au] = await Promise.all([loadAbstracts(), loadAuthors()]);
@@ -26,8 +29,8 @@
 			return;
 		}
 		authorsById = new Map(au.authors.map((x) => [x.author_id, x]));
-		abstractsById = new Map(a.abstracts.map((x) => [x.abstract_id, x]));
-		const target = a.abstracts.find((x) => x.poster_id === posterId) ?? null;
+		abstractsById = new Map(a.abstracts.map((x) => [x.poster_id, x]));
+		const target = a.abstracts.find((x) => x.poster_id === posterIdInt) ?? null;
 		abstractRecord = target;
 		unknown = target === null;
 		loaded = true;
@@ -36,7 +39,7 @@
 
 <svelte:head>
 	{#if abstractRecord}
-		<title>{abstractRecord.poster_id} — {abstractRecord.title}</title>
+		<title>{String(abstractRecord.poster_id).padStart(4, '0')} — {abstractRecord.title}</title>
 	{:else}
 		<title>Abstract not found</title>
 	{/if}
@@ -51,7 +54,7 @@
 		<p class="status">Loading…</p>
 	{:else if unknown}
 		<section class="not-found" data-testid="abstract-not-found">
-			<h1>No abstract with poster id <code>{posterId}</code></h1>
+			<h1>No abstract with poster id <code>{posterIdParam}</code></h1>
 			<p>
 				The poster id in this URL doesn't match any accepted abstract in the current data
 				package. It may have been re-assigned by the program, or the data package may not be

@@ -42,6 +42,7 @@ const MIME = {
 	'.webp': 'image/webp',
 	'.ico': 'image/x-icon',
 	'.onnx': 'application/octet-stream',
+	'.parquet': 'application/octet-stream',
 	'.wasm': 'application/wasm',
 	'.woff': 'font/woff',
 	'.woff2': 'font/woff2',
@@ -57,24 +58,33 @@ async function stage() {
 	await cp(BUILD_DIR, join(PUBLISH_DIR, 'ohbm2026'), { recursive: true });
 	await cp(join(REDIRECT_DIR, 'index.html'), join(PUBLISH_DIR, 'index.html'));
 	await cp(join(REDIRECT_DIR, '404.html'), join(PUBLISH_DIR, '404.html'));
-	// Stage a data-package tarball so the e2e tests can run against real
-	// data without hitting the production Dropbox URL. Two sources, in
-	// preference order:
-	//   1. `OHBM2026_LOCAL_TARBALL` env var — an absolute path to an
-	//      existing tarball (e.g. the maintainer's local Dropbox sync at
-	//      `~/MIT Dropbox/.../ui-data.tar.gz`). Copied verbatim. Useful
-	//      when you want byte-identical parity with what production
-	//      fetches.
-	//   2. `site/static/data/` — re-tarred on the fly. The contents may
-	//      drift from the production package; fine for in-repo iteration.
-	// The build must have been done with
-	// `VITE_DATA_PACKAGE_URL=http://127.0.0.1:4173/data-package.tar.gz`
-	// for the browser to actually reach this.
+	// Stage a data package so the e2e tests can run against real data
+	// without hitting the production Dropbox URL. Stage 10 ships parquet
+	// (`data.parquet`); the legacy tarball path was removed.
+	//
+	// Three sources, in preference order:
+	//   1. `OHBM2026_LOCAL_PARQUET` env var — an absolute path to a
+	//      `data.parquet` (e.g. the maintainer's local Dropbox sync at
+	//      `~/MIT Dropbox/.../ohbm2026/data.parquet`). Copied verbatim.
+	//   2. `OHBM2026_LOCAL_TARBALL` env var — legacy fallback for the
+	//      Stage-6 tarball shape. Kept around so an older bundle still
+	//      works for ad-hoc dev. (Will be removed once Stage 11 lands.)
+	//   3. `site/static/data/` — re-tarred on the fly (Stage-6 shape).
+	//
+	// The build must have been done with `VITE_DATA_PACKAGE_URL`
+	// pointing at the URL served here (parquet → `…/data.parquet`,
+	// tarball → `…/data-package.tar.gz`).
+	const localParquet = process.env.OHBM2026_LOCAL_PARQUET;
+	if (localParquet && existsSync(localParquet)) {
+		await cp(localParquet, join(PUBLISH_DIR, 'data.parquet'));
+		console.log(`stage-and-serve: data-package = ${localParquet} (parquet)`);
+		return;
+	}
 	const tarOut = join(PUBLISH_DIR, 'data-package.tar.gz');
 	const localTarball = process.env.OHBM2026_LOCAL_TARBALL;
 	if (localTarball && existsSync(localTarball)) {
 		await cp(localTarball, tarOut);
-		console.log(`stage-and-serve: data-package = ${localTarball}`);
+		console.log(`stage-and-serve: data-package = ${localTarball} (legacy tarball)`);
 		return;
 	}
 	const dataDir = join(SITE_ROOT, 'static', 'data');

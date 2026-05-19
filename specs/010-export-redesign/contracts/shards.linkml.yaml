@@ -1,0 +1,514 @@
+# Stage-10 LinkML schema — parquet-single shape.
+#
+# Replaces `specs/008-ui-rewrite/contracts/ui_data.linkml.yaml`. Codifies
+# the per-table shapes the parquet-single emitter writes
+# (`src/ohbm2026/ui_data/formats/parquet_single.py`). Every type that
+# Stage 6 carried as `range: Any` is now concrete — Parquet STRUCT and
+# LIST<…> columns give us real types end-to-end. See research.md §B3 for
+# the format-commit rationale.
+#
+# Validation gates (FR-201 + FR-202 + SC-203 + SC-204):
+#
+#   1. `grep -c "range: Any" shards.linkml.yaml` returns 0 — STRUCT
+#      columns eliminated the three Stage-6 holdouts (Manifest.cells,
+#      Abstract.facets, Enrichment.records).
+#   2. `scripts/lint_schema.py` exits 0.
+#   3. `scripts/validate_ui_data.sh` reports PASS for each per-table
+#      schema against a known-good shard.
+
+id: https://github.com/sensein/ohbm2026/specs/010-export-redesign/contracts/shards
+name: ohbm_shards
+title: OHBM Abstract Atlas — Stage-10 data package (parquet-single)
+description: |-
+  Per-table LinkML definitions for the single `data.parquet` shipped at
+  `OHBM2026_UI_DATA_PACKAGE_URL`. The outer file is a discriminated
+  Parquet container (one row group per logical table, `table_name`
+  string + `table_bytes` blob); each inner table validates against the
+  corresponding class below.
+license: MIT
+
+prefixes:
+  linkml: https://w3id.org/linkml/
+  ohbm: https://github.com/sensein/ohbm2026/specs/010-export-redesign/contracts/shards/
+default_prefix: ohbm
+default_range: string
+
+imports:
+  - linkml:types
+
+# -- Enums -----------------------------------------------------------
+
+enums:
+  AcceptedFor:
+    description: |-
+      Submission acceptance category. "Unknown" is the fallback the
+      ingest applies when the raw record's accepted_for is missing.
+    permissible_values:
+      Poster: {}
+      Oral: {}
+      Lightning: {}
+      Symposium: {}
+      Educational Course: {}
+      Withdrawn:
+        description: |-
+          MUST NOT appear in the exported abstracts table — withdrawn
+          records are filtered out at build time (cross-shard invariant
+          3). Present here only because the type system tracks the
+          source enum's complete value set.
+      Unknown: {}
+
+  EcoCode:
+    description: |-
+      ECO v1 top-level evidence codes. Used by enrichment.claims to
+      annotate the kind of evidence underlying each LLM-extracted claim.
+    permissible_values:
+      "ECO:0000352": { description: evidence used in manual assertion }
+      "ECO:0000269": { description: experimental evidence }
+      "ECO:0000305": { description: curator inference }
+      "ECO:0000250": { description: by-sequence-similarity evidence }
+      "ECO:0000314": { description: direct assay }
+      "ECO:0000315": { description: mutant-phenotype evidence }
+      "ECO:0000316": { description: genetic-interaction evidence }
+      "ECO:0000317": { description: genomic-context evidence }
+      "ECO:0000353": { description: physical-interaction evidence }
+
+# -- Reusable structs (STRUCT columns in Parquet) --------------------
+
+classes:
+
+  BuildInfo:
+    description: |-
+      Provenance block. Identical bytes are stamped into every shard
+      envelope so a single read tells the consumer which pipeline
+      revision + corpus state produced the data.
+    slots:
+      - corpus_state_key
+      - code_revision
+      - code_revision_short
+      - stage4_rollup_state_key
+      - built_at
+      - conference_id
+
+  Sections:
+    description: |-
+      The five rich-text panels of an abstract record. Plain text;
+      no markdown. References section is rendered separately from
+      `reference_dois` / `reference_urls` / `reference_titles`.
+    attributes:
+      introduction:
+        range: string
+        required: true
+      methods:
+        range: string
+        required: true
+      results:
+        range: string
+        required: true
+      conclusion:
+        range: string
+        required: true
+      references:
+        range: string
+        required: true
+
+  Topics:
+    description: |-
+      Primary + secondary topic + sub-category as assigned by the
+      submitter. Distinct from the LLM-derived cluster topic.
+    attributes:
+      primary:
+        range: string
+        required: true
+      primary_subcategory:
+        range: string
+        required: true
+      secondary:
+        range: string
+        required: true
+      secondary_subcategory:
+        range: string
+        required: true
+
+  Facets:
+    description: |-
+      Per-record facet values. Each key is a typed `list<string>`;
+      the Stage-6 `range: Any` was eliminated by making every facet
+      key explicit (FR-201). New facets require a schema bump.
+    attributes:
+      keywords:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      methods:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      study_type:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      population:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      field_strength:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      processing_packages:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      species:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      recording_technology:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      brain_regions:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      brain_networks:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      accepted_for:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+
+  PosterStandby:
+    description: |-
+      The two stand-by slots assigned to a poster by the program
+      committee. UTC timestamps; each window is 1 hour so end-time
+      is implicit (start + 1h). The CSV (`proposal_listing.csv`) is
+      the source of truth — these fields are NOT in Oxford GraphQL.
+    attributes:
+      first:
+        range: datetime
+        required: false
+      second:
+        range: datetime
+        required: false
+
+  # -- Per-table classes (one row group per class in the parquet) ----
+
+  Abstract:
+    description: |-
+      One row per accepted abstract. `poster_id` is the sole
+      cross-shard join key (Oxford submission_id is preserved in
+      `data/primary/abstracts.json` for traceability, not in this
+      export). Section bodies are plain text.
+    attributes:
+      poster_id:
+        range: integer
+        required: true
+        description: 4-digit poster identifier, range 1–3333.
+      title:
+        range: string
+        required: true
+      accepted_for:
+        range: AcceptedFor
+        required: true
+      sections:
+        range: Sections
+        required: true
+        inlined: true
+      topics:
+        range: Topics
+        required: true
+        inlined: true
+      methods_checklist:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      facets:
+        range: Facets
+        required: true
+        inlined: true
+      author_ids:
+        range: integer
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      reference_dois:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      reference_urls:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+        description: |-
+          Same length as reference_dois (positional join — slot i in
+          each parallel array refers to the same reference).
+      reference_titles:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+        description: |-
+          Same length as reference_dois (positional join).
+      poster_standby:
+        range: PosterStandby
+        required: true
+        inlined: true
+
+  Author:
+    description: |-
+      Deduplicated author record. Each row carries every accepted
+      poster_id this author co-authored, so the cross-link
+      `abstract.author_ids[*]` → `author.author_id` is bidirectional
+      from a single map of authors.
+    attributes:
+      author_id:
+        range: integer
+        required: true
+      name:
+        range: string
+        required: true
+      affiliations:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      poster_ids:
+        range: integer
+        multivalued: true
+        required: true
+        minimum_cardinality: 1
+
+  CellRow:
+    description: |-
+      One row per (cell, abstract). The cell layout overlays the
+      abstracts table positionally — `poster_id` MUST equal the
+      poster_id at the same row index in the abstracts table
+      (cross-shard invariant 2; enforced by `builder.py`).
+    attributes:
+      poster_id:
+        range: integer
+        required: true
+      umap2d:
+        range: float
+        multivalued: true
+        required: true
+        minimum_cardinality: 2
+        maximum_cardinality: 2
+      umap3d:
+        range: float
+        multivalued: true
+        required: true
+        minimum_cardinality: 3
+        maximum_cardinality: 3
+      umap_missing:
+        range: boolean
+        required: true
+      community_id:
+        range: integer
+        required: true
+        description: |-
+          Per-cell community label. -1 means "no community assigned"
+          for this abstract in this cell.
+      topic_cluster_id:
+        range: integer
+        required: true
+      neuroscape_cluster_id:
+        range: integer
+        required: false
+        description: |-
+          Only present on neuroscape_* cells.
+      neuroscape_cluster_distance:
+        range: float
+        required: false
+        description: |-
+          Only present on neuroscape_* cells.
+
+  TopicRecord:
+    description: |-
+      Cluster summary for one (cell, kind) pair — title +
+      description + focus + keyword set produced by spaCy + c-TF-IDF
+      + LLM (analyze-matrix stage).
+    attributes:
+      cluster_id:
+        range: integer
+        required: true
+      keywords:
+        range: string
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      title:
+        range: string
+        required: true
+      description:
+        range: string
+        required: true
+      focus:
+        range: string
+        required: true
+
+  NeighborRow:
+    description: |-
+      K-nearest + K-farthest neighbours for a single (cell,
+      abstract) pair. All id arrays are parallel — slot i in
+      nearest_distances pairs with slot i in nearest_ids; same for
+      farthest. Length k is constant per cell (k = 10 in the OHBM
+      build).
+    attributes:
+      poster_id:
+        range: integer
+        required: true
+      nearest_ids:
+        range: integer
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      nearest_distances:
+        range: float
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+        description: |-
+          Same length as nearest_ids.
+      farthest_ids:
+        range: integer
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+      farthest_distances:
+        range: float
+        multivalued: true
+        required: true
+        minimum_cardinality: 0
+        description: |-
+          Same length as farthest_ids.
+
+  EnrichmentClaim:
+    description: |-
+      One LLM-extracted claim from an abstract. `claim_index` keeps
+      ordering stable within a (poster_id) group.
+    attributes:
+      poster_id:
+        range: integer
+        required: true
+      claim_index:
+        range: integer
+        required: true
+      claim:
+        range: string
+        required: false
+      claim_type:
+        range: string
+        required: false
+      evidence:
+        range: string
+        required: false
+      evidence_eco_codes:
+        range: EcoCode
+        multivalued: true
+        required: false
+        minimum_cardinality: 0
+      source:
+        range: string
+        required: false
+      source_quote_verified:
+        range: boolean
+        required: false
+
+  EnrichmentFigure:
+    description: |-
+      One LLM-interpreted figure caption from an abstract.
+    attributes:
+      poster_id:
+        range: integer
+        required: true
+      figure_index:
+        range: integer
+        required: true
+      interpretation:
+        range: string
+        required: false
+      keywords:
+        range: string
+        multivalued: true
+        required: false
+        minimum_cardinality: 0
+      ocr_text:
+        range: string
+        required: false
+      question_name:
+        range: string
+        required: false
+      model_quality_estimate:
+        range: string
+        required: false
+
+  Manifest:
+    description: |-
+      Single-row manifest table. The actual manifest is stored as a
+      JSON-string column in the parquet (heterogeneous nested shapes
+      for cells / facets / search defeat direct STRUCT packing); the
+      JSON-in-string slot keeps the outer table flat without losing
+      structure. The browser decoder parses `manifest_json` back to
+      an object on first read.
+    attributes:
+      schema_version:
+        range: string
+        required: true
+      format:
+        range: string
+        required: true
+        description: |-
+          Always "parquet-single" for this schema. Used by the
+          dispatcher in `loader.ts` to pick the right decoder.
+      manifest_json:
+        range: string
+        required: true
+        description: |-
+          JSON-encoded payload with build_info, cell registry,
+          facet registry, etc. Parsed client-side.
+
+# -- Slots used by reusable structs ----------------------------------
+
+slots:
+  corpus_state_key:
+    range: string
+    required: true
+  code_revision:
+    range: string
+    required: true
+  code_revision_short:
+    range: string
+    required: true
+  stage4_rollup_state_key:
+    range: string
+    required: true
+  built_at:
+    range: string
+    required: true
+    description: ISO 8601 UTC timestamp.
+  conference_id:
+    range: string
+    required: true
+    description: |-
+      Identifier of the conference this data package describes. Stamped
+      into every shard's build_info so a future multi-conference deploy
+      can disambiguate at consumer side — the conference parquets
+      themselves are frozen post-build (Phase-5 design call).

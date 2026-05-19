@@ -66,7 +66,7 @@ interface InvertedIndex {
 	/** Per-abstract ordered token stream — needed for phrase adjacency. */
 	tokenStreams: Map<number, string[]>;
 	/**
-	 * Set of every abstract_id in the corpus. Cached on the index so a query
+	 * Set of every poster_id in the corpus. Cached on the index so a query
 	 * consisting only of negations (`-fmri`) can copy a starting set without
 	 * walking the abstracts list on every keystroke.
 	 */
@@ -111,7 +111,7 @@ function buildInvertedIndex(
 			facetBlob
 		].join(' ');
 		const stream = tokenizeForIndex(corpus);
-		tokenStreams.set(a.abstract_id, stream);
+		tokenStreams.set(a.poster_id, stream);
 		const seen = new Set<string>();
 		for (const tok of stream) {
 			if (seen.has(tok)) continue;
@@ -121,7 +121,7 @@ function buildInvertedIndex(
 				postingList = new Set();
 				postings.set(tok, postingList);
 			}
-			postingList.add(a.abstract_id);
+			postingList.add(a.poster_id);
 		}
 	}
 	const index: InvertedIndex = {
@@ -309,7 +309,7 @@ export function queryForSemantic(parsed: ParsedQuery): string {
 
 // ─── Evaluation ────────────────────────────────────────────────────────────
 
-/** Set of abstract_ids whose corpus contains a token within DL threshold of `qword`. */
+/** Set of poster_ids whose corpus contains a token within DL threshold of `qword`. */
 function lookupWord(
 	qword: string,
 	index: InvertedIndex
@@ -501,7 +501,7 @@ export function lexicalSearch(
 }
 
 interface SearchHaystack {
-	abstract_id: number;
+	poster_id: number;
 	haystack: string;
 }
 
@@ -534,7 +534,7 @@ export function buildHaystacks(
 				facetBlob
 			].join('\n')
 		);
-		return { abstract_id: a.abstract_id, haystack };
+		return { poster_id: a.poster_id, haystack };
 	});
 	haystackCache.set(abstracts, out);
 	return out;
@@ -550,8 +550,8 @@ export function searchAbstracts(
 	if (!q) return null;
 	const haystacks = buildHaystacks(abstracts, authorsById);
 	const out = new Set<number>();
-	for (const { abstract_id, haystack } of haystacks) {
-		if (haystack.includes(q)) out.add(abstract_id);
+	for (const { poster_id, haystack } of haystacks) {
+		if (haystack.includes(q)) out.add(poster_id);
 	}
 	return out;
 }

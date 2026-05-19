@@ -23,7 +23,9 @@ class TestAcceptedOnlyInvariant(unittest.TestCase):
             )
         self.assertEqual(len(records), 2)
         self.assertTrue(all(r["accepted_for"] != "Withdrawn" for r in records))
-        self.assertNotIn(1002, {r["abstract_id"] for r in records})
+        # Stage 10: poster_id is the user-facing id; submission 1002 maps
+        # to poster 102 in the fixture and must not appear.
+        self.assertNotIn(102, {r["poster_id"] for r in records})
 
     def test_envelope_carries_build_info(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -48,8 +50,11 @@ class TestAcceptedOnlyInvariant(unittest.TestCase):
                 references_path=None,
                 withdrawn_path=paths["withdrawn"],
             )
+        # Stage 10: poster_id is int16; "0101" from the fixture parses to
+        # 101 (leading zeros are display-only — `String(id).padStart(4)`
+        # in the UI).
         poster_ids = {r["poster_id"] for r in records}
-        self.assertIn("M-AM-101", poster_ids)
+        self.assertIn(101, poster_ids)
         for r in records:
             self.assertNotIn("submission_id", r)
 

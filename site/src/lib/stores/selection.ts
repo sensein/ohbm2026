@@ -13,7 +13,10 @@ export const activeFilters = writable<Map<string, Set<string>>>(new Map());
 
 export const lassoSelection = writable<Set<number> | null>(null);
 
-export const focusedAbstract = writable<string | null>(null);
+/** Currently-focused abstract's poster_id (int). Null when no abstract is
+ *  focused. Stage 10: was `string | null` when poster_id was the string
+ *  form; now matches AbstractRecord.poster_id's number type. */
+export const focusedAbstract = writable<number | null>(null);
 
 /** "Show only saved" — restricts the result list to items currently in the
  *  cart. Pairs with the bulk-add affordance: save a set, flip this on,

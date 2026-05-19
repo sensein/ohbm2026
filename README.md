@@ -102,7 +102,9 @@ The latest end state of the project is:
    - two semantic cluster lenses:
      - `25-cluster benchmark`
      - `claims 28-cluster benchmark`
-9. **Atlas UI** — static SvelteKit site served from GitHub Pages, with per-PR preview deploys surfaced in the PR's Deployments box (NOT bot comments). Shipped across `008-ui-rewrite` (US1–US8) and `009-conference-subpath` (URL rework). Production at `abstractatlas.brainkb.org/ohbm2026/`; PR previews at `/pr-<N>/ohbm2026/`. The bare root `abstractatlas.brainkb.org/` bounces to `/ohbm2026/` via a static `<meta http-equiv="refresh">` + JS redirect island (gh-pages cannot serve a true HTTP 301; spec 009 names this honestly). See `specs/008-ui-rewrite/` for the feature surface and `specs/009-conference-subpath/` for the URL-shape rework.
+9. **Atlas UI** — static SvelteKit site served from GitHub Pages, with per-PR preview deploys surfaced in the PR's Deployments box (NOT bot comments). Shipped across `008-ui-rewrite` (US1–US8), `009-conference-subpath` (URL rework), and `010-export-redesign` (parquet data package + identifier consolidation). Production at `abstractatlas.brainkb.org/ohbm2026/`; PR previews at `/pr-<N>/ohbm2026/`. The bare root `abstractatlas.brainkb.org/` bounces to `/ohbm2026/` via a static `<meta http-equiv="refresh">` + JS redirect island (gh-pages cannot serve a true HTTP 301; spec 009 names this honestly).
+
+10. **Data export redesign** (`010-export-redesign`) — the data package switched from a gzipped tarball of JSON shards to a single Parquet file. Reasons: native STRUCT/LIST types eliminate every `range: Any` slot from the schema, dict-encoded int columns shrink id storage ~4× before zstd, and the single-file shape supports HTTP Range requests for future row-group lazy load. Schema change: `poster_id` (int16, range 1–3333) is the sole user-facing identifier across every shard — Oxford submission_id no longer appears in the export. The reverse map lives in `data/primary/abstracts.json` for traceability. Phase 5 (cross-conference linking) is deferred to a UI-side artifact so conference parquets stay immutable post-build.
 
 ## Atlas UI
 
@@ -132,15 +134,14 @@ cd site && UI_DATA_AVAILABLE=1 pnpm exec playwright test --project=chromium   # 
 
 ### Refreshing the deployed data package
 
-CI doesn't materialize the Stage 1–4 inputs. Instead, the maintainer builds the data package locally and hosts the tarball at a URL the deploy workflow reads from the `OHBM2026_UI_DATA_PACKAGE_URL` repo variable (sha256-pinned via `OHBM2026_UI_DATA_PACKAGE_SHA256`).
+CI doesn't materialize the Stage 1–4 inputs. Instead, the maintainer builds the data package locally and hosts the single `data.parquet` at a URL the deploy workflow reads from the `OHBM2026_UI_DATA_PACKAGE_URL` repo variable (sha256-pinned via `OHBM2026_UI_DATA_PACKAGE_SHA256`).
 
-**Dropbox in-place write is required to preserve the share link** ([Dropbox docs](https://help.dropbox.com/share/force-download)). The recipe below uses `tar -czf <canonical-path>` which opens the destination with `O_WRONLY|O_CREAT|O_TRUNC` — preserves the inode, which Dropbox observes as an overwrite (link stays). Do NOT use `cp newfile.tar.gz <canonical-path>` from a different filesystem or `rm canonical && cp …` — both look like delete+create to Dropbox and break the share URL.
+**Stage 10 swap** (see `specs/010-export-redesign/research.md` § B3): the data package is now a single `data.parquet` file (~25 MB) with one row group per logical table — abstracts, authors, cells, topics, neighbours, enrichment, manifest, MiniLM vector blob. Range-fetchable at row-group granularity for the lazy-load story; replaces the Stage-6 gzipped JSON-shards tarball.
+
+**Dropbox in-place write is still required to preserve the share link** — overwrite the same path on Dropbox so the inode / share URL stays stable; do NOT delete-and-create.
 
 ```bash
-# 1. Build the data package in place (writes to site/static/data/).
-#    Each shard is written via O_TRUNC so the inode stays stable for any
-#    later in-place tar write; mtimes are pinned to a fixed timestamp for
-#    byte-identical tarballs across reruns.
+# 1. Build the parquet directly to the canonical Dropbox path.
 PYTHONPATH=src .venv/bin/python scripts/build_ui_data.py \
   --corpus data/primary/abstracts.json \
   --withdrawn data/primary/abstracts_withdrawn.json \
@@ -148,20 +149,20 @@ PYTHONPATH=src .venv/bin/python scripts/build_ui_data.py \
   --enriched data/primary/abstracts_enriched.sqlite \
   --analysis-root data/outputs/analysis \
   --discover-rollup \
-  --output site/static/data
+  --minilm-root data/outputs/embeddings/minilm \
+  --proposal-listing archive/proposals/proposals/block_spread_soft/proposal_listing.csv \
+  --output ~/dbm/shares/ohbm2026/ \
+  --output-format parquet-single \
+  --conference ohbm2026
 
-# 2. Write the tarball directly to the canonical Dropbox path. The first
-#    time you do this, share-link the resulting file via the Dropbox UI
-#    and record the `?dl=0` URL as `OHBM2026_UI_DATA_PACKAGE_URL`. Every
-#    refresh hereafter re-uses the same path → same inode → same share URL.
-tar -czf ~/dbm/shares/ohbm2026/ui-data.tar.gz -C site/static data
-
-# 3. Update the sha256 repo variable so CI verifies the new bytes.
-NEW_SHA=$(shasum -a 256 ~/dbm/shares/ohbm2026/ui-data.tar.gz | awk '{print $1}')
+# 2. Update the sha256 repo variable so CI sidecar docs reflect the
+#    new bytes. The URL repo variable never changes after the first
+#    share-link is generated; only the sha256 var bumps per refresh.
+NEW_SHA=$(shasum -a 256 ~/dbm/shares/ohbm2026/data.parquet | awk '{print $1}')
 gh variable set OHBM2026_UI_DATA_PACKAGE_SHA256 --body "$NEW_SHA"
 ```
 
-The URL repo variable never changes after the first share-link is generated; only the sha256 var bumps per refresh. Next PR-preview deploy fetches + sha256-verifies the new package.
+The `--proposal-listing` flag is optional — without it the `poster_standby` field is empty; with it each abstract carries the program-committee stand-by times. The CLI also accepts `--output-format gzip-json-shards` for the legacy tarball shape (kept reachable for one-off dev comparisons; not the canonical export).
 
 Per-PR previews surface in the **PR's Deployments box** (top-of-PR, via the `environment:` declaration in `.github/workflows/pr-preview.yml`) — NOT as a bot comment. The short committish (first 7 chars of git SHA) bakes into the page `<title>` + the persistent footer affordance via the `VITE_BUILD_SHA` env var injected by the deploy workflows, so reviewers can verify each PR-preview reflects the latest pushed commit at-a-glance (FR-022 + SC-011).
 

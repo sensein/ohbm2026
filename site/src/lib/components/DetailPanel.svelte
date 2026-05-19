@@ -50,8 +50,8 @@
 	// Reset per-section/per-card open state when the focused abstract changes
 	// so the next abstract starts in the same collapsed default.
 	let prevAbstractId: number | null = null;
-	$: if (abstract && abstract.abstract_id !== prevAbstractId) {
-		prevAbstractId = abstract.abstract_id;
+	$: if (abstract && abstract.poster_id !== prevAbstractId) {
+		prevAbstractId = abstract.poster_id;
 		openSections = {};
 		openClaims = {};
 		openFigures = {};
@@ -71,7 +71,7 @@
 		if (!abstract || !allCells) return [] as ClusterRow[];
 		const rows: ClusterRow[] = [];
 		for (const [cellKey, { cell, topics }] of allCells) {
-			const row = cell.rows.find((r) => r.abstract_id === abstract!.abstract_id);
+			const row = cell.rows.find((r) => r.poster_id === abstract!.poster_id);
 			if (!row) continue;
 			const topicMap = new Map<number, string>();
 			if (topics) {
@@ -105,7 +105,7 @@
 	})();
 	$: enrichment = (() => {
 		if (!abstract || !enrichmentShard) return null;
-		const rec = enrichmentShard.records[String(abstract.abstract_id)];
+		const rec = enrichmentShard.records[String(abstract.poster_id)];
 		return (rec as EnrichmentRecord | undefined) ?? null;
 	})();
 	$: claimsModelId = enrichmentShard?.ai_provenance.claims_model_id ?? null;
@@ -156,10 +156,10 @@
 		kind: 'nearest' | 'farthest'
 	): RelatedEntry[] {
 		if (!shards || focusedId === undefined) return [];
-		// abstract_id → { distances: [], cellKeys: [] }
+		// poster_id → { distances: [], cellKeys: [] }
 		const buckets = new Map<number, { distances: number[]; cellKeys: string[] }>();
 		for (const [cellKey, shard] of shards) {
-			const row = shard.abstract_ids.indexOf(focusedId);
+			const row = shard.poster_ids.indexOf(focusedId);
 			if (row < 0) continue;
 			const ids = kind === 'nearest' ? shard.nearest_ids[row] : shard.farthest_ids[row];
 			const dist =
@@ -206,11 +206,11 @@
 		return out;
 	}
 
-	$: focusedId = abstract?.abstract_id;
+	$: focusedId = abstract?.poster_id;
 	$: nearest = aggregateRelated(allNeighbors, focusedId, 'nearest');
 	$: farthest = aggregateRelated(allNeighbors, focusedId, 'farthest');
 
-	function focusRelated(posterId: string) {
+	function focusRelated(posterId: number) {
 		if (posterId) $focusedAbstract = posterId;
 	}
 
@@ -290,7 +290,7 @@
 				{#if abstract.poster_id && compact}
 					<a
 						class="permalink permalink-top"
-						href={`${base}/abstract/${abstract.poster_id}/`}
+						href={`${base}/abstract/${String(abstract.poster_id).padStart(4, '0')}/`}
 						data-testid="detail-permalink"
 						title="Open the full-detail page for this abstract"
 					>
@@ -616,20 +616,25 @@
 				<!-- tabindex=0 + role="region" + aria-label so the
 					 overflow:auto scroll container is reachable by keyboard
 					 users (axe scrollable-region-focusable / WCAG 2.1.1). -->
-				<ul
-					class="cluster-grid"
+				<!-- Wrap the <ul> in a region-roled <div>; putting role="region"
+					 on the <ul> itself strips its implicit list role and axe
+					 then flags the child <li>s as "must be in a <ul>/<ol>". -->
+				<div
+					class="cluster-grid-region"
 					tabindex="0"
 					role="region"
 					aria-label="Cluster membership across all (model × input) cells"
 				>
-					{#each clusterMemberships as row (row.cellKey)}
-						<li class="cluster-row">
-							<code class="cluster-cell">{row.cellKey}</code>
-							<span class="cluster-id">#{row.communityId}</span>
-							<span class="cluster-label" title={row.label}>{row.label}</span>
-						</li>
-					{/each}
-				</ul>
+					<ul class="cluster-grid">
+						{#each clusterMemberships as row (row.cellKey)}
+							<li class="cluster-row">
+								<code class="cluster-cell">{row.cellKey}</code>
+								<span class="cluster-id">#{row.communityId}</span>
+								<span class="cluster-label" title={row.label}>{row.label}</span>
+							</li>
+						{/each}
+					</ul>
+				</div>
 			</section>
 		{/if}
 		{/snippet}
@@ -647,8 +652,9 @@
 							Most similar
 							<span class="hint">closest 5 shown; scroll for more</span>
 						</h3>
-						<ul class="related-list related-scroll" data-testid="related-nearest-list" tabindex="0" role="region" aria-label="Most-similar abstracts list">
-							{#each nearest as entry, i (entry.abstract.abstract_id)}
+						<div class="related-scroll" tabindex="0" role="region" aria-label="Most-similar abstracts list">
+						<ul class="related-list" data-testid="related-nearest-list">
+							{#each nearest as entry, i (entry.abstract.poster_id)}
 								{@const inCartNow = $cartStore.has(entry.abstract.poster_id)}
 								<li>
 									<div class="related-link">
@@ -661,7 +667,7 @@
 										>
 											<span class="related-rank">#{i + 1}</span>
 											<span class="related-poster-pile">
-												<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+												<span class="related-poster">{entry.abstract.poster_id ? String(entry.abstract.poster_id).padStart(4, '0') : '—'}</span>
 												<span class="related-distance" title="min cosine distance across maps">
 													d={entry.minDistance.toFixed(3)}
 												</span>
@@ -727,6 +733,7 @@
 								</li>
 							{/each}
 						</ul>
+						</div>
 					</div>
 				{/if}
 				{#if farthest.length}
@@ -735,8 +742,9 @@
 							Most different
 							<span class="hint">farthest 5 shown; scroll for more</span>
 						</h3>
-						<ul class="related-list related-scroll" data-testid="related-farthest-list" tabindex="0" role="region" aria-label="Most-different abstracts list">
-							{#each farthest as entry, i (entry.abstract.abstract_id)}
+						<div class="related-scroll" tabindex="0" role="region" aria-label="Most-different abstracts list">
+						<ul class="related-list" data-testid="related-farthest-list">
+							{#each farthest as entry, i (entry.abstract.poster_id)}
 								{@const inCartFar = $cartStore.has(entry.abstract.poster_id)}
 								<li>
 									<div class="related-link">
@@ -749,7 +757,7 @@
 										>
 											<span class="related-rank">#{i + 1}</span>
 											<span class="related-poster-pile">
-												<span class="related-poster">{entry.abstract.poster_id || '—'}</span>
+												<span class="related-poster">{entry.abstract.poster_id ? String(entry.abstract.poster_id).padStart(4, '0') : '—'}</span>
 												<span class="related-distance" title="mean cosine distance across maps">
 													d={entry.meanDistance.toFixed(3)}
 												</span>
@@ -815,6 +823,7 @@
 								</li>
 							{/each}
 						</ul>
+						</div>
 					</div>
 				{/if}
 			</section>
@@ -1239,6 +1248,11 @@
 		flex-wrap: wrap;
 		gap: 0.4rem;
 	}
+	.cluster-grid-region {
+		max-height: 14rem;
+		overflow-y: auto;
+		padding-right: 0.3rem;
+	}
 	.cluster-grid {
 		list-style: none;
 		padding: 0;
@@ -1246,9 +1260,6 @@
 		display: grid;
 		grid-template-columns: 1fr;
 		gap: 0.2rem;
-		max-height: 14rem;
-		overflow-y: auto;
-		padding-right: 0.3rem;
 	}
 	.cluster-row {
 		display: grid;

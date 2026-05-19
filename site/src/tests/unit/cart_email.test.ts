@@ -6,10 +6,9 @@ import {
 } from '$lib/cart_email';
 import type { AbstractRecord } from '$lib/shards';
 
-function rec(id: number, poster: string, title: string): AbstractRecord {
+function rec(posterId: number, title: string): AbstractRecord {
 	return {
-		abstract_id: id,
-		poster_id: poster,
+		poster_id: posterId,
 		title,
 		accepted_for: 'Poster',
 		sections: { introduction: '', methods: '', results: '', conclusion: '', references: '' },
@@ -23,9 +22,13 @@ function rec(id: number, poster: string, title: string): AbstractRecord {
 	};
 }
 
+function pad(id: number): string {
+	return String(id).padStart(4, '0');
+}
+
 describe('buildMailtoLink', () => {
 	it('produces a mailto: URL with the standard subject', () => {
-		const url = buildMailtoLink([rec(1, 'M-AM-101', 'Memory in aging')], new Map(), {
+		const url = buildMailtoLink([rec(101, 'Memory in aging')], new Map(), {
 			siteUrl: 'https://example.org/atlas'
 		});
 		expect(url.startsWith('mailto:?subject=')).toBe(true);
@@ -33,18 +36,18 @@ describe('buildMailtoLink', () => {
 	});
 
 	it('embeds each abstract as poster_id + title + permalink', () => {
-		const items = [rec(1, 'M-AM-101', 'A'), rec(2, 'M-AM-102', 'B')];
+		const items = [rec(101, 'A'), rec(102, 'B')];
 		const url = buildMailtoLink(items, new Map(), { siteUrl: 'https://example.org/atlas' });
 		const body = decodeURIComponent(url.split('&body=')[1]);
-		expect(body).toContain('M-AM-101');
-		expect(body).toContain('M-AM-102');
-		expect(body).toContain('https://example.org/atlas/abstract/M-AM-101/');
-		expect(body).toContain('https://example.org/atlas/abstract/M-AM-102/');
+		expect(body).toContain(pad(101));
+		expect(body).toContain(pad(102));
+		expect(body).toContain(`https://example.org/atlas/abstract/${pad(101)}/`);
+		expect(body).toContain(`https://example.org/atlas/abstract/${pad(102)}/`);
 	});
 
 	it('includes lead author when provided', () => {
-		const items = [rec(1, 'M-AM-101', 'Memory in aging')];
-		const leads = new Map<number, string>([[1, 'José García']]);
+		const items = [rec(101, 'Memory in aging')];
+		const leads = new Map<number, string>([[101, 'José García']]);
 		const url = buildMailtoLink(items, leads, { siteUrl: 'https://example.org' });
 		const body = decodeURIComponent(url.split('&body=')[1]);
 		expect(body).toContain('— José García');
@@ -53,7 +56,7 @@ describe('buildMailtoLink', () => {
 	it('caps the URL length at the mailto budget and inserts a truncation marker', () => {
 		// Manufacture 500 fake abstracts; the cap kicks in long before the end.
 		const many = Array.from({ length: 500 }, (_, i) =>
-			rec(i, `P${i.toString().padStart(4, '0')}`, `Abstract title number ${i} — a longish placeholder so each line eats bytes`)
+			rec(i + 1, `Abstract title number ${i} — a longish placeholder so each line eats bytes`)
 		);
 		const url = buildMailtoLink(many, new Map(), { siteUrl: 'https://example.org/atlas' });
 		expect(url.length).toBeLessThanOrEqual(MAX_MAILTO_LENGTH);
@@ -69,13 +72,13 @@ describe('buildMailtoLink', () => {
 	});
 
 	it('puts each item on its own numbered block with a labelled Open link', () => {
-		const items = [rec(1, 'M-AM-101', 'Memory in aging'), rec(2, 'M-AM-102', 'Vision')];
+		const items = [rec(101, 'Memory in aging'), rec(102, 'Vision')];
 		const url = buildMailtoLink(items, new Map(), { siteUrl: 'https://example.org/atlas' });
 		const body = decodeURIComponent(url.split('&body=')[1]);
-		expect(body).toContain('1. [M-AM-101] Memory in aging');
-		expect(body).toContain('2. [M-AM-102] Vision');
-		expect(body).toContain('→ Open: https://example.org/atlas/abstract/M-AM-101/');
-		expect(body).toContain('→ Open: https://example.org/atlas/abstract/M-AM-102/');
+		expect(body).toContain(`1. [${pad(101)}] Memory in aging`);
+		expect(body).toContain(`2. [${pad(102)}] Vision`);
+		expect(body).toContain(`→ Open: https://example.org/atlas/abstract/${pad(101)}/`);
+		expect(body).toContain(`→ Open: https://example.org/atlas/abstract/${pad(102)}/`);
 		expect(body).toContain('Browse the rest at https://example.org/atlas/');
 	});
 
@@ -90,10 +93,10 @@ describe('buildMailtoLink', () => {
 
 describe('buildPlainTextList', () => {
 	it('produces a clipboard-friendly plain-text rendering', () => {
-		const items = [rec(1, 'M-AM-101', 'Memory in aging')];
+		const items = [rec(101, 'Memory in aging')];
 		const txt = buildPlainTextList(items, new Map(), 'https://example.org');
-		expect(txt).toContain('M-AM-101');
+		expect(txt).toContain(pad(101));
 		expect(txt).toContain('Memory in aging');
-		expect(txt).toContain('https://example.org/abstract/M-AM-101/');
+		expect(txt).toContain(`https://example.org/abstract/${pad(101)}/`);
 	});
 });

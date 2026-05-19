@@ -45,7 +45,43 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minilm-bundle", dest="minilm_bundle", type=Path, default=None,
                         help="Deprecated single-bundle alias; use --minilm-root.")
     parser.add_argument("--references-yaml", dest="references_yaml", type=Path, default=None)
+    parser.add_argument(
+        "--proposal-listing",
+        dest="proposal_listing",
+        type=Path,
+        default=None,
+        help=(
+            "Optional CSV with the program-committee poster numbering "
+            "(`archive/proposals/.../proposal_listing.csv`). When given, each "
+            "abstract record gets a `poster_standby: {first, second}` struct "
+            "with the two stand-by times from the CSV. These fields are not "
+            "in the Oxford GraphQL schema."
+        ),
+    )
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--output-format",
+        dest="output_format",
+        default="parquet-single",
+        choices=["parquet-single", "gzip-json-shards"],
+        help=(
+            "Container format for the emitted data package. "
+            "`parquet-single` (default) is the canonical Stage-10 export — "
+            "one `data.parquet` file with all logical tables as per-row "
+            "Parquet blobs. `gzip-json-shards` is the Stage-6 legacy "
+            "emitter, kept for one-off dev comparisons."
+        ),
+    )
+    parser.add_argument(
+        "--conference",
+        dest="conference_id",
+        default="ohbm2026",
+        help=(
+            "Conference identifier baked into the manifest's `build_info` "
+            "envelope (FR-206). URL-safe, lower-snake-case. Default "
+            "`ohbm2026`."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -65,6 +101,9 @@ def main(argv: list[str] | None = None) -> int:
             discover_rollup=args.discover_rollup,
             output_dir=args.output,
             minilm_root=args.minilm_root,
+            conference_id=args.conference_id,
+            output_format=args.output_format,
+            proposal_listing_path=args.proposal_listing,
         )
     except Stage6BuildError as exc:
         print(f"build_ui_data.py: {exc}", file=sys.stderr)

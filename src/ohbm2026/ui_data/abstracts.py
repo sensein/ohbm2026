@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -255,30 +255,169 @@ def _withdrawn_ids(withdrawn_path: Path | None) -> set[int]:
     return {int(a["id"]) for a in iterable if isinstance(a, dict) and a.get("id") is not None}
 
 
-def build_abstracts_records(
+def _load_standby_times(
+    path: Path | None,
+) -> dict[int, dict[str, "_dt.datetime | None"]]:  # type: ignore[name-defined]
+    """Load poster stand-by start times from the proposal-listing CSV.
+
+    Returns `{submission_id: {first: datetime|None, second: datetime|None}}`
+    with timezone-aware Python `datetime` objects (UTC). Each emitter
+    converts these to its native time representation — for the parquet
+    candidate that's a `TIMESTAMP(unit=ms, tz=UTC)` column, which is
+    int64 on disk + dict-encoded over the 8 unique conference slots
+    (~1 byte per value after compression).
+
+    The CSV is the only source for these times — Oxford GraphQL doesn't
+    expose them. Each row's two stand-by times are local Bordeaux
+    strings like "Wednesday, June 17 | 12:45-13:45"; OHBM 2026 lands
+    inside CEST (UTC+2, no DST transitions between June 15 and 18) and
+    every window is exactly 1 hour, so the start time is sufficient —
+    the end is implicit (start + 1h).
+    """
+    if path is None:
+        return {}
+    import csv
+    import datetime as _dt
+    import re as _re
+
+    _CEST = _dt.timezone(_dt.timedelta(hours=2))
+    _UTC = _dt.timezone.utc
+    _MONTHS = {
+        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+        "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+    }
+    _PATTERN = _re.compile(
+        r"\s*\w+,\s*(?P<month>\w+)\s+(?P<day>\d+)\s*\|\s*(?P<hh>\d{1,2}):(?P<mm>\d{2})\s*-",
+        _re.IGNORECASE,
+    )
+
+    def _to_utc(local: str) -> "_dt.datetime | None":
+        if not local:
+            return None
+        m = _PATTERN.match(local)
+        if not m:
+            return None
+        month = _MONTHS.get(m["month"].lower())
+        if month is None:
+            return None
+        try:
+            local_dt = _dt.datetime(
+                2026, month, int(m["day"]), int(m["hh"]), int(m["mm"]), tzinfo=_CEST
+            )
+        except ValueError:
+            return None
+        return local_dt.astimezone(_UTC)
+
+    out: dict[int, dict[str, "_dt.datetime | None"]] = {}
+    try:
+        with Path(path).open() as f:
+            lines = f.readlines()
+        header_idx = next(
+            (i for i, ln in enumerate(lines) if ln.startswith("Abstract ID Number")),
+            None,
+        )
+        if header_idx is None:
+            return {}
+        reader = csv.DictReader(lines[header_idx:])
+        first_col = "First Stand-by Time"
+        second_col = "Second Stand-by Time"
+        for row in reader:
+            sid_raw = (row.get("Abstract ID Number") or "").strip()
+            if not sid_raw.isdigit():
+                continue
+            sid = int(sid_raw)
+            out[sid] = {
+                "first": _to_utc((row.get(first_col) or "").strip()),
+                "second": _to_utc((row.get(second_col) or "").strip()),
+            }
+    except (OSError, csv.Error):
+        return {}
+    return out
+
+
+def build_abstract_to_poster_map(
+    *,
+    corpus_path: Path,
+    withdrawn_path: Path | None,
+) -> dict[int, int]:
+    """Return ``{oxford_submission_id: poster_id_int}`` for the accepted,
+    deduped corpus.
+
+    Stage 10: this is the canonical translation table threaded into every
+    sub-builder so each emits poster_id-keyed shapes directly (no
+    post-process). The dedup logic mirrors ``iter_abstracts`` —
+    first-encountered record per poster_id wins; records without a
+    numeric poster_id are excluded.
+    """
+    corpus = _load_corpus(corpus_path)
+    withdrawn = _withdrawn_ids(withdrawn_path)
+    out: dict[int, int] = {}
+    seen: set[int] = set()
+    for raw in corpus:
+        if raw.get("accepted_for") == "Withdrawn":
+            continue
+        abstract_id = raw.get("id")
+        if abstract_id is None:
+            continue
+        if int(abstract_id) in withdrawn:
+            continue
+        poster_raw = raw.get("poster_id")
+        if poster_raw is None:
+            continue
+        poster_raw_str = str(poster_raw)
+        if not poster_raw_str.isdigit():
+            raise Stage6BuildError(
+                f"non-numeric poster_id {poster_raw_str!r} on submission {abstract_id}; "
+                f"Stage-10 export uses int16 poster_id throughout"
+            )
+        poster_id_int = int(poster_raw_str)
+        if poster_id_int in seen:
+            continue
+        seen.add(poster_id_int)
+        out[int(abstract_id)] = poster_id_int
+    return out
+
+
+def iter_abstracts(
     *,
     corpus_path: Path,
     enriched_path: Path | None,
     references_path: Path | None,
     withdrawn_path: Path | None,
     author_id_remap: Mapping[int, int] | None = None,
-) -> list[dict[str, Any]]:
-    """Return the per-abstract list (accepted-only, poster_id-keyed).
+    standby_times_path: Path | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Yield per-abstract rows (accepted-only, poster_id-keyed).
 
-    When ``author_id_remap`` is provided, the raw GraphQL author ids on each
-    record are translated to the synthetic ids assigned by the authors
-    builder. Raw ids that don't appear in the remap (e.g. authors whose
-    only submission was withdrawn) are dropped silently to keep the cross-
-    shard invariant clean. Missing remap = legacy raw-id passthrough.
+    Stage-10 entry point: the format-agnostic row stream every candidate
+    emitter under ``ohbm2026.ui_data.formats`` consumes. Rows match the
+    ``AbstractRow`` shape in ``types.py``. Identical record contents to
+    ``build_abstracts_records()`` — that wrapper is now ``list(iter_abstracts(...))``.
+
+    Streaming benefits: Parquet RecordBatch builders + SQLite INSERT
+    sequences both prefer row-at-a-time consumption to a fully-materialised
+    list (saves a ~30 MB allocation for the OHBM corpus).
     """
 
     corpus = _load_corpus(corpus_path)
     enriched_by_id = _load_enriched_by_id(enriched_path)
     refs_by_id = _load_references_by_id(references_path)
     withdrawn = _withdrawn_ids(withdrawn_path)
+    standby_by_sid = _load_standby_times(standby_times_path)
 
-    records: list[dict[str, Any]] = []
     skipped_no_poster_id = 0
+    # Dedupe poster_id collisions. Oxford ingest preserves all submission
+    # IDs (unique), but the program committee's poster_id assignment
+    # (Oxford `program_code`) can collide when an author accidentally
+    # submits the same abstract twice. Known case as of 2026-05-18:
+    # poster_id 2335 shared by submissions 1246466 + 1248744 (identical
+    # title + identical lead author "Knight"; the proposal-listing CSV
+    # shows them as adjacent posters 2335/2336, but Oxford's program_code
+    # field is stale for 1248744). Treat them as a single poster: keep
+    # the first-encountered record (corpus iteration order), drop later
+    # ones with the same poster_id. Log so the call is visible.
+    seen_poster_ids: set[int] = set()
+    deduped_oxford_ids: list[int] = []
     for raw in corpus:
         if raw.get("accepted_for") == "Withdrawn":
             continue
@@ -292,6 +431,24 @@ def build_abstracts_records(
         if not raw.get("poster_id"):
             skipped_no_poster_id += 1
             continue
+        # Coerce poster_id to int. Stage-10: the poster_id is the sole
+        # user-facing identifier across the export and is stored as int16
+        # (range 1–3333). Source values from Oxford are zero-padded strings
+        # like "0503", "2335"; we strip the padding here and rely on the UI
+        # to re-pad for display (`String(id).padStart(4, '0')`). Reject
+        # non-numeric poster_ids loudly — they would silently break the
+        # exported schema (no historical case of non-numeric in OHBM).
+        poster_raw = str(raw.get("poster_id"))
+        if not poster_raw.isdigit():
+            raise Stage6BuildError(
+                f"non-numeric poster_id {poster_raw!r} on submission {abstract_id}; "
+                f"Stage-10 export uses int16 poster_id throughout"
+            )
+        poster_id_int = int(poster_raw)
+        if poster_id_int in seen_poster_ids:
+            deduped_oxford_ids.append(int(abstract_id))
+            continue
+        seen_poster_ids.add(poster_id_int)
 
         questions = question_lookup(raw)
         enriched = enriched_by_id.get(int(abstract_id), {})
@@ -314,9 +471,22 @@ def build_abstracts_records(
         else:
             author_ids = raw_author_ids
 
-        record = {
+        # Stand-by start times are sourced from the proposal-listing CSV
+        # (not in Oxford GraphQL). Stored as tz-aware UTC `datetime`
+        # objects — the parquet emitter writes them as TIMESTAMP[ms, UTC]
+        # (int64 on disk, dict-encodes well over the ~8 unique
+        # conference slots). None for either field if the CSV wasn't
+        # supplied or this submission isn't in it. Each window is
+        # always 1 hour, so the end is implicit (start + 1h).
+        standby = standby_by_sid.get(int(abstract_id), {})
+        yield {
+            # `abstract_id` is the Oxford submission id. It stays on the
+            # yielded record so the rest of the build pipeline can join
+            # against rollup/analysis files (which key by submission id).
+            # The parquet emitter drops this field — only `poster_id`
+            # lands in the exported shard.
             "abstract_id": int(abstract_id),
-            "poster_id": str(raw.get("poster_id")),
+            "poster_id": poster_id_int,
             "title": cleaned_abstract_title(raw.get("title")) or "",
             "accepted_for": raw.get("accepted_for") or "Unknown",
             "sections": {
@@ -335,14 +505,50 @@ def build_abstracts_records(
             "reference_dois": dois,
             "reference_urls": urls,
             "reference_titles": ref_titles,
+            "poster_standby": {
+                "first": standby.get("first"),
+                "second": standby.get("second"),
+            },
         }
-        records.append(record)
     if skipped_no_poster_id:
         print(
             f"abstracts: skipped {skipped_no_poster_id} accepted record(s) without poster_id "
             f"(FR-002 requires the program-assigned poster_id as the user-facing identifier)"
         )
-    return records
+    if deduped_oxford_ids:
+        print(
+            f"abstracts: dropped {len(deduped_oxford_ids)} duplicate-poster_id record(s) "
+            f"(Oxford submission ids: {deduped_oxford_ids}). First-encountered record per "
+            f"poster_id wins; check upstream Oxford `program_code` for stale assignments."
+        )
+
+
+def build_abstracts_records(
+    *,
+    corpus_path: Path,
+    enriched_path: Path | None,
+    references_path: Path | None,
+    withdrawn_path: Path | None,
+    author_id_remap: Mapping[int, int] | None = None,
+    standby_times_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """List-materialising wrapper around ``iter_abstracts`` for backward compat.
+
+    Pre-Stage-10 callers (the json-shards emitter, every test fixture, the
+    Stage-6 ``build_abstracts`` envelope below) consume the records as a
+    list. Stage-10 candidate emitters (Parquet, SQLite, etc.) call
+    ``iter_abstracts`` directly.
+    """
+    return list(
+        iter_abstracts(
+            corpus_path=corpus_path,
+            enriched_path=enriched_path,
+            references_path=references_path,
+            withdrawn_path=withdrawn_path,
+            author_id_remap=author_id_remap,
+            standby_times_path=standby_times_path,
+        )
+    )
 
 
 def build_abstracts(
@@ -353,6 +559,7 @@ def build_abstracts(
     withdrawn_path: Path | None,
     build_info: Mapping[str, str],
     author_id_remap: Mapping[int, int] | None = None,
+    standby_times_path: Path | None = None,
 ) -> dict[str, Any]:
     """Return the abstracts shard envelope per data-model.md §2.
 
@@ -366,6 +573,7 @@ def build_abstracts(
         references_path=references_path,
         withdrawn_path=withdrawn_path,
         author_id_remap=author_id_remap,
+        standby_times_path=standby_times_path,
     )
     return {
         "schema_version": SCHEMA_VERSION,

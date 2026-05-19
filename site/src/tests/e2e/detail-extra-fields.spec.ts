@@ -19,9 +19,15 @@ test.describe('FR-011 — detail panel renders only Topics + Methods extras', ()
 	test('opening any abstract shows topics + methods + no other facet keys as headings', async ({
 		page
 	}) => {
+		// The home-page inline detail pane renders DetailPanel with
+		// `compact={true}` and hides topics / methods / sections by design.
+		// FR-011 applies to the FULL detail view, which lives at the
+		// permalink route — navigate there for the assertion.
 		await page.goto('/');
 		await expect(page.getByTestId('result-card').first()).toBeVisible({ timeout: 5000 });
-		await page.getByTestId('result-card').first().click();
+		const firstCard = page.getByTestId('result-card').first();
+		const posterId = await firstCard.getAttribute('data-poster-id');
+		await page.goto(`/ohbm2026/abstract/${encodeURIComponent(posterId!)}/`);
 		await expect(page.getByTestId('detail-panel')).toBeVisible();
 
 		// Allowed extra-question sections — at least one must be visible.
@@ -45,21 +51,27 @@ test.describe('FR-011 — detail panel renders only Topics + Methods extras', ()
 			await expect(page.getByTestId(key)).toHaveCount(0);
 		}
 
-		// Defensive: the rendered <h2> headings inside the detail panel are
-		// limited to Authors / Introduction / Methods / Results / Conclusion /
-		// Topics / Methods (the checklist) / References.
+		// Defensive: every <h2> in the detail panel must start with an
+		// allowed lead word. Each h2 can carry trailing helper text in a
+		// <span class="hint-inline"> or <span class="muted"> ("Authors
+		// click to filter by author", "Cluster membership — per (model
+		// × input)"), so we substring-match the lead.
 		const headings = await page.getByTestId('detail-panel').locator('h2').allTextContents();
-		const allowed = new Set([
+		const allowedLeads = [
 			'Authors',
 			'Introduction',
 			'Methods',
 			'Results',
 			'Conclusion',
 			'Topics',
-			'References'
-		]);
+			'References',
+			'Cluster membership',
+			'Related abstracts'
+		];
 		for (const h of headings) {
-			expect(allowed.has(h.trim())).toBe(true);
+			const trimmed = h.trim();
+			const ok = allowedLeads.some((lead) => trimmed.startsWith(lead));
+			expect(ok, `heading "${trimmed}" not in allowedLeads`).toBe(true);
 		}
 	});
 });

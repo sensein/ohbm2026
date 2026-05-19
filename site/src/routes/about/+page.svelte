@@ -165,7 +165,7 @@
 									</li>
 									<li>
 										<strong>Figure assets.</strong> Inline figures stream into
-										<code>data/primary/assets/&lt;abstract_id&gt;_&lt;sha12&gt;.&lt;ext&gt;</code>
+										<code>data/primary/assets/&lt;poster_id&gt;_&lt;sha12&gt;.&lt;ext&gt;</code>
 										via the <code>asset_stem</code> hash; re-runs detect identical
 										content and skip the download.
 									</li>

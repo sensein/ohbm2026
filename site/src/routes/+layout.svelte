@@ -134,13 +134,7 @@
 </script>
 
 <svelte:head>
-	{#if envBuildInfo}
-		<title>OHBM 2026 Atlas (beta) · {envBuildInfo.code_revision_short}</title>
-	{:else if dataBuildInfo}
-		<title>OHBM 2026 Atlas (beta) · {dataBuildInfo.code_revision_short}</title>
-	{:else}
-		<title>OHBM 2026 Atlas (beta)</title>
-	{/if}
+	<title>OHBM 2026 Atlas (beta)</title>
 </svelte:head>
 
 <div class="shell">

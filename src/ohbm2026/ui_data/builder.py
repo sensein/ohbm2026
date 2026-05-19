@@ -19,7 +19,7 @@ from typing import Any
 # CDN content hashes). Epoch 0 trips some tools; use 2026-01-01 instead.
 DETERMINISTIC_MTIME = 1767225600  # 2026-01-01T00:00:00Z
 
-from ohbm2026.ui_data.abstracts import build_abstracts
+from ohbm2026.ui_data.abstracts import build_abstract_to_poster_map, build_abstracts
 from ohbm2026.ui_data.authors import build_authors
 from ohbm2026.ui_data.cells import build_cells
 from ohbm2026.ui_data.enrichment import build_enrichment
@@ -71,6 +71,25 @@ def _resolve_rollup(
     )
 
 
+def _get_writer(output_format: str):
+    """Resolve the format-specific writer module.
+
+    Each writer exposes a ``write(...)`` function with the same signature
+    (see ``formats/gzip_json_shards.py`` for the canonical shape).
+    Adding a new candidate = adding a new module under ``formats/`` and
+    one branch here.
+    """
+    if output_format == "parquet-single":
+        from ohbm2026.ui_data.formats import parquet_single
+        return parquet_single
+    if output_format == "gzip-json-shards":
+        # Stage-6 legacy emitter — kept reachable for one-off dev
+        # comparisons; not the canonical export.
+        from ohbm2026.ui_data.formats import gzip_json_shards
+        return gzip_json_shards
+    raise Stage6BuildError(f"Unknown --output-format: {output_format!r}")
+
+
 def build_ui_data_package(
     *,
     corpus_path: Path,
@@ -84,11 +103,19 @@ def build_ui_data_package(
     output_dir: Path,
     build_info: Mapping[str, str] | None = None,
     minilm_root: Path | None = None,
+    conference_id: str = "ohbm2026",
+    output_format: str = "parquet-single",
+    proposal_listing_path: Path | None = None,
 ) -> int:
     """Run the full Stage 6 build.
 
     Returns 0 on success, non-zero on any invariant failure (per
     contracts/data-package.md exit codes).
+
+    Stage-10 (spec 010-export-redesign FR-206) stamps ``conference_id``
+    into the ``build_info`` envelope of every emitted shard so a future
+    multi-conference deploy can disambiguate records by conference
+    without consulting the URL path.
     """
 
     rollup_db = _resolve_rollup(
@@ -103,6 +130,20 @@ def build_ui_data_package(
             rollup_db=rollup_db,
             analysis_root=Path(analysis_root) if analysis_root else None,
         )
+    # Stage-10 stamp: every shard's `build_info` carries `conference_id`.
+    # Stage-6 emitters consume `build_info` as `dict(build_info)` so the
+    # new field propagates without per-emitter changes.
+    build_info = {**build_info, "conference_id": conference_id}
+
+    # Stage 10: build the canonical {abstract_id → poster_id} map FIRST.
+    # Every sub-builder takes this map and emits poster_id-keyed records
+    # natively (no post-process remap). The map encodes the corpus dedup
+    # decisions, so any submission absent from the map is implicitly
+    # dropped from every shard.
+    abstract_to_poster = build_abstract_to_poster_map(
+        corpus_path=Path(corpus_path),
+        withdrawn_path=Path(withdrawn_path) if withdrawn_path else None,
+    )
 
     # Build authors first to derive the raw→synthetic id remap; the abstracts
     # builder uses it so `author_ids` references match the authors shard
@@ -110,6 +151,7 @@ def build_ui_data_package(
     authors_envelope, author_id_remap = build_authors(
         corpus_path=Path(corpus_path),
         authors_path=Path(authors_path),
+        abstract_to_poster=abstract_to_poster,
         build_info=build_info,
         return_remap=True,
     )
@@ -121,6 +163,7 @@ def build_ui_data_package(
         withdrawn_path=Path(withdrawn_path) if withdrawn_path else None,
         build_info=build_info,
         author_id_remap=author_id_remap,
+        standby_times_path=Path(proposal_listing_path) if proposal_listing_path else None,
     )
     abstract_records = abstracts_envelope["abstracts"]
     abstract_ids = [r["abstract_id"] for r in abstract_records]
@@ -135,6 +178,7 @@ def build_ui_data_package(
     cells_envelopes = build_cells(
         rollup_db=rollup_db,
         abstract_ids=abstract_ids,
+        abstract_to_poster=abstract_to_poster,
         build_info=build_info,
         analysis_root=Path(analysis_root) if analysis_root else None,
     )
@@ -152,6 +196,7 @@ def build_ui_data_package(
         neighbors_envelopes = build_neighbors(
             analysis_root=Path(analysis_root),
             cell_keys=list(cells_envelopes.keys()),
+            abstract_to_poster=abstract_to_poster,
             build_info=build_info,
         )
 
@@ -165,86 +210,78 @@ def build_ui_data_package(
         build_info=build_info,
     )
 
-    # --- In-place write -------------------------------------------------
-    # Write each shard directly into the output dir. Files that already
-    # exist are truncated in place (preserves inode + Dropbox file_id);
-    # new files are created. After writing, prune any stale shards left
-    # over from prior builds (e.g. cells/topics from a removed cell_key).
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-
-    expected: set[Path] = set()
-
-    def _emit(rel: str, payload: Mapping[str, Any]) -> None:
-        target = output / rel
-        _write_json(target, payload)
-        expected.add(target)
-
-    _emit("manifest.json", manifest)
-    _emit("abstracts.json", abstracts_envelope)
-    _emit("authors.json", authors_envelope)
-    # Claims + figure interpretations live in a separate shard so that the
-    # main abstracts.json stays small enough for first paint. The detail
-    # panel reads `data/enrichment.json` lazily on focus.
+    # --- Compute envelopes ----------------------------------------------
+    # Stage-10 split: the envelope-computation logic (this block, below)
+    # is format-agnostic. The actual on-disk writing is delegated to a
+    # candidate-specific writer module under `formats/` so the bench can
+    # measure Parquet / SQLite / DuckDB / Arrow IPC alongside the
+    # baseline gzip-json-shards path.
     enrichment_envelope = build_enrichment(
         enriched_path=Path(enriched_path) if enriched_path else None,
         abstract_ids=abstract_ids,
+        abstract_to_poster=abstract_to_poster,
         build_info=build_info,
     )
-    _emit("enrichment.json", enrichment_envelope)
-    for cell_key, envelope in cells_envelopes.items():
-        _emit(f"cells/{cell_key}.json", envelope)
-    for (model, inp, kind), envelope in topics_envelopes.items():
-        _emit(f"topics/{model}_{inp}_{kind}.json", envelope)
-    for cell_key, envelope in neighbors_envelopes.items():
-        _emit(f"neighbors/{cell_key}.json", envelope)
-    # MiniLM semantic-search vectors — quantized int8 buffer + sidecar.
-    # When the MiniLM bundle isn't available the builder emits just a sidecar
-    # placeholder so the manifest's pointed-at URL still 200s.
+    minilm_bin: bytes | None = None
     if minilm_root is not None and Path(minilm_root).exists():
         try:
-            bin_bytes, sidecar = build_minilm_vectors(
+            minilm_bin, minilm_sidecar = build_minilm_vectors(
                 embeddings_root=Path(minilm_root),
                 abstract_ids=abstract_ids,
+                abstract_to_poster=abstract_to_poster,
                 build_info=build_info,
             )
-            bin_path = output / "search" / "minilm_vectors.bin"
-            bin_path.parent.mkdir(parents=True, exist_ok=True)
-            with bin_path.open("wb") as fh:
-                fh.write(bin_bytes)
-            # Pin mtime same as JSON shards for tarball reproducibility.
-            os.utime(bin_path, (DETERMINISTIC_MTIME, DETERMINISTIC_MTIME))
-            expected.add(bin_path)
-            _emit("search/minilm_vectors.build_info.json", sidecar)
         except FileNotFoundError as exc:
             print(f"WARNING: MiniLM vectors skipped: {exc}")
-            _emit(
-                "search/minilm_vectors.build_info.json",
-                {
-                    "schema_version": "minilm_vectors.v1",
-                    "build_info": dict(build_info),
-                    "shape": [len(abstract_ids), 384],
-                    "dtype": "int8",
-                    "byte_offset_url": "data/search/minilm_vectors.bin",
-                    "note": "vectors not built (MiniLM bundle missing)",
-                },
-            )
-    else:
-        _emit(
-            "search/minilm_vectors.build_info.json",
-            {
+            minilm_sidecar = {
                 "schema_version": "minilm_vectors.v1",
                 "build_info": dict(build_info),
                 "shape": [len(abstract_ids), 384],
                 "dtype": "int8",
                 "byte_offset_url": "data/search/minilm_vectors.bin",
-                "note": "vectors not built (no --minilm-root)",
-            },
-        )
+                "note": "vectors not built (MiniLM bundle missing)",
+            }
+    else:
+        minilm_sidecar = {
+            "schema_version": "minilm_vectors.v1",
+            "build_info": dict(build_info),
+            "shape": [len(abstract_ids), 384],
+            "dtype": "int8",
+            "byte_offset_url": "data/search/minilm_vectors.bin",
+            "note": "vectors not built (no --minilm-root)",
+        }
 
-    # Drop stale shards from prior runs that weren't re-emitted this build.
-    # Keep the `.fetched-from-package` marker that fetch_ui_inputs.sh drops.
-    for path in list(output.rglob("*.json")) + list(output.rglob("*.bin")):
+    # --- Dispatch to the format-specific writer -------------------------
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    expected = _get_writer(output_format).write(
+        output_dir=output,
+        build_info=build_info,
+        conference_id=conference_id,
+        manifest=manifest,
+        abstracts_envelope=abstracts_envelope,
+        authors_envelope=authors_envelope,
+        cells_envelopes=cells_envelopes,
+        topics_envelopes=topics_envelopes,
+        neighbors_envelopes=neighbors_envelopes,
+        enrichment_envelope=enrichment_envelope,
+        minilm_bin=minilm_bin,
+        minilm_sidecar=minilm_sidecar,
+    )
+
+    # Drop stale files from prior runs that weren't re-emitted this build.
+    # Only applies to formats that write multiple files; single-container
+    # formats (sqlite_single, duckdb_single, arrow_ipc as one file) handle
+    # this by overwriting the single file.
+    for path in (
+        list(output.rglob("*.json"))
+        + list(output.rglob("*.bin"))
+        + list(output.rglob("*.parquet"))
+        + list(output.rglob("*.arrow"))
+        + list(output.rglob("*.sqlite"))
+        + list(output.rglob("*.duckdb"))
+        + list(output.rglob("*.sql"))
+    ):
         if path in expected:
             continue
         path.unlink()
@@ -278,27 +315,43 @@ def _validate_invariants(
             f"abstracts shard has {len(abstract_records)} records"
         )
 
-    # 2. Each cell shard has the same count + positional order.
-    abstract_ids = [r["abstract_id"] for r in abstract_records]
+    # 2. Each cell shard has the same count + positional order. Join key
+    # is `poster_id` (Stage 10) — the cells emitter no longer carries
+    # the Oxford `abstract_id`. The abstracts envelope still has both
+    # internally so we anchor the expected order via poster_id.
+    poster_ids_in_order = [r["poster_id"] for r in abstract_records]
     for cell_key, envelope in cells.items():
         rows = envelope["rows"]
         if len(rows) != expected_count:
             raise Stage6BuildError(
                 f"Invariant 2 violated: cell {cell_key} has {len(rows)} rows, expected {expected_count}"
             )
-        for idx, (aid, row) in enumerate(zip(abstract_ids, rows)):
-            if row["abstract_id"] != aid:
+        for idx, (pid, row) in enumerate(zip(poster_ids_in_order, rows)):
+            if row["poster_id"] != pid:
                 raise Stage6BuildError(
-                    f"Invariant 2 violated: cell {cell_key} row {idx} abstract_id={row['abstract_id']} "
-                    f"!= abstracts[{idx}].abstract_id={aid}"
+                    f"Invariant 2 violated: cell {cell_key} row {idx} poster_id={row['poster_id']} "
+                    f"!= abstracts[{idx}].poster_id={pid}"
                 )
 
     # 3. Accepted-only invariant.
-    leaked = [r["abstract_id"] for r in abstract_records if r.get("accepted_for") == "Withdrawn"]
+    leaked = [r["poster_id"] for r in abstract_records if r.get("accepted_for") == "Withdrawn"]
     if leaked:
         raise Stage6BuildError(
             f"Invariant 3 violated: {len(leaked)} withdrawn records leaked into abstracts shard "
-            f"(ids: {leaked[:5]}{'...' if len(leaked) > 5 else ''})"
+            f"(poster_ids: {leaked[:5]}{'...' if len(leaked) > 5 else ''})"
+        )
+
+    # 3a. Poster-id uniqueness — the dedup in `iter_abstracts` guarantees
+    # this, but we double-check here so any future refactor that bypasses
+    # the dedup loop trips loudly.
+    from collections import Counter as _Counter
+
+    poster_id_counts = _Counter(r["poster_id"] for r in abstract_records)
+    duplicates = {pid: c for pid, c in poster_id_counts.items() if c > 1}
+    if duplicates:
+        raise Stage6BuildError(
+            f"Invariant 3a violated: {len(duplicates)} poster_id collision(s) survived "
+            f"the dedup pass — {duplicates}"
         )
 
     # 4. Author referential integrity (now enforced — see US1 remap in
