@@ -79,6 +79,11 @@ test.describe('US1: build provenance (FR-022 / SC-011)', () => {
 	test('placeholder route also surfaces the build short SHA in the title', async ({ page }) => {
 		await page.goto('/');
 		const title = await page.title();
-		expect(title).toMatch(/OHBM 2026 Atlas · [0-9a-f]{7}/);
+		// `+layout.svelte` titles the page `OHBM 2026 Atlas (beta) · <sha>`
+		// once the build_info is available (either from VITE_BUILD_SHA at
+		// build time OR from the manifest at load time). The "(beta)" tag
+		// is part of the public Stage-6 title; the test asserts the SHA
+		// suffix lands on this route.
+		expect(title).toMatch(/OHBM 2026 Atlas \(beta\) · [0-9a-f]{7}/);
 	});
 });
