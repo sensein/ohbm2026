@@ -281,6 +281,18 @@ def iter_abstracts(
     withdrawn = _withdrawn_ids(withdrawn_path)
 
     skipped_no_poster_id = 0
+    # Dedupe poster_id collisions. Oxford ingest preserves all submission
+    # IDs (unique), but the program committee's poster_id assignment
+    # (Oxford `program_code`) can collide when an author accidentally
+    # submits the same abstract twice. Known case as of 2026-05-18:
+    # poster_id 2335 shared by submissions 1246466 + 1248744 (identical
+    # title + identical lead author "Knight"; the proposal-listing CSV
+    # shows them as adjacent posters 2335/2336, but Oxford's program_code
+    # field is stale for 1248744). Treat them as a single poster: keep
+    # the first-encountered record (corpus iteration order), drop later
+    # ones with the same poster_id. Log so the call is visible.
+    seen_poster_ids: set[str] = set()
+    deduped_oxford_ids: list[int] = []
     for raw in corpus:
         if raw.get("accepted_for") == "Withdrawn":
             continue
@@ -294,6 +306,11 @@ def iter_abstracts(
         if not raw.get("poster_id"):
             skipped_no_poster_id += 1
             continue
+        poster_id_str = str(raw.get("poster_id"))
+        if poster_id_str in seen_poster_ids:
+            deduped_oxford_ids.append(int(abstract_id))
+            continue
+        seen_poster_ids.add(poster_id_str)
 
         questions = question_lookup(raw)
         enriched = enriched_by_id.get(int(abstract_id), {})
@@ -342,6 +359,12 @@ def iter_abstracts(
         print(
             f"abstracts: skipped {skipped_no_poster_id} accepted record(s) without poster_id "
             f"(FR-002 requires the program-assigned poster_id as the user-facing identifier)"
+        )
+    if deduped_oxford_ids:
+        print(
+            f"abstracts: dropped {len(deduped_oxford_ids)} duplicate-poster_id record(s) "
+            f"(Oxford submission ids: {deduped_oxford_ids}). First-encountered record per "
+            f"poster_id wins; check upstream Oxford `program_code` for stale assignments."
         )
 
 
