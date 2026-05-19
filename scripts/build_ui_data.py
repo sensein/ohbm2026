@@ -49,29 +49,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--output-format",
         dest="output_format",
-        default="gzip-json-shards",
-        choices=[
-            "gzip-json-shards",
-            # The next 5 are wired up in Stage-10 Phase 3 (T019-T024).
-            # Listed here so the CLI surface is stable from Phase 2 onward
-            # and the bench harness can validate every choice it intends
-            # to invoke, even before the emitter exists.
-            "parquet-files",
-            "parquet-duckdb",
-            "sqlite-single",
-            "duckdb-single",
-            "arrow-ipc",
-            # Candidate #7 — added 2026-05-18 when the single-URL deploy
-            # constraint ruled out the multi-file Parquet candidates. One
-            # `.parquet` file with per-table BLOB rows.
-            "parquet-single",
-        ],
+        default="parquet-single",
+        choices=["parquet-single", "gzip-json-shards"],
         help=(
             "Container format for the emitted data package. "
-            "`gzip-json-shards` is Stage-6 behaviour (default); the other "
-            "5 are Stage-10 bench candidates whose emitters land in "
-            "`src/ohbm2026/ui_data/formats/`. Pre-Phase-3, only "
-            "`gzip-json-shards` is implemented."
+            "`parquet-single` (default) is the canonical Stage-10 export — "
+            "one `data.parquet` file with all logical tables as per-row "
+            "Parquet blobs. `gzip-json-shards` is the Stage-6 legacy "
+            "emitter, kept for one-off dev comparisons."
         ),
     )
     parser.add_argument(

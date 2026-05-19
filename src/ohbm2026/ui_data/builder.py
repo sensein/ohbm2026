@@ -79,28 +79,14 @@ def _get_writer(output_format: str):
     Adding a new candidate = adding a new module under ``formats/`` and
     one branch here.
     """
-    from ohbm2026.ui_data.formats import gzip_json_shards
-
-    if output_format == "gzip-json-shards":
-        return gzip_json_shards
-    if output_format == "parquet-files":
-        from ohbm2026.ui_data.formats import parquet_files
-        return parquet_files
-    if output_format == "parquet-duckdb":
-        from ohbm2026.ui_data.formats import parquet_duckdb
-        return parquet_duckdb
-    if output_format == "sqlite-single":
-        from ohbm2026.ui_data.formats import sqlite_single
-        return sqlite_single
-    if output_format == "duckdb-single":
-        from ohbm2026.ui_data.formats import duckdb_single
-        return duckdb_single
-    if output_format == "arrow-ipc":
-        from ohbm2026.ui_data.formats import arrow_ipc
-        return arrow_ipc
     if output_format == "parquet-single":
         from ohbm2026.ui_data.formats import parquet_single
         return parquet_single
+    if output_format == "gzip-json-shards":
+        # Stage-6 legacy emitter — kept reachable for one-off dev
+        # comparisons; not the canonical export.
+        from ohbm2026.ui_data.formats import gzip_json_shards
+        return gzip_json_shards
     raise Stage6BuildError(f"Unknown --output-format: {output_format!r}")
 
 
@@ -118,7 +104,7 @@ def build_ui_data_package(
     build_info: Mapping[str, str] | None = None,
     minilm_root: Path | None = None,
     conference_id: str = "ohbm2026",
-    output_format: str = "gzip-json-shards",
+    output_format: str = "parquet-single",
 ) -> int:
     """Run the full Stage 6 build.
 

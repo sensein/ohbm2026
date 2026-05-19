@@ -1,5 +1,5 @@
 import { base } from '$app/paths';
-import { loadDataPackage } from './data_package/tarball';
+import { loadDataPackage } from './data_package/loader';
 
 export interface BuildInfo {
 	corpus_state_key: string;
