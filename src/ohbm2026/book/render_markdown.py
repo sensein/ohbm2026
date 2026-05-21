@@ -17,6 +17,24 @@ import re
 import shutil
 from importlib import resources
 
+# Disable Pillow's decompression-bomb safety check at module-import
+# time. The default ~179 MP limit defends against malicious external
+# uploads; our corpus comes from Oxford Abstracts and is fully
+# trusted. A handful of legitimate figures (large screenshots,
+# high-res neuroimaging exports) exceed 179 MP and would otherwise
+# crash the whole joblib batch via raise-on-first-failure semantics.
+# Setting it here (not inside _copy_figure) means each joblib loky
+# worker pays the override exactly once at module import, not on
+# every per-figure call. The Pillow import is lazy via a try block
+# so unit tests that compose the markdown without copying figures
+# don't pay the Pillow import cost when render_markdown loads.
+try:
+    from PIL import Image as _PIL_Image  # noqa: F401
+
+    _PIL_Image.MAX_IMAGE_PIXELS = None
+except ImportError:
+    pass
+
 from ohbm2026.book.model import (
     Author,
     AuthorIndexEntry,
@@ -144,6 +162,19 @@ def _standby_md(entry: BookEntry) -> str | None:
     if not parts:
         return None
     return "**Standby**: " + " · ".join(parts)
+
+
+def entry_to_md(entry: BookEntry) -> str:
+    """Render one abstract section as markdown (Stage 11.1 public helper).
+
+    Stable wrapper around `_entry_md` for the per-abstract PDF pipeline
+    in :mod:`ohbm2026.book.render_per_abstract`. Discards the figure-
+    filename side-effect list — figures are still written by
+    :func:`emit_book_md` for the markdown bundle; the per-abstract
+    render reads them via pandoc's ``--resource-path``.
+    """
+
+    return _entry_md(entry, fig_filenames=[])
 
 
 def _entry_md(entry: BookEntry, fig_filenames: list[str]) -> str:
@@ -292,14 +323,18 @@ def emit_book_md(
     into ``fig_assets/``. Set to None to copy figures byte-for-byte
     from the original `local_path`. Resizing keeps PNG bit-depth +
     JPEG quality at sensible defaults; aspect ratio preserved.
-    Without resize the OHBM corpus produces a 6 GB pandoc docx that
-    Word refuses to open.
+
+    Stage 11.1 — figure resizing runs joblib-parallel + skips
+    already-present destinations (no rmtree of fig_assets/ on entry),
+    so the first build pays the ~3-min cost once and subsequent runs
+    just byte-skip. **Operator: if you change ``--max-image-width``,
+    delete ``data/outputs/book/.staging__*/fig_assets/`` manually
+    OR `rm -rf data/outputs/book/`** — the cache has no per-file
+    width sidecar so it can't auto-invalidate.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     fig_dir = output_dir / "fig_assets"
-    if fig_dir.exists():
-        shutil.rmtree(fig_dir)
-    fig_dir.mkdir()
+    fig_dir.mkdir(exist_ok=True)
 
     template = _read_template()
     header = template.format(
@@ -326,8 +361,12 @@ def emit_book_md(
     (output_dir / "book.md").write_text(full, encoding="utf-8")
 
     # Copy the figure assets — flat directory, names from the contract.
-    # We iterate over entries again to recover the (fig, filename)
-    # pairing (deterministic order, no rely-on-side-effects).
+    # We iterate over entries to recover the (fig, filename) pairing
+    # (deterministic order, no rely-on-side-effects), then dispatch
+    # the resize work via joblib loky-backed parallel. Per-file
+    # `dest.exists()` short-circuit means warm runs are O(N) stat
+    # calls — no Pillow load.
+    copy_jobs: list[tuple[pathlib.Path, pathlib.Path, int | None]] = []
     for entry in book.entries:
         type_counts = collections.Counter(
             _figure_type(f.question_name) for f in entry.figures
@@ -343,7 +382,29 @@ def emit_book_md(
             )
             dest = fig_dir / filename
             if fig.local_path.exists() and not dest.exists():
-                _copy_figure(fig.local_path, dest, max_image_width)
+                # Resolve to absolute paths before handing off to joblib.
+                # Loky's worker pool may have been created in a prior
+                # cwd (pools are process-pool-cached); workers can't
+                # find relative paths that aren't relative to their
+                # initial cwd. Absolute paths are immune to that.
+                copy_jobs.append(
+                    (
+                        fig.local_path.resolve(),
+                        dest.resolve(),
+                        max_image_width,
+                    )
+                )
+
+    if copy_jobs:
+        # Lazy import joblib — only the figure-resize codepath needs
+        # it; unit tests that compose the markdown without copying
+        # figures don't pay the import cost.
+        from joblib import Parallel, delayed
+
+        Parallel(n_jobs=-1, backend="loky")(
+            delayed(_copy_figure)(src, dest, max_width)
+            for (src, dest, max_width) in copy_jobs
+        )
 
 
 def _copy_figure(
@@ -358,7 +419,10 @@ def _copy_figure(
         return
     # Lazy import — keeps Pillow off the startup path for callers
     # that don't render figures (e.g. unit tests on the markdown
-    # composer only).
+    # composer only). The decompression-bomb-check disable lives in
+    # this module's import-time block (see _disable_pillow_bomb_check
+    # below) so worker processes get the override exactly once at
+    # import — not on every per-figure call.
     from PIL import Image, UnidentifiedImageError
 
     try:

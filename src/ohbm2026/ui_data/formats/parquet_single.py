@@ -91,25 +91,52 @@ def _facets_to_arrow(facets: Mapping[str, Any]) -> dict[str, list[str]]:
     return {k: list(facets.get(k, []) or []) for k in keys}
 
 
-_POSTER_STANDBY_TYPE = pa.struct(
-    [
-        ("first", pa.timestamp("ms", tz="UTC")),
-        ("second", pa.timestamp("ms", tz="UTC")),
-    ]
-)
+# Stage 11.1 — parquet format version. The browser-side decoder
+# dispatches on this. v2 drops the legacy `poster_standby: {first,
+# second}` STRUCT in favor of a new `standby_slots` table + two INT8
+# index columns on `abstracts`. Loader accepts both shapes for one
+# deploy cycle.
+PARQUET_FORMAT_VERSION = "parquet-single.v2"
 
 
-def _abstracts_to_table(envelope: Mapping[str, Any]) -> pa.Table:
-    """Build the abstracts table. STRUCT columns for sections / topics
-    / facets / poster_standby. poster_id is INT16 (range 1–3333).
-    Stage 10: `abstract_id` (Oxford submission id) is dropped from the
-    export; `poster_id` is the sole identifier on the wire."""
-    rows = []
+def _collect_standby_by_poster(envelope: Mapping[str, Any]) -> dict[int, dict]:
+    """Pull standby datetime pairs from the per-record envelope.
+
+    The legacy v1 path produced records carrying
+    ``poster_standby: {first: datetime|None, second: datetime|None}``.
+    This v2 emitter still consumes that intermediate shape (no churn
+    in ``abstracts.py``) but emits the new shape on the wire.
+    """
+
+    out: dict[int, dict] = {}
     for r in envelope["abstracts"]:
         standby = r.get("poster_standby") or {}
+        first = standby.get("first")
+        second = standby.get("second")
+        if first is None and second is None:
+            continue
+        out[int(r["poster_id"])] = {"first": first, "second": second}
+    return out
+
+
+def _abstracts_to_table(
+    envelope: Mapping[str, Any],
+    poster_to_index: Mapping[int, tuple[int | None, int | None]],
+) -> pa.Table:
+    """Build the abstracts table. STRUCT columns for sections / topics
+    / facets. ``standby_first_index`` / ``standby_second_index`` are
+    INT8 nullable references into the new ``standby_slots`` table
+    (Stage 11.1 US2). poster_id is INT16 (range 1-3333). Stage 10:
+    ``abstract_id`` (Oxford submission id) is dropped from the export;
+    ``poster_id`` is the sole identifier on the wire.
+    """
+    rows = []
+    for r in envelope["abstracts"]:
+        pid = int(r["poster_id"])
+        first_idx, second_idx = poster_to_index.get(pid, (None, None))
         rows.append(
             {
-                "poster_id": int(r["poster_id"]),
+                "poster_id": pid,
                 "title": str(r.get("title", "")),
                 "accepted_for": str(r.get("accepted_for", "Unknown")),
                 "sections": dict(r.get("sections", {})),
@@ -120,27 +147,46 @@ def _abstracts_to_table(envelope: Mapping[str, Any]) -> pa.Table:
                 "reference_dois": list(r.get("reference_dois", [])),
                 "reference_urls": list(r.get("reference_urls", [])),
                 "reference_titles": list(r.get("reference_titles", [])),
-                "poster_standby": {
-                    "first": standby.get("first"),
-                    "second": standby.get("second"),
-                },
+                "standby_first_index": first_idx,
+                "standby_second_index": second_idx,
             }
         )
     table = pa.Table.from_pylist(rows)
-    # Pin types explicitly: poster_id → INT16, poster_standby → typed
-    # STRUCT with TIMESTAMP[ms, UTC]. Without the casts pylist inference
-    # would default to INT64 / ns-precision-naive timestamps, defeating
-    # the storage win.
+    # Pin types explicitly: poster_id → INT16, standby indices → INT8.
+    # Without the casts pylist inference would default to INT64 +
+    # waste ~7 B per row × 3 K rows.
     table = table.set_column(
         table.schema.get_field_index("poster_id"),
         "poster_id",
         table["poster_id"].cast(pa.int16()),
     )
-    return table.set_column(
-        table.schema.get_field_index("poster_standby"),
-        "poster_standby",
-        table["poster_standby"].cast(_POSTER_STANDBY_TYPE),
+    for col in ("standby_first_index", "standby_second_index"):
+        idx = table.schema.get_field_index(col)
+        table = table.set_column(idx, col, table[col].cast(pa.int8()))
+    return table
+
+
+def _standby_slots_to_table(slots: list[dict]) -> pa.Table:
+    """Stage 11.1 US2 — global lookup table of program windows.
+
+    Columns: ``slot_index: INT8``, ``start_utc: TIMESTAMP[ms, UTC]``,
+    ``end_utc: TIMESTAMP[ms, UTC]``, ``display_label: VARCHAR``.
+
+    8 rows for OHBM 2026. The UI's ``standby.ts`` consumes the rows
+    directly — no further Intl.DateTimeFormat work happens at
+    facet-recompute time.
+    """
+
+    table = pa.Table.from_pylist(slots)
+    table = table.set_column(
+        table.schema.get_field_index("slot_index"),
+        "slot_index",
+        table["slot_index"].cast(pa.int8()),
     )
+    for col in ("start_utc", "end_utc"):
+        idx = table.schema.get_field_index(col)
+        table = table.set_column(idx, col, table[col].cast(pa.timestamp("ms", tz="UTC")))
+    return table
 
 
 def _authors_to_table(envelope: Mapping[str, Any]) -> pa.Table:
@@ -222,6 +268,10 @@ def _manifest_to_table(manifest: Mapping[str, Any]) -> pa.Table:
     flat = {
         "schema_version": str(manifest.get("schema_version", "")),
         "format": "parquet-single",
+        # Stage 11.1 — exposes the format version separately from the
+        # UI data-package schema_version so the browser-side decoder
+        # can branch on it without parsing the inner manifest JSON.
+        "format_version": PARQUET_FORMAT_VERSION,
         "manifest_json": json.dumps(manifest, sort_keys=True),
     }
     return pa.Table.from_pylist([flat])
@@ -256,10 +306,28 @@ def write(
 
     manifest_with_format = dict(manifest)
     manifest_with_format["format"] = "parquet-single"
+    manifest_with_format["format_version"] = PARQUET_FORMAT_VERSION
+
+    # Stage 11.1 US2 — derive the standby_slots table once, then thread
+    # the per-poster INT8 lookup map into the abstracts emitter.
+    from ohbm2026.ui_data.standby_slots import (
+        build_poster_to_index_map,
+        derive_standby_slots,
+    )
+
+    standby_by_pid = _collect_standby_by_poster(abstracts_envelope)
+    standby_slots = derive_standby_slots(standby_by_pid)
+    poster_to_index = build_poster_to_index_map(standby_by_pid, standby_slots)
 
     entries.append(("manifest", _to_inner_parquet_bytes(_manifest_to_table(manifest_with_format))))
-    entries.append(("abstracts", _to_inner_parquet_bytes(_abstracts_to_table(abstracts_envelope))))
+    entries.append(
+        ("abstracts", _to_inner_parquet_bytes(_abstracts_to_table(abstracts_envelope, poster_to_index)))
+    )
     entries.append(("authors", _to_inner_parquet_bytes(_authors_to_table(authors_envelope))))
+    if standby_slots:
+        entries.append(
+            ("standby_slots", _to_inner_parquet_bytes(_standby_slots_to_table(standby_slots)))
+        )
 
     claims_t, figures_t = _enrichment_to_tables(enrichment_envelope)
     if claims_t.num_rows:

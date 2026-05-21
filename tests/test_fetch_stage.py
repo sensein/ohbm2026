@@ -242,7 +242,8 @@ class ProvenanceContractTests(unittest.TestCase):
             record = json.loads(provenance_path.read_text(encoding="utf-8"))
 
         for required_field in (
-            "provenance_version", "run_id", "state_key", "run_timestamp",
+            # Stage 11.1 US4: `state_key` renamed to `fetch_state_key`.
+            "provenance_version", "run_id", "fetch_state_key", "run_timestamp",
             "code_revision", "command_line", "env_vars_consulted",
             "endpoint_url", "query_count", "request_retry_count",
             "retry_reasons", "abstract_count", "figure_asset_count",
@@ -361,14 +362,16 @@ class ResumabilityContractTests(unittest.TestCase):
 
             schema_path = list((tmp / "data" / "inputs").glob("abstracts_graphql_schema__*.json"))[0]
             schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            # Stage 11.1 US4: Stage 1 emits `fetch_state_key`.
+            schema_state_key = schema.get("fetch_state_key", schema.get("state_key"))
             ckpt_dir = tmp / "data" / "cache" / "fetch_abstracts"
             ckpt_dir.mkdir(parents=True, exist_ok=True)
-            ckpt_path = ckpt_dir / f"checkpoint__{schema['state_key']}.json"
+            ckpt_path = ckpt_dir / f"checkpoint__{schema_state_key}.json"
             ckpt_path.write_text(
                 json.dumps(
                     {
                         "checkpoint_version": "fetch.checkpoint.v1",
-                        "state_key": schema["state_key"],
+                        "fetch_state_key": schema_state_key,
                         "bound_schema_hash": schema["schema_hash"],
                         "started_at": "2026-05-13T00:00:00+00:00",
                         "last_updated_at": "2026-05-13T00:00:00+00:00",
@@ -581,14 +584,15 @@ class DiscoveryContractTests(unittest.TestCase):
 
             schema_path = list((tmp / "data" / "inputs").glob("abstracts_graphql_schema__*.json"))[0]
             schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            schema_state_key = schema.get("fetch_state_key", schema.get("state_key"))
             ckpt_dir = tmp / "data" / "cache" / "fetch_abstracts"
             ckpt_dir.mkdir(parents=True, exist_ok=True)
-            ckpt_path = ckpt_dir / f"checkpoint__{schema['state_key']}.json"
+            ckpt_path = ckpt_dir / f"checkpoint__{schema_state_key}.json"
             ckpt_path.write_text(
                 json.dumps(
                     {
                         "checkpoint_version": "fetch.checkpoint.v1",
-                        "state_key": schema["state_key"],
+                        "fetch_state_key": schema_state_key,
                         "bound_schema_hash": "0" * 64,  # wrong hash
                         "started_at": "2026-05-13T00:00:00+00:00",
                         "last_updated_at": "2026-05-13T00:00:00+00:00",

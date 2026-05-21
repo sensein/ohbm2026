@@ -1,5 +1,11 @@
 # Quickstart — Book of Abstracts
 
+> **Note (Stage 11.1, 2026-05-20):** the `--format docx` path was
+> retired. Use `--format md` (markdown bundle) or `--format pdf`
+> (per-abstract pipeline). PDF builds now use the per-abstract
+> pipeline with content-hash caching; first-run ~7 min, warm-cache
+> re-run ≤ 60 s. Full delta in `specs/012-stage11-followups/`.
+
 Operator runbook. Takes you from a clean checkout to a printable
 PDF book in ten minutes (after one-time system-deps install).
 

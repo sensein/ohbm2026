@@ -124,3 +124,67 @@ class Book:
     entries: tuple[BookEntry, ...]
     author_index: tuple[AuthorIndexEntry, ...]
     corpus_state_key: str
+
+
+# ---------------------------------------------------------------------------
+# Stage 11.1 — per-abstract PDF pipeline data model
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AbstractPdfChunk:
+    """One pre-rendered per-abstract PDF on disk.
+
+    `poster_id` is negative when the chunk is synthetic front matter
+    (title page + TOC) rather than an abstract — the assembler uses
+    that to identify the front-matter slot separately. `pandoc_stderr`
+    is None on a successful render; populated when the chunk represents
+    a failed render that the orchestrator dropped from the assembled
+    book (in that case `cached_path` may or may not exist).
+    """
+
+    poster_id: int
+    cache_key: str
+    cached_path: pathlib.Path
+    page_count: int
+    cache_hit: bool
+    pandoc_stderr: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PerAbstractFailure:
+    """A per-abstract pandoc/Tectonic failure, captured for provenance.
+
+    Aggregated into `provenance.failed_abstracts[]` per CA-006 /
+    FR-002 so operators can diagnose the failing entry without
+    re-running the entire build.
+    """
+
+    poster_id: int
+    cache_key: str
+    pandoc_exit_code: int
+    stderr_tail: str
+    failed_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class AssembledBook:
+    """Result of `assemble_pdf.assemble` — the two-pass output state.
+
+    `chunk_offsets` is a sequence of `(poster_id, start_page_1based)`
+    pairs in concatenation order (front matter first). `index_pages`
+    is the measured page count of the appended index appendix —
+    written into provenance.json so downstream tests (T009) can
+    floor-check without re-opening the PDF.
+    """
+
+    chunks: tuple[AbstractPdfChunk, ...]
+    chunk_offsets: tuple[tuple[int, int], ...]
+    front_matter_pages: int
+    draft_path: pathlib.Path
+    final_path: pathlib.Path
+    cache_hit_count: int
+    cache_miss_count: int
+    failures: tuple[PerAbstractFailure, ...]
+    assembly_time_seconds: float
+    index_pages: int

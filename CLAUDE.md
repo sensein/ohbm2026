@@ -168,32 +168,59 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/011-abstracts-book/plan.md`. The companion design artefacts
+at `specs/012-stage11-followups/plan.md`. The companion design artefacts
 under the same directory — `research.md`, `data-model.md`,
-`contracts/cli.md`, and `quickstart.md` — pin the Book-of-Abstracts
-exporter: a deterministic `ohbmcli book` subcommand that composes
-every accepted abstract (title, authors with affiliations, full
-body text, embedded figures, references) into a printable book in
-three formats (`md` bundle + `pdf` + `docx`), with three sort
-orders (`poster_id`, `title`, `first_author`) and a paginated
-author index at the back. **No AI-generated content reaches the
-book** — sourced exclusively from Stage-1 artefacts
-(`data/primary/abstracts.json` + `authors.json` +
-`data/inputs/assets/`), never from Stage-2 enrichments. **Markdown
-is the canonical intermediate** (2026-05-19 clarification): HTML
-→ markdown happens once at corpus load, and PDF + DOCX both
-derive from the same `book.md` via pandoc — PDF through xelatex
-with `\makeindex`/`\printindex` for the page-numbered author
-index, optional `tufte-book` document class via `--style tufte`;
-DOCX through pandoc's native docx writer (anchor-link index, not
-PAGEREF — documented limitation). System deps: `pandoc` + a LaTeX
-engine (`tectonic` recommended). Key research discoveries in
-`research.md`: the corpus has NO author-supplied figure captions
-(figures only carry a `question_name` label — "Methods Figure" /
-"Results Figure"), and all long-form responses are HTML (not
-markdown) and are converted once at the corpus boundary.
+`contracts/cli.md`, `contracts/standby.linkml.yaml`, and `quickstart.md`
+— pin Stage 11.1: four bundled stories landing on top of Stage 11.
+
+**US1 — per-abstract parallel + cached PDF**: replaces Stage 11's
+single-pass whole-corpus pandoc compile with a per-abstract pipeline.
+Each abstract renders to its own small PDF cached by
+`sha256(md_body || pandoc_version || engine_version ||
+header_includes_hash || style)`; joblib parallelises across all
+cores. A **two-pass assembly** gets a real page-numbered author
+index: pass 1 concatenates the chunks via `pikepdf` and measures
+each chunk's page offset; pass 2 emits a stub markdown with
+`\setcounter{page}` + `\printindex` and concatenates the appendix
+onto the draft. Per-abstract failures isolate cleanly — the
+offending entry drops out, the rest renders, `provenance.json`
+records the failure. First-build target ≤ 10 min, warm-cache
+re-run ≤ 60 s.
+
+**US2 — standby-block INT8 schema**: replaces the parquet's
+`poster_standby: {first, second}` STRUCT with a separate 8-row
+`standby_slots` table + two INT8 indices per abstract. UI's hot-path
+`Intl.DateTimeFormat` memo cache (added in PR #27) becomes dead
+code under v2; facet recompute drops to constant time. Schema
+version bumps `parquet-single.v1 → v2`; the decoder accepts both
+shapes for one deploy cycle.
+
+**US3 — DOCX retirement**: `ohbmcli book --format docx` exits
+non-zero with a stderr pointer at `--format md` and `--format
+pdf`. The implementation, the optional `python-docx` dep, and
+the docx-only test module are removed. README + quickstart +
+`docs/abstracts-book-plan.md` updated.
+
+**US4 — CI telemetry + state-key rename**: telemetry on the
+PR-association retry loop so the operator can verify it saved
+the deploy; Stage 1's `state_key` renamed to `fetch_state_key`
+so it no longer collides verbally with Stage 6's
+`corpus_state_key`. Readers accept both names via a shared
+`read_fetch_state_key` helper for backward compatibility.
+
+System deps unchanged from Stage 11 (`pandoc` + Tectonic). New
+dep already in `[analysis]`: `joblib`. The Stage-11 markdown
+bundle path is untouched.
 
 Previous-stage plans:
+- Stage 11 book of abstracts: `specs/011-abstracts-book/plan.md`
+  (deterministic `ohbmcli book` CLI; markdown-canonical intermediate
+  via pandoc → xelatex/Tectonic for PDF + pandoc-native DOCX writer;
+  optional `--style tufte`; figure pre-resize at `--max-image-width`;
+  authoritative standby times from FINAL OHBM 2026 listing CSV with
+  UI display + facet + cart-restore deep links). Shipped via PRs
+  #26-#30. Real-corpus PDF on monolithic compile didn't ship; Stage
+  11.1 supersedes that path with per-abstract parallel + caching.
 - Stage 10 data export redesign: `specs/010-export-redesign/plan.md`
   (single-file Parquet with row-group-per-table layout; LinkML-tight
   schema eliminating every `range: Any`; magic-byte sniff dispatch

@@ -174,6 +174,15 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 				build_info: buildInfo,
 				abstracts: rows
 			});
+		} else if (name === 'standby_slots') {
+			// Stage 11.1 US2 — global lookup table. Decoder emits it as
+			// its own shard; the abstract-hydration step below joins the
+			// per-row INT8 indices against this table.
+			out.set('data/standby_slots.json', {
+				schema_version: 'standby_slots.v1',
+				build_info: buildInfo,
+				slots: rows
+			});
 		} else if (name === 'authors') {
 			out.set('data/authors.json', { schema_version: 'authors.v2', build_info: buildInfo, authors: rows });
 		} else if (name.startsWith('cells:')) {
@@ -240,6 +249,38 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 		ai_provenance: {},
 		records
 	});
+
+	// Stage 11.1 US2 — hydrate the legacy `poster_standby: {first, second}`
+	// STRUCT on every abstract record from the new v2 (standby_first_index,
+	// standby_second_index) → standby_slots lookup. This keeps the existing
+	// UI code (facets.ts, standby.ts) working unchanged during the
+	// migration window. Once the next deploy clears, the v1 fallback +
+	// the Intl-formatter memo cache can be retired.
+	const slotsShard = out.get('data/standby_slots.json') as
+		| { slots?: Array<{ slot_index: number; start_utc: Date | number }> }
+		| undefined;
+	if (slotsShard?.slots && Array.isArray(slotsShard.slots)) {
+		const slotByIndex = new Map<number, Date | number>();
+		for (const s of slotsShard.slots) {
+			slotByIndex.set(Number(s.slot_index), s.start_utc);
+		}
+		const abstractsShard = out.get('data/abstracts.json') as
+			| { abstracts?: Array<Record<string, unknown>> }
+			| undefined;
+		if (abstractsShard?.abstracts) {
+			for (const a of abstractsShard.abstracts) {
+				const fi = a['standby_first_index'];
+				const si = a['standby_second_index'];
+				const first =
+					fi == null ? null : slotByIndex.get(Number(fi)) ?? null;
+				const second =
+					si == null ? null : slotByIndex.get(Number(si)) ?? null;
+				if (first !== null || second !== null) {
+					a['poster_standby'] = { first, second };
+				}
+			}
+		}
+	}
 
 	return out;
 }

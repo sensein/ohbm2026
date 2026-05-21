@@ -69,6 +69,7 @@ __all__ = [
     "UIBuildError",
     "Stage6Error",
     "BookBuildError",
+    "PerAbstractRenderError",
 ]
 
 
@@ -335,6 +336,30 @@ class BookBuildError(OhbmStageError):
     def __init__(self, message: str, *, details: str | None = None) -> None:
         super().__init__(message)
         self.details = details
+
+
+class PerAbstractRenderError(BookBuildError):
+    """Stage 11.1 per-abstract pandoc/Tectonic render aborted.
+
+    Distinct from a build-wide :class:`BookBuildError` so the orchestrator
+    can isolate the failing entry, drop it from the assembled PDF, and
+    record (poster_id, stderr_tail) under ``provenance.failed_abstracts``
+    while the remaining chunks render normally (FR-002).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        poster_id: int | None = None,
+        cache_key: str | None = None,
+        pandoc_exit_code: int | None = None,
+        details: str | None = None,
+    ) -> None:
+        super().__init__(message, details=details)
+        self.poster_id = poster_id
+        self.cache_key = cache_key
+        self.pandoc_exit_code = pandoc_exit_code
 
 
 class CommunityResolutionDegenerate(Warning):

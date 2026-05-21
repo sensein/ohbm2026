@@ -1,0 +1,19 @@
+% Stage 11.1 — minimal preamble for per-abstract pandoc invocations.
+% Loaded by render_per_abstract.py via `-H per-abstract.tex.template`.
+%
+% Drops the title-page + TOC machinery that lives in the front-matter
+% chunk: those would otherwise double up across every per-abstract
+% PDF. Drops makeindex too: per-chunk indexing is meaningless because
+% each chunk is rendered in isolation and doesn't know its global
+% page offset. The assembled book's author index is hand-rolled in
+% pass 2 from the measured chunk_offsets (see assemble_pdf.py), so
+% indexing here would just bloat .idx files that nobody reads.
+
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{hyperref}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  urlcolor=blue,
+}

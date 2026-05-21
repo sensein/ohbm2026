@@ -1,0 +1,78 @@
+id: https://abstractatlas.brainkb.org/schemas/standby
+name: ohbm_standby_v1
+description: |
+  Stage-11.1 schema addendum to specs/010-export-redesign/contracts/shards.linkml.yaml.
+  Defines the new `standby_slots` table emitted by the parquet builder + the
+  INT8 index columns added to the existing `abstracts` table. Both replace
+  the v1 `poster_standby: {first, second}` STRUCT column.
+prefixes:
+  linkml: https://w3id.org/linkml/
+  xsd: http://www.w3.org/2001/XMLSchema#
+default_prefix: ohbm_standby_v1
+
+imports:
+  - linkml:types
+
+classes:
+  StandbySlot:
+    description: |
+      One distinct program window (e.g. "Day 1 (Mon Jun 15) · 13:45-14:45").
+      8 rows for OHBM 2026. The table is global — every accepted abstract
+      with standby data references rows in this table via its
+      standby_first_index + standby_second_index INT8 columns.
+    attributes:
+      slot_index:
+        range: integer
+        required: true
+        minimum_value: 0
+        maximum_value: 127
+        description: |
+          Primary key. Dense 0..N-1. Ordered chronologically by start_utc
+          ascending — so slot_index = chronological position.
+      start_utc:
+        range: datetime
+        required: true
+        description: Inclusive window start, UTC.
+      end_utc:
+        range: datetime
+        required: true
+        description: |
+          Exclusive window end, UTC. For OHBM 2026 every window is 1 hour
+          exactly so end_utc = start_utc + 1h, but the contract permits
+          arbitrary durations.
+      display_label:
+        range: string
+        required: true
+        description: |
+          Pre-rendered display string in conference-venue local time
+          (Europe/Paris for OHBM 2026). UI shows this verbatim — no
+          Intl.DateTimeFormat work at facet-recompute time.
+
+  AbstractStandbyRef:
+    description: |
+      Mixin applied to the `abstracts` table. Two nullable INT8 columns
+      referencing rows in StandbySlot.
+    attributes:
+      standby_first_index:
+        range: integer
+        required: false
+        minimum_value: 0
+        maximum_value: 127
+        description: |
+          Index into the standby_slots table for the abstract's FIRST
+          stand-by window. Null when the abstract has no standby data
+          (orphan submission or pre-standby-CSV state).
+      standby_second_index:
+        range: integer
+        required: false
+        minimum_value: 0
+        maximum_value: 127
+        description: |
+          Index into the standby_slots table for the abstract's SECOND
+          stand-by window. Same null-semantics as standby_first_index.
+
+# Schema-version pin for the manifest's `schema_version` field.
+# Migrations: v1 (legacy) → v2 (this addendum). The decoder must
+# accept both for one deploy cycle (R5).
+settings:
+  schema_version: parquet-single.v2

@@ -1,5 +1,16 @@
 # Contract — `ohbmcli book`
 
+> **Note (Stage 11.1, 2026-05-20):** the PDF path was rewired to a
+> per-abstract pipeline + two-pass assembly. Three new flags
+> (`--workers`, `--no-cache`, `--cache-dir`) are added; provenance
+> gains `pdf_pipeline_version`, `pdf_engine_version`,
+> `cache_hit_count`, `cache_miss_count`, `assembly_time_seconds`,
+> `index_pages`, `front_matter_pages`, `included_poster_ids[]`,
+> `failed_abstracts[]`. The legacy `xelatex_version` field is still
+> emitted (alongside the new `pdf_engine_version`) for one deploy
+> cycle. DOCX retirement is in scope of Stage 11.1 US3 — see
+> `specs/012-stage11-followups/contracts/cli.md` for the full delta.
+
 Command surface this feature exposes. Single CLI entry point; no
 network endpoints.
 

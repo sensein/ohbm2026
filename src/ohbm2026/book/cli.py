@@ -20,7 +20,13 @@ from ohbm2026.book.render_markdown import emit_book_md
 from ohbm2026.book.sort import STRATEGIES
 from ohbm2026.exceptions import BookBuildError, ProvenanceError
 
-_VALID_FORMATS = ("md", "pdf", "docx", "all")
+_VALID_FORMATS = ("md", "pdf", "all")
+_RETIRED_FORMATS = ("docx",)
+_DOCX_RETIREMENT_MESSAGE = (
+    "error: docx export was retired in Stage 11.1 — use --format md "
+    "(markdown bundle) or --format pdf (per-abstract PDF pipeline) "
+    "instead. See docs/abstracts-book-plan.md for the migration note."
+)
 _VALID_STYLES = ("plain", "tufte")
 
 
@@ -38,9 +44,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--format",
         default="md",
-        choices=_VALID_FORMATS,
+        # `docx` is intentionally accepted at the parser level so we
+        # can emit a typed retirement message in `main()`; argparse
+        # would otherwise reject with a generic "invalid choice"
+        # line that doesn't name the alternatives.
+        choices=tuple(list(_VALID_FORMATS) + list(_RETIRED_FORMATS)),
         help="Output format. `md` is always emitted (canonical intermediate); "
-        "`pdf` / `docx` are derived from it via pandoc; `all` produces all three.",
+        "`pdf` is derived via the per-abstract pipeline; `all` produces both. "
+        "`docx` was retired in Stage 11.1 (rejected with a pointer at the "
+        "surviving formats).",
     )
     p.add_argument(
         "--style",
@@ -117,6 +129,34 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the state-key suffix on the output directory.",
     )
+    # Stage 11.1 — per-abstract PDF pipeline flags.
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        help=(
+            "joblib.Parallel n_jobs for per-abstract PDF rendering. "
+            "Default -1 (all cores). Pass 1 for serial debug builds."
+        ),
+    )
+    p.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=(
+            "Bypass the per-abstract PDF cache (every chunk re-renders). "
+            "Existing cache entries are NOT overwritten — only fresh "
+            "renders get persisted on success."
+        ),
+    )
+    p.add_argument(
+        "--cache-dir",
+        default="data/cache/book/abstracts",
+        help=(
+            "Where the per-abstract PDF cache lives. Default "
+            "data/cache/book/abstracts — gitignored under the root "
+            "data/ rule."
+        ),
+    )
     return p
 
 
@@ -145,12 +185,16 @@ def _format_needs_pdf(fmt: str) -> bool:
     return fmt in ("pdf", "all")
 
 
-def _format_needs_docx(fmt: str) -> bool:
-    return fmt in ("docx", "all")
-
-
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    # Stage 11.1 US3: --format docx is retired with a pointer at the
+    # surviving formats. Exit 2 (typed BookBuildError) so any operator
+    # wrapper script that checks the exit code still distinguishes
+    # this from generic argparse errors (exit 1).
+    if args.format in _RETIRED_FORMATS:
+        print(_DOCX_RETIREMENT_MESSAGE, file=sys.stderr)
+        return 2
 
     corpus_path = pathlib.Path(args.corpus)
     authors_path = pathlib.Path(args.authors)
@@ -162,12 +206,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     need_pdf = _format_needs_pdf(args.format)
-    need_docx = _format_needs_docx(args.format)
 
     # Preflight system deps when format touches pandoc.
     pandoc_version = None
     xelatex_version = None
-    if need_pdf or need_docx:
+    if need_pdf:
         from ohbm2026.book.render_via_pandoc import preflight
 
         try:
@@ -235,16 +278,21 @@ def main(argv: list[str] | None = None) -> int:
 
     strip_metadata = not args.no_determinism_strip
 
-    # PDF (US1).
+    # PDF (US1 + Stage 11.1).
+    assembled = None
     if need_pdf:
         from ohbm2026.book.render_via_pandoc import to_pdf
 
         try:
-            to_pdf(
-                staging_dir / "book.md",
+            assembled = to_pdf(
+                book,
+                staging_dir,
                 staging_dir / "book.pdf",
                 style=args.style,
                 strip_metadata=strip_metadata,
+                workers=args.workers,
+                no_cache=args.no_cache,
+                cache_dir=pathlib.Path(args.cache_dir),
             )
         except BookBuildError as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -255,29 +303,12 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-
-    # DOCX (US3).
-    if need_docx:
-        from ohbm2026.book.render_via_pandoc import to_docx
-
-        try:
-            to_docx(
-                staging_dir / "book.md",
-                staging_dir / "book.docx",
-                strip_metadata=strip_metadata,
-            )
-        except NotImplementedError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
-        except BookBuildError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            if exc.details:
-                print(f"  details: {exc.details}", file=sys.stderr)
+        if assembled.failures:
             print(
-                f"  partial artefacts left in {staging_dir} for inspection",
+                f"warning: {len(assembled.failures)} abstract(s) failed "
+                f"to render and were omitted; see provenance.failed_abstracts[]",
                 file=sys.stderr,
             )
-            return 2
 
     # Provenance.
     command_line = " ".join(["ohbmcli", "book", *(argv if argv is not None else sys.argv[1:])])
@@ -291,6 +322,7 @@ def main(argv: list[str] | None = None) -> int:
             command_line=command_line,
             pandoc_version=pandoc_version,
             xelatex_version=xelatex_version,
+            assembled=assembled,
         )
     except ProvenanceError as exc:
         print(f"error: {exc}", file=sys.stderr)

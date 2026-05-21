@@ -93,11 +93,41 @@ export interface AbstractRecord {
 	 * carry that slot (rare — every accepted poster has both windows
 	 * in the FINAL listing). Local-time display lives in the UI; the
 	 * data layer keeps UTC for sortability + portability.
+	 *
+	 * Stage 11.1 v2 transport: the parquet emits two INT8
+	 * `standby_first_index` / `standby_second_index` columns referencing
+	 * the new `standby_slots` table. The loader (loader.ts) hydrates
+	 * this `poster_standby` field from the v2 indices so existing UI
+	 * code keeps working unchanged.
 	 */
 	poster_standby?: {
 		first: Date | number | null;
 		second: Date | number | null;
 	};
+	/** Stage 11.1 v2 wire field — index into `standby_slots`. */
+	standby_first_index?: number | null;
+	/** Stage 11.1 v2 wire field — index into `standby_slots`. */
+	standby_second_index?: number | null;
+}
+
+/**
+ * One row of the Stage 11.1 v2 `standby_slots` table — a global
+ * lookup carrying pre-rendered Paris-local display labels for each
+ * of OHBM 2026's 8 program windows. Loaded once per session; the
+ * UI's `standby.ts` reads `display_label` directly (no
+ * Intl.DateTimeFormat work at facet-recompute time).
+ */
+export interface StandbySlot {
+	slot_index: number;
+	start_utc: Date | number;
+	end_utc: Date | number;
+	display_label: string;
+}
+
+export interface StandbySlotsShard {
+	schema_version: string;
+	build_info: BuildInfo;
+	slots: StandbySlot[];
 }
 
 export interface AuthorRecord {

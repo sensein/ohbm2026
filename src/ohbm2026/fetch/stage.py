@@ -311,7 +311,9 @@ def _run(args: argparse.Namespace, argv: list[str]) -> int:
         "authors_output": _project_relative(cwd, authors_path),
         "schema_artifact": _project_relative(cwd, schema_artifact_path),
         "provenance_record": _project_relative(cwd, provenance_path),
-        "state_key": state_key,
+        # Stage 11.1 US4 — renamed from `state_key` for the summary
+        # printed to stdout (operator-facing).
+        "fetch_state_key": state_key,
         "abstract_count": final_count,
         "author_count": author_count,
         "figure_asset_count": figure_asset_count,
@@ -497,7 +499,11 @@ def _new_checkpoint(
 ) -> dict[str, Any]:
     return {
         "checkpoint_version": CHECKPOINT_VERSION,
-        "state_key": state_key,
+        # Stage 11.1 US4 — renamed from `state_key` so the field
+        # name no longer collides verbally with Stage 6's
+        # `corpus_state_key`. Readers go through
+        # `artifacts.read_fetch_state_key` which accepts both names.
+        "fetch_state_key": state_key,
         "bound_schema_hash": schema_hash,
         "started_at": _utc_now(),
         "last_updated_at": _utc_now(),
@@ -525,10 +531,12 @@ def _load_or_init_checkpoint(
             f"Existing checkpoint {checkpoint_path} is unreadable: {exc}"
         ) from exc
 
-    if ckpt.get("state_key") != state_key:
+    # Accept both field names during the migration window (Stage 11.1 US4).
+    ckpt_state_key = ckpt.get("fetch_state_key", ckpt.get("state_key"))
+    if ckpt_state_key != state_key:
         raise CheckpointError(
-            f"Checkpoint state_key={ckpt.get('state_key')!r} does not match "
-            f"current run state_key={state_key!r}"
+            f"Checkpoint fetch_state_key={ckpt_state_key!r} does not match "
+            f"current run fetch_state_key={state_key!r}"
         )
 
     if ckpt.get("bound_schema_hash") != current_schema_hash and not allow_schema_change:
@@ -555,7 +563,8 @@ def _write_schema_artifact(
         "schema_version": SCHEMA_ARTIFACT_VERSION,
         "fetched_at": _utc_now(),
         "endpoint_url": _gql.GRAPHQL_ENDPOINT,
-        "state_key": state_key,
+        # Stage 11.1 US4 — renamed field. See _new_checkpoint().
+        "fetch_state_key": state_key,
         "schema_hash": schema_hash,
         "introspection_raw": introspection_raw,
         "field_index": [e.to_dict() for e in field_index],
@@ -616,7 +625,8 @@ def _build_provenance_record(
     record = {
         "provenance_version": PROVENANCE_VERSION,
         "run_id": run_id,
-        "state_key": state_key,
+        # Stage 11.1 US4 — renamed field.
+        "fetch_state_key": state_key,
         "run_timestamp": _utc_now(),
         "code_revision": _git_revision(cwd),
         "command_line": ["fetch-abstracts", *argv],

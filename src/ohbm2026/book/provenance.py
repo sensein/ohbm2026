@@ -138,8 +138,19 @@ def write_provenance(
     pandoc_version: str | None = None,
     xelatex_version: str | None = None,
     display_width_inches: float = 6.5,
+    assembled=None,  # type: ignore[no-untyped-def]
 ) -> pathlib.Path:
-    """Write `output_dir/provenance.json` and return its path."""
+    """Write `output_dir/provenance.json` and return its path.
+
+    ``assembled`` is the :class:`AssembledBook` returned by Stage 11.1's
+    per-abstract PDF orchestrator. When provided, the emitted
+    provenance gains the Stage-11.1 fields: cache_hit_count,
+    cache_miss_count, failed_abstracts[], assembly_time_seconds,
+    index_pages, included_poster_ids, pdf_pipeline_version,
+    pdf_engine_version. When None (md-only / legacy single-pass build)
+    those fields are omitted so the provenance contract remains a
+    superset of Stage 11's.
+    """
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -187,9 +198,38 @@ def write_provenance(
         "figure_count": figure_count,
         "figures_below_resolution_threshold": below,
         "pandoc_version": pandoc_version,
+        # Legacy field name kept for one deploy cycle so downstream
+        # consumers reading old provenance files don't break; Stage
+        # 11.1 also writes the new `pdf_engine_version` below when
+        # the assembled-book path produced this run.
         "xelatex_version": xelatex_version,
         "no_ai_audit": no_ai,
     }
+    if assembled is not None:
+        payload["pdf_pipeline_version"] = "stage-11.1"
+        payload["pdf_engine_version"] = xelatex_version
+        payload["cache_hit_count"] = assembled.cache_hit_count
+        payload["cache_miss_count"] = assembled.cache_miss_count
+        payload["assembly_time_seconds"] = assembled.assembly_time_seconds
+        payload["index_pages"] = assembled.index_pages
+        payload["front_matter_pages"] = assembled.front_matter_pages
+        # Surviving abstracts (sort order preserved).
+        included = [
+            offset_pid
+            for (offset_pid, _start) in assembled.chunk_offsets
+            if offset_pid >= 0  # filter out the front-matter slot (-1)
+        ]
+        payload["included_poster_ids"] = included
+        payload["failed_abstracts"] = [
+            {
+                "poster_id": f.poster_id,
+                "cache_key": f.cache_key,
+                "pandoc_exit_code": f.pandoc_exit_code,
+                "stderr_tail": f.stderr_tail,
+                "failed_at": f.failed_at,
+            }
+            for f in assembled.failures
+        ]
     dest = output_dir / "provenance.json"
     dest.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return dest

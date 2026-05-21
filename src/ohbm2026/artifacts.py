@@ -216,6 +216,42 @@ def artifact_is_stale(existing_metadata: Mapping[str, Any] | None, *, expected_s
     return str(existing_metadata.get("state_key") or "") != expected_state_key
 
 
+def read_fetch_state_key(provenance_doc: Mapping[str, Any]) -> str:
+    """Stage 11.1 — read Stage 1's state-key from a fetch provenance doc.
+
+    Accepts both the new ``fetch_state_key`` field name (Stage 11.1+) and
+    the legacy ``state_key`` field (pre-Stage-11.1 artefacts on disk),
+    so the rename can roll out without invalidating existing local
+    provenance files. A :class:`DeprecationWarning` fires on every
+    legacy-field read so grepping the project logs surfaces every stale
+    artefact.
+
+    Note: the rename is **field-name only** — the Python ``state_key``
+    variable across stages and the generic ``state_key`` field inside
+    ``build_artifact_metadata`` are intentionally unchanged. Only
+    Stage 1's fetch-stage provenance + checkpoint top-level field is
+    renamed (it collided verbally with Stage 6's ``corpus_state_key``).
+    """
+
+    if "fetch_state_key" in provenance_doc:
+        return str(provenance_doc["fetch_state_key"])
+    if "state_key" in provenance_doc:
+        import warnings
+
+        warnings.warn(
+            "Stage 1 provenance uses legacy 'state_key' field; "
+            "future fetches emit 'fetch_state_key'. See "
+            "specs/012-stage11-followups/research.md R6.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return str(provenance_doc["state_key"])
+    raise KeyError(
+        "no fetch state-key found in provenance doc "
+        "(expected 'fetch_state_key' or legacy 'state_key')"
+    )
+
+
 def regeneration_action(existing_metadata: Mapping[str, Any] | None, *, expected_state_key: str) -> str:
     if not existing_metadata:
         return "full_rebuild"

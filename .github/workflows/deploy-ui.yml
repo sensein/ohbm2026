@@ -75,7 +75,15 @@ jobs:
               // to ~30 s with linear backoff before falling through.
               const sha = context.sha;
               let pr = null;
+              // Stage 11.1 US4 — explicit telemetry on every attempt
+              // (success on first call AND retry success) so the
+              // operator can VERIFY the retry loop saved a deploy on
+              // the next labelled merge (SC-006). Without this, a
+              // silent success on the first call is indistinguishable
+              // from a missing retry loop.
+              const loopStart = Date.now();
               for (let attempt = 0; attempt < 6; attempt++) {
+                const attemptStart = Date.now();
                 const { data: prs } =
                   await github.rest.repos.listPullRequestsAssociatedWithCommit({
                     owner: context.repo.owner,
@@ -85,11 +93,29 @@ jobs:
                 pr = prs.find(
                   (p) => p.merge_commit_sha === sha && p.merged_at,
                 );
-                if (pr) break;
+                const elapsedMs = Date.now() - attemptStart;
+                if (pr) {
+                  if (attempt === 0) {
+                    core.info(
+                      `PR-association lookup: attempt 1/6 succeeded on first call (${elapsedMs} ms)`,
+                    );
+                  } else {
+                    const totalMs = Date.now() - loopStart;
+                    core.info(
+                      `PR-association lookup: attempt ${attempt + 1}/6 succeeded after retry (${totalMs} ms total)`,
+                    );
+                  }
+                  break;
+                }
                 core.info(
-                  `PR-association lookup attempt ${attempt + 1}/6 returned no match for ${sha.slice(0, 7)}; retrying in 5 s…`,
+                  `PR-association lookup attempt ${attempt + 1}/6 returned no match for ${sha.slice(0, 7)} (${elapsedMs} ms); retrying in 5 s…`,
                 );
                 await new Promise((r) => setTimeout(r, 5000));
+              }
+              if (!pr) {
+                core.warning(
+                  `PR-association lookup: attempt 6/6 EXHAUSTED — falling through to sandbox`,
+                );
               }
               const labels = (pr?.labels || []).map((l) => l.name);
               target = labels.includes('deploy-production') ? 'production' : 'sandbox';
