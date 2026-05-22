@@ -206,13 +206,29 @@ def write_provenance(
         "no_ai_audit": no_ai,
     }
     if assembled is not None:
-        payload["pdf_pipeline_version"] = "stage-11.1"
+        payload["pdf_pipeline_version"] = "stage-12"
         payload["pdf_engine_version"] = xelatex_version
         payload["cache_hit_count"] = assembled.cache_hit_count
         payload["cache_miss_count"] = assembled.cache_miss_count
         payload["assembly_time_seconds"] = assembled.assembly_time_seconds
         payload["index_pages"] = assembled.index_pages
         payload["front_matter_pages"] = assembled.front_matter_pages
+        # Stage 12 US2 / FR-006 — figure-normalisation audit fields.
+        # Read the module-level fallback registry from render_markdown
+        # then reset it so the next build starts clean.
+        from ohbm2026.book.render_markdown import (
+            get_normalise_fallbacks,
+            reset_normalise_fallbacks,
+        )
+
+        fallbacks = get_normalise_fallbacks()
+        payload["figures_normalised_count"] = max(0, figure_count - len(fallbacks))
+        payload["figures_normalised_with_fallback"] = fallbacks
+        # Stage 12 US3 / FR-010 — TOC page count derives from the
+        # front-matter chunk's page count (the new 3-column longtable
+        # IS the dominant content of the front matter).
+        payload["toc_page_count"] = assembled.front_matter_pages
+        reset_normalise_fallbacks()
         # Surviving abstracts (sort order preserved).
         included = [
             offset_pid

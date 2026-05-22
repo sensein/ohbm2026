@@ -174,7 +174,7 @@
 		const xs3: number[] = [];
 		const ys3: number[] = [];
 		const zs3: number[] = [];
-		const posters: string[] = [];
+		const posters: number[] = [];
 		const titles: string[] = [];
 		const communityLabels: string[] = [];
 		const communityIds: number[] = [];
@@ -536,7 +536,7 @@
 						// the poster_id straight off customdata so trace
 						// partitioning doesn't affect the click target.
 						const posterId = pt?.customdata?.[0];
-						if (posterId) $focusedAbstract = posterId;
+						if (typeof posterId === 'number') $focusedAbstract = posterId;
 					});
 					// Capture every camera change (user orbit / zoom / pan, OR our
 					// own rotation `relayout`) into `currentEye3D`. The event

@@ -129,6 +129,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the state-key suffix on the output directory.",
     )
+    # Stage 12 US5 — margin preset.
+    p.add_argument(
+        "--margins",
+        default="tight",
+        choices=("tight", "loose"),
+        help=(
+            "Book margin preset (Stage 12). `tight` (default) uses "
+            "\\usepackage[margin=0.65in]{geometry} for ≥ 15%% page-"
+            "count reduction. `loose` recovers the LaTeX `book` "
+            "class default (~1in margins) for archival / comparison."
+        ),
+    )
     # Stage 11.1 — per-abstract PDF pipeline flags.
     p.add_argument(
         "--workers",
@@ -293,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 workers=args.workers,
                 no_cache=args.no_cache,
                 cache_dir=pathlib.Path(args.cache_dir),
+                margins=args.margins,
             )
         except BookBuildError as exc:
             print(f"error: {exc}", file=sys.stderr)

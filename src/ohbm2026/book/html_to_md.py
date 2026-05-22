@@ -215,11 +215,434 @@ def normalise_for_latex(text: str) -> str:
     HTML output: the patterns are character-class-driven and don't
     touch ASCII or already-converted `$...$` math spans.
     """
+    text = _strip_control_chars(text)
     text = _fold_math_alphanumerics(text)
     text = _normalise_unicode_super_sub(text)
     text = _normalise_greek_and_math(text)
+    # Stage 12.1: convert well-formed `^X^` caret-super pairs BEFORE
+    # `_collapse_caret_runs` so adjacent pairs (`^X^^Y^` from HTML
+    # like `<sup>X</sup><sup>Y</sup>`) get cleanly split into
+    # `\textsuperscript{X}\textsuperscript{Y}` instead of being
+    # mangled by the `^^` collapse pass. Running the collapse first
+    # turned poster 239's `^-^^17^` into `^-\^17^` which downstream
+    # regexes captured wrong and produced
+    # `\textsuperscript{-\}17^` (Stage 11.1 / Stage 12 failure #2 in
+    # provenance.failed_abstracts[]).
+    text = _caret_super_to_latex(text)
     text = _collapse_caret_runs(text)
+    text = _escape_bare_ampersand(text)
+    text = _normalise_latex_aliases(text)
+    text = _wrap_bare_matrix_environments(text)
+    text = _autowrap_bare_math(text)
+    text = _defang_unknown_commands(text)
     return text
+
+
+# Common author-shortened LaTeX commands that aren't real LaTeX.
+# Replace each with its standard equivalent BEFORE defang so the
+# result lands on a real command rather than getting stripped.
+_LATEX_ALIASES = {
+    "thinsp": "thinspace",
+    "negthinsp": "negthinspace",
+    "medsp": "medspace",
+    "thicksp": "thickspace",
+}
+_ALIAS_RE = re.compile(
+    r"(?<!\\)\\(" + "|".join(_LATEX_ALIASES) + r")\b"
+)
+
+
+def _normalise_latex_aliases(text: str) -> str:
+    return _ALIAS_RE.sub(lambda m: "\\" + _LATEX_ALIASES[m.group(1)], text)
+
+
+# Matrix-family environments require math mode. Authors who paste raw
+# LaTeX equations into the Oxford form often forget to wrap the
+# matrix in `$$...$$` / `\[...\]`. Without wrapping, Tectonic errors
+# with "Missing $ inserted" the moment it hits `\begin{matrix}`.
+# Other math envs (`equation`, `align`, `gather`, ...) open their
+# own display-math context and do NOT need wrapping.
+_MATRIX_ENV_NAMES = (
+    "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix",
+    "smallmatrix",
+)
+_MATRIX_ENV_RE = re.compile(
+    r"\\begin\{(" + "|".join(_MATRIX_ENV_NAMES) + r")\}.*?\\end\{\1\}",
+    re.DOTALL,
+)
+
+
+def _wrap_bare_matrix_environments(text: str) -> str:
+    """Wrap bare ``\\begin{matrix}...\\end{matrix}`` blocks in
+    ``\\[...\\]`` display-math so they compile. Skips occurrences
+    that are already inside an author-written ``$...$`` math span
+    (would produce broken ``$\\[...\\]$`` otherwise).
+    """
+    # Determine which positions are already inside `$...$`.
+    span_intervals = [
+        (m.start(), m.end()) for m in _MATH_SPAN_RE.finditer(text)
+    ]
+
+    def _is_in_math(pos: int) -> bool:
+        for s, e in span_intervals:
+            if s <= pos < e:
+                return True
+        return False
+
+    def _wrap(m: "re.Match[str]") -> str:
+        if _is_in_math(m.start()):
+            return m.group(0)
+        # Use `$$...$$` display math instead of `\[...\]`. Pandoc
+        # treats `\[` in markdown as a literal escaped bracket
+        # (`\[` → `{[}` in LaTeX output) — NOT display math. `$$`
+        # is the only delimiter pandoc reliably recognises for
+        # markdown→latex display math.
+        return "$$" + m.group(0) + "$$"
+
+    return _MATRIX_ENV_RE.sub(_wrap, text)
+
+
+# Math-only LaTeX commands an author would write in body text only by
+# accident. When we see one of these outside a `$...$` span we wrap
+# the surrounding math-token run so LaTeX accepts it. The commands
+# below need math mode to compile at all; their text-mode siblings
+# (e.g. `\textsuperscript`, `\emph`) are NOT in this set.
+_MATH_ONLY_COMMANDS = frozenset({
+    "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon",
+    "zeta", "eta", "theta", "vartheta", "iota", "kappa", "lambda",
+    "mu", "nu", "xi", "pi", "varpi", "rho", "varrho", "sigma",
+    "varsigma", "tau", "upsilon", "phi", "varphi", "chi", "psi",
+    "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi",
+    "Sigma", "Upsilon", "Phi", "Psi", "Omega",
+    "left", "right", "big", "Big", "bigg", "Bigg",
+    "hat", "widehat", "tilde", "widetilde", "bar", "overline",
+    "vec", "dot", "ddot",
+    "frac", "sqrt", "sum", "prod", "int", "lim",
+    "mathrm", "mathbf", "mathit", "mathbb", "mathcal",
+    "leq", "geq", "neq", "approx", "equiv", "sim", "propto",
+    "pm", "mp", "cdot", "times", "infty", "partial", "nabla",
+    "in", "notin", "subset", "supset", "cap", "cup",
+    "to", "rightarrow", "leftarrow", "Rightarrow", "Leftarrow",
+})
+
+# Commands that are valid in BOTH text and math mode — don't trigger
+# auto-wrap on these alone (they're often legitimately in body text).
+_DUAL_MODE_COMMANDS = frozenset({
+    "textsuperscript", "textsubscript", "textbf", "textit", "emph",
+    "log", "ln", "exp", "sin", "cos", "tan",
+})
+
+_MATH_CMD_START_RE = re.compile(r"\\([a-zA-Z]+)")
+
+
+def _autowrap_bare_math(text: str) -> str:
+    """Wrap contiguous LaTeX math expressions in `$...$` when authors
+    write raw LaTeX math (e.g. ``\\rho\\left(s,j\\right)=corr(z,j)``)
+    in body text without dollar-wrapping it. Tectonic otherwise
+    errors with "Missing $ inserted" (observed: poster 2094).
+
+    Heuristic:
+    1. Split text by existing `$...$` math spans + `\\begin{ENV}...
+       \\end{ENV}` math environments (matrix / align / equation /
+       gather); skip those — they're already in math mode.
+    2. Scan for the first occurrence of a math-only command in a
+       non-math chunk.
+    3. Walk forward through valid math characters (`{}()[]_^=+-*/<>|,
+       digits, letters, whitespace, more `\\command`s) until a clear
+       sentence boundary: `.`, `?`, `!`, `;`, or `\\n\\n` outside
+       braces.
+    4. Wrap the captured run in `$...$`.
+    """
+    parts = _split_math_regions(text)
+    out: list[str] = []
+    for chunk, in_math in parts:
+        if in_math:
+            out.append(chunk)
+            continue
+        out.append(_wrap_math_runs(chunk))
+    return "".join(out)
+
+
+# Math environments where everything is already in math mode.
+# `\begin{matrix}...\end{matrix}` and friends MUST stay untouched by
+# autowrap or we double-wrap with `$...$` and break TeX. The
+# environment name list matches amsmath conventions.
+_MATH_ENV_NAMES = (
+    "matrix", "pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix",
+    "smallmatrix",
+    "align", "align\\*", "aligned", "alignat", "alignat\\*",
+    "gather", "gather\\*", "gathered",
+    "equation", "equation\\*", "eqnarray", "eqnarray\\*",
+    "multline", "multline\\*", "split", "cases",
+)
+_MATH_ENV_RE = re.compile(
+    r"\\begin\{(" + "|".join(_MATH_ENV_NAMES) + r")\}.*?\\end\{\1\}",
+    re.DOTALL,
+)
+
+
+def _split_math_regions(text: str) -> list[tuple[str, bool]]:
+    """Like ``_split_by_math_spans`` but also recognises
+    ``\\begin{matrix}...\\end{matrix}``-style math environments
+    that auto-wrap must skip."""
+    # First find all spans (math span + math env) and sort by start.
+    spans: list[tuple[int, int]] = []
+    for m in _MATH_SPAN_RE.finditer(text):
+        spans.append((m.start(), m.end()))
+    for m in _MATH_ENV_RE.finditer(text):
+        spans.append((m.start(), m.end()))
+    spans.sort()
+
+    # Merge overlapping/adjacent spans.
+    merged: list[tuple[int, int]] = []
+    for s, e in spans:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
+    out: list[tuple[str, bool]] = []
+    cursor = 0
+    for s, e in merged:
+        if s > cursor:
+            out.append((text[cursor:s], False))
+        out.append((text[s:e], True))
+        cursor = e
+    if cursor < len(text):
+        out.append((text[cursor:], False))
+    return out
+
+
+def _wrap_math_runs(text: str) -> str:
+    """Within a non-math text chunk, find each math-command anchored
+    run and wrap it in ``$...$``."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        anchor = _next_math_anchor(text, i)
+        if anchor is None:
+            out.append(text[i:])
+            break
+        a_start, a_end = anchor
+        out.append(text[i:a_start])
+        run_end = _scan_math_run_end(text, a_start)
+        out.append("$" + text[a_start:run_end] + "$")
+        i = run_end
+    return "".join(out)
+
+
+def _next_math_anchor(text: str, start: int) -> tuple[int, int] | None:
+    """Return ``(start, end)`` of the next math-only command in
+    ``text`` at or after ``start``, or None if none found."""
+    pos = start
+    while pos < len(text):
+        m = _MATH_CMD_START_RE.search(text, pos)
+        if m is None:
+            return None
+        name = m.group(1)
+        if name in _MATH_ONLY_COMMANDS:
+            return (m.start(), m.end())
+        pos = m.end()
+    return None
+
+
+# A math-run-terminator: sentence-final punctuation followed by
+# whitespace (or end-of-string), or a paragraph break. Inside the
+# math expression, periods/commas inside arguments are common, so
+# we only honour these when bracket depth is 0.
+def _scan_math_run_end(text: str, start: int) -> int:
+    """Walk forward from ``start`` consuming valid math tokens; return
+    the exclusive end index where the math run terminates."""
+    depth = 0  # nesting of {}, (), []
+    i = start
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            # Eat the command + optional argument brace.
+            j = i + 1
+            while j < n and text[j].isalpha():
+                j += 1
+            if j == i + 1 and j < n:
+                # Single-char escape like `\(`, `\)`, `\\`, `\!`. Treat
+                # `\(` and `\)` as natural run terminators — they'd
+                # open/close a separate math span.
+                if text[j] in "()":
+                    return i
+                j = i + 2
+            i = j
+            continue
+        if ch in "{([":
+            depth += 1
+            i += 1
+            continue
+        if ch in "})]":
+            if depth == 0:
+                return i  # don't consume an unmatched closer
+            depth -= 1
+            i += 1
+            continue
+        if depth == 0 and ch in ".?!;":
+            # Sentence-final outside any bracket → end the run.
+            return i
+        if depth == 0 and ch == "\n":
+            # A blank line ends the run (paragraph break).
+            if i + 1 < n and text[i + 1] == "\n":
+                return i
+            i += 1
+            continue
+        # Default: consume the character as part of the math run.
+        i += 1
+    return i
+
+
+# C0 (U+0000-U+001F) and C1 (U+0080-U+009F) control characters,
+# plus zero-width and bidi-marker codepoints that authors paste in
+# unintentionally (Word's "smart" non-printing markers, soft hyphens,
+# the BOM, etc.). Latin Modern can't represent them and Tectonic
+# raises "Text line contains an invalid character" → whole abstract
+# fails to render. Preserve newline, tab, and carriage return so we
+# don't destroy line structure.
+_SAFE_CONTROL_CHARS = {"\n", "\t", "\r"}
+
+
+def _strip_control_chars(text: str) -> str:
+    """Remove C0/C1 control codepoints and zero-width markers that
+    Tectonic refuses to typeset.
+
+    Examples observed in the corpus (Stage 12.1 / 12.2 failures):
+    - U+0002 (STX) inside "Nat\\x02ural Science Foundation" (poster 995)
+    - U+000B (vertical tab) breaking a multi-line author affiliation
+      (poster 2024)
+    """
+    out: list[str] = []
+    for ch in text:
+        cp = ord(ch)
+        if ch in _SAFE_CONTROL_CHARS:
+            out.append(ch)
+            continue
+        if cp < 0x20:
+            continue
+        if 0x7F <= cp <= 0x9F:
+            continue
+        # Zero-width + bidi markers
+        if cp in (0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF, 0x00AD):
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+# Escape any bare `&` (not already `\&`, not part of an HTML entity)
+# to `\&`. Pandoc normally escapes `&` in markdown body text, but
+# leaks the literal through when neighbouring `$...$` math spans
+# confuse its inline parser (observed in posters 913 + 1898 where
+# `... $\pm$ ...; H&Y ...` produced an unescaped `H&Y` in the .tex →
+# LaTeX "Misplaced alignment tab" error).
+_BARE_AMP_RE = re.compile(r"(?<!\\)&(?!amp;|lt;|gt;|quot;|apos;|nbsp;|#\d+;|#x[0-9a-fA-F]+;|[a-zA-Z]+;)")
+
+
+def _escape_bare_ampersand(text: str) -> str:
+    return _BARE_AMP_RE.sub(r"\\&", text)
+
+
+# Whitelist of LaTeX commands we intentionally emit OR pandoc emits
+# in normal markdown→latex conversion. Anything else looking like
+# `\Capitalized` or `\R` outside our control is most likely an
+# author-pasted typo with a stray backslash (observed: `\State` for
+# "State", `\R1` for "R1" in grant-IDs). We defang these by stripping
+# the leading backslash so the bare word renders as text.
+_KNOWN_COMMAND_PREFIXES = frozenset({
+    # Pandoc-emitted text commands
+    "textbf", "textit", "textsuperscript", "textsubscript", "emph",
+    "textbackslash", "textless", "textgreater",
+    "textasciitilde", "textasciicircum", "textendash", "textemdash",
+    # Pandoc-emitted structural commands
+    "section", "subsection", "subsubsection", "paragraph", "label",
+    "footnote", "footnotemark", "footnotetext", "cite", "ref", "url", "href",
+    "item", "begin", "end", "includegraphics", "caption", "centering",
+    "newline", "par", "newpage", "clearpage", "hline", "tabular",
+    "figure", "table", "ldots", "cdots", "quad", "qquad",
+    "hspace", "vspace", "strut", "tightlist", "pandocbounded",
+    "providecommand", "def", "labelenumi", "arabic", "setcounter",
+    "printindex", "tableofcontents", "index", "makeindex",
+    # Greek letters (we emit these via _normalise_greek_and_math)
+    "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta",
+    "eta", "theta", "vartheta", "iota", "kappa", "lambda", "mu", "nu",
+    "xi", "pi", "varpi", "rho", "varrho", "sigma", "varsigma", "tau",
+    "upsilon", "phi", "varphi", "chi", "psi", "omega",
+    "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+    "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Pi", "Rho", "Sigma",
+    "Tau", "Upsilon", "Phi", "Chi", "Psi", "Omega",
+    # Math operators we emit
+    "to", "gets", "leftrightarrow", "Rightarrow", "Leftarrow",
+    "Leftrightarrow", "leq", "geq", "neq", "approx", "equiv", "sim",
+    "propto", "infty", "partial", "nabla", "sum", "prod", "int",
+    "in", "notin", "subset", "supset", "cap", "cup", "emptyset",
+    "pm", "mp", "times", "div", "surd", "ast", "cdot", "circ", "prime",
+    "star", "forall", "exists", "frac", "sqrt", "mathbb", "mathbf",
+    "mathit", "mathrm", "mathcal",
+    # Math delimiters + sizing (authors quote these often in equations)
+    "left", "right", "big", "Big", "bigg", "Bigg",
+    "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr",
+    "bigm", "Bigm", "biggm", "Biggm",
+    "langle", "rangle", "lvert", "rvert", "lVert", "rVert",
+    "vert", "Vert",
+    # Math accents
+    "hat", "widehat", "tilde", "widetilde", "bar", "overline",
+    "underline", "dot", "ddot", "vec", "overrightarrow", "overleftarrow",
+    "overbrace", "underbrace",
+    # Math functions
+    "sin", "cos", "tan", "cot", "sec", "csc",
+    "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+    "log", "ln", "exp", "lim", "limsup", "liminf",
+    "sup", "inf", "min", "max", "arg", "det", "dim", "ker",
+    "gcd", "lcm", "mod", "deg",
+    # Spacing
+    "thinspace", "negthinspace", "thinsp", "negthinsp",
+    "medspace", "thickspace",
+    # Relations + sets + delimiters used in math
+    "mid", "parallel", "perp", "models", "vdash", "dashv",
+    "land", "lor", "lnot", "implies", "iff",
+    "varnothing", "complement", "setminus",
+    # Common math identifiers
+    "Re", "Im", "Pr",
+    "deg", "hom", "ker", "im", "coker",
+    "ll", "gg", "lll", "ggg", "doteq", "cong", "ncong",
+    "subseteq", "supseteq", "subsetneq", "supsetneq",
+    "preceq", "succeq", "prec", "succ",
+    # Greek-letter variants (used in equations)
+    "phantom", "vphantom", "hphantom",
+})
+
+# Match `\CamelCase` or `\R` style commands that are NOT followed by
+# `{` (we don't touch `\command{...}` forms — those are more likely
+# real commands and false-positive risk is higher) AND NOT preceded
+# by another `\` (a literal `\\` — common in matrix row breaks —
+# must NOT be re-interpreted as a `\foo` command starting at the
+# second backslash). Only Latin letters; anything else is unaffected.
+_UNKNOWN_CMD_RE = re.compile(r"(?<!\\)\\([A-Za-z]+)(?![A-Za-z\{])")
+
+
+def _defang_unknown_commands(text: str) -> str:
+    """Strip the leading backslash from `\\Command` patterns that
+    aren't in our known whitelist. Targets author-pasted typos like
+    `\\State Key Laboratory` (poster 1791) where the backslash is
+    spurious and LaTeX errors out with "Undefined control sequence".
+
+    Only defangs forms NOT followed by an opening brace — `\\foo{...}`
+    is more likely to be a real LaTeX call (e.g. an author quoting
+    a citation macro) and we err on the side of letting LaTeX itself
+    raise the error, rather than silently transforming the call.
+    """
+
+    def _sub(m: "re.Match[str]") -> str:
+        name = m.group(1)
+        if name in _KNOWN_COMMAND_PREFIXES:
+            return m.group(0)
+        # Strip the backslash; the word stays as text.
+        return name
+
+    return _UNKNOWN_CMD_RE.sub(_sub, text)
 
 
 # Pandoc's `^...^` superscript syntax pairs ONE opening + ONE closing
@@ -239,6 +662,31 @@ def _collapse_caret_runs(text: str) -> str:
     return _DOUBLE_CARET_RE.sub(r"\\^", text)
 
 
+# Stage 12.1 — convert pandoc text-superscript syntax `^X^` to
+# explicit LaTeX `\textsuperscript{X}` so pandoc's math-mode parser
+# never sees stray carets adjacent to `$math$` spans. Without this,
+# patterns like `3$\times$3 mm^3^` get parsed weirdly: pandoc pairs
+# the dollars across the `mm^3^` boundary, creating a math-mode
+# span that contains `^3^` — which LaTeX reads as
+# "superscript-3-superscript" → "Double superscript" error.
+#
+# This was the dominant cause of the 76 broken-LaTeX abstracts in
+# Stage 11.1's `provenance.failed_abstracts[]` (clustered under
+# "Double superscript" error signatures).
+#
+# Match shape: `^<non-space-non-caret content>^`. Mostly affects:
+#   - author-affiliation markers (`Doe^1^`)
+#   - unit notations (`mm^3^`, `cm^2^`)
+#   - inline references (`Smith^2024^`)
+# Already-escaped `\^X^` won't match (the leading `^` is preceded
+# by `\`); we use a negative lookbehind to skip those.
+_CARET_SUPER_RE = re.compile(r"(?<!\\)\^([^\s^]+)\^")
+
+
+def _caret_super_to_latex(text: str) -> str:
+    return _CARET_SUPER_RE.sub(r"\\textsuperscript{\1}", text)
+
+
 def _normalise_greek_and_math(text: str) -> str:
     """Wrap Greek letters and math operators in `$...$` inline-math
     markers so they fall through to LaTeX's math mode (Computer
@@ -254,21 +702,71 @@ def _normalise_greek_and_math(text: str) -> str:
     spans don't collapse because that's harder to undo and the
     rendered PDF treats `$\\alpha$ $+$ $\\beta$` identically to
     `$\\alpha + \\beta$` once you ignore the (invisible) spacing.
+
+    Stage 12.2 — when a Greek/math glyph is ALREADY inside an
+    author-written `$...$` math span, we MUST NOT re-wrap it in
+    another `$...$` pair. Doing so closes the outer span prematurely
+    and reopens it later, producing broken nesting like
+    ``$A = diag(e^{$\\alpha$})$`` → pandoc renders this as
+    ``\\(A = diag(e^{\\)\\alpha\\(})\\)`` which Tectonic rejects with
+    "Missing }" (observed: poster 455). Split the text by `$...$`
+    spans first; inside math regions emit the LaTeX command bare
+    (no `$` wrap); outside math regions wrap as before.
     """
+    parts = _split_by_math_spans(text)
+    out: list[str] = []
+    for chunk, in_math in parts:
+        if in_math:
+            # Already in math mode — emit bare commands, no extra `$`.
+            chunk = _GREEK_RE.sub(
+                lambda m: _GREEK_LATEX[m.group(0)], chunk
+            )
+            chunk = _MATH_OP_RE.sub(
+                lambda m: _MATH_OP_LATEX[m.group(0)], chunk
+            )
+            out.append(chunk)
+        else:
+            chunk = _GREEK_RE.sub(
+                lambda m: f"${_GREEK_LATEX[m.group(0)]}$", chunk
+            )
 
-    def _greek(m: "re.Match[str]") -> str:
-        return f"${_GREEK_LATEX[m.group(0)]}$"
+            def _mathop(m: "re.Match[str]") -> str:
+                repl = _MATH_OP_LATEX[m.group(0)]
+                if repl.startswith("\\"):
+                    return f"${repl}$"
+                return repl
 
-    def _mathop(m: "re.Match[str]") -> str:
-        repl = _MATH_OP_LATEX[m.group(0)]
-        # ASCII fallback (e.g. − → -) doesn't need math mode.
-        if repl.startswith("\\"):
-            return f"${repl}$"
-        return repl
+            chunk = _MATH_OP_RE.sub(_mathop, chunk)
+            out.append(chunk)
+    return "".join(out)
 
-    text = _GREEK_RE.sub(_greek, text)
-    text = _MATH_OP_RE.sub(_mathop, text)
-    return text
+
+# Match author-written inline-math spans (`$...$`). Single-dollar
+# only — display math (`$$...$$`) is handled by recognising the
+# balanced pair as TWO `$...$` regions with an empty inside, which
+# is harmless. The non-greedy body excludes `$` so we don't span
+# across multiple math regions. Backslash-escaped `\$` (literal
+# dollar sign) is NOT treated as a delimiter.
+_MATH_SPAN_RE = re.compile(r"(?<!\\)\$([^$]*?)(?<!\\)\$")
+
+
+def _split_by_math_spans(text: str) -> list[tuple[str, bool]]:
+    """Return ``[(chunk, in_math), ...]`` covering ``text`` end-to-end.
+
+    Inside math spans (``in_math=True``) the chunk includes the
+    opening `$` and closing `$` so reassembly via ``"".join`` round-
+    trips exactly. Outside math, the chunk is plain text.
+    """
+    parts: list[tuple[str, bool]] = []
+    cursor = 0
+    for m in _MATH_SPAN_RE.finditer(text):
+        if m.start() > cursor:
+            parts.append((text[cursor : m.start()], False))
+        parts.append((m.group(0), True))
+        cursor = m.end()
+    if cursor < len(text):
+        parts.append((text[cursor:], False))
+    return parts
 
 
 def html_to_pandoc_md(html: str) -> str:

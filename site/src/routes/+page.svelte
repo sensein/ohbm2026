@@ -31,7 +31,7 @@
 	let manifest: Manifest | null = null;
 	let abstracts: AbstractRecord[] = [];
 	let authorsById: Map<number, AuthorRecord> = new Map();
-	let abstractsByPosterId: Map<string, AbstractRecord> = new Map();
+	let abstractsByPosterId: Map<number, AbstractRecord> = new Map();
 	let abstractsById: Map<number, AbstractRecord> = new Map();
 	let loaded = false;
 	let dataMissing = false;
@@ -234,8 +234,8 @@
 	$: facetCounts = recomputeFacets(abstracts, $activeFilters, preFilterForFacetCounts, facetCtx);
 
 	function cartIdsFromStore(
-		byPid: Map<string, AbstractRecord>,
-		cart: Set<string>
+		byPid: Map<number, AbstractRecord>,
+		cart: Set<number>
 	): Set<number> {
 		const out = new Set<number>();
 		for (const pid of cart) {

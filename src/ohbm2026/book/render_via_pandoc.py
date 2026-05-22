@@ -87,14 +87,86 @@ def _first_line(b: bytes) -> str:
     return b.decode("utf-8", errors="replace").splitlines()[0].strip()
 
 
-def _header_includes_path(style: str) -> pathlib.Path:
+def _prewarm_tectonic_cache(pandoc_path: str, engine_binary: str) -> None:
+    """Pre-warm Tectonic's LaTeX bundle cache to avoid parallel
+    workers racing on the first cache populate.
+
+    Issue: when N joblib workers spawn ~simultaneously, each
+    Tectonic invocation does `\\usepackage{...}` resolution against
+    ``~/Library/Caches/Tectonic``. The first time the build
+    references a package (e.g. ``longtable`` or the ``size10.clo``
+    metric file), several workers race to populate the same cache
+    entry. Some get partial reads → "Metric (TFM) file not loadable"
+    errors → the chunks fail. With ``--workers 48`` this caused
+    ~17/3,164 spurious failures in the Stage 12.1 smoke.
+
+    Fix: pre-warm the cache by running a SINGLE Tectonic compile
+    that exercises the same preamble as the per-abstract chunks.
+    After this returns, the cache holds every package the workers
+    will request → no race, no spurious failures.
+
+    Cost: ~5 s on a cold Tectonic cache; ~0.5 s on a warm one.
+    """
+
+    # Lazy import to avoid the circular dep render_via_pandoc <→
+    # render_per_abstract (both reference each other for the
+    # production pipeline).
+    from ohbm2026.book.render_per_abstract import per_abstract_header_path
+
+    # Minimal markdown that exercises the per-abstract preamble:
+    # geometry + longtable + textsuperscript + math.
+    sample = (
+        "Pre-warm sample. "
+        r"$\times$ a\textsuperscript{1}. "
+        r"\begin{longtable}{r r} a & b \\ \end{longtable}"
+    )
+    per_chunk_header = per_abstract_header_path().resolve()
+    try:
+        subprocess.run(
+            [
+                pandoc_path,
+                "--from=markdown+raw_tex+pandoc_title_block-strikeout",
+                "--to=pdf",
+                f"--pdf-engine={engine_binary}",
+                "-H",
+                str(per_chunk_header),
+                "--standalone",
+                "-o",
+                "/dev/null",
+            ],
+            input=sample,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        # If the pre-warm fails, the joblib workers may hit the
+        # original race, but the build still proceeds — we don't
+        # want a one-time warmup to break the pipeline. Failures
+        # are loud at the per-abstract level anyway.
+        pass
+
+
+def _header_includes_path(style: str, *, margins: str = "tight") -> pathlib.Path:
     """Return the absolute path to the right LaTeX header-includes
-    file (plain vs tufte-book). Files live alongside the book
-    package so the operator never has to manage them.
+    file. Files live alongside the book package so the operator never
+    has to manage them.
+
+    Stage 12 US5 — `margins`:
+    - ``"tight"`` (default): ``header-includes.tex`` carries
+      ``\\usepackage[margin=0.65in]{geometry}`` for ≥ 15% page-count
+      reduction.
+    - ``"loose"``: ``header-includes-loose.tex`` omits the geometry
+      import; the LaTeX `book` class default (~1 in) applies.
+
+    The Tufte style is independent of the margins flag — Tufte's
+    sidenote layout has its own geometry contract.
     """
     pkg = resources.files("ohbm2026.book.templates")
     if style == "tufte":
         return pathlib.Path(str(pkg.joinpath("header-includes-tufte.tex")))
+    if margins == "loose":
+        return pathlib.Path(str(pkg.joinpath("header-includes-loose.tex")))
     return pathlib.Path(str(pkg.joinpath("header-includes.tex")))
 
 
@@ -108,6 +180,7 @@ def to_pdf(
     workers: int = -1,
     no_cache: bool = False,
     cache_dir: pathlib.Path | None = None,
+    margins: str = "tight",
 ):
     """Stage 11.1 — orchestrate the per-abstract PDF pipeline.
 
@@ -164,7 +237,19 @@ def to_pdf(
 
     pandoc_version = _first_line(subprocess.check_output([pandoc, "--version"]))
 
-    header_includes = _header_includes_path(style)
+    # Stage 12.1 — pre-warm Tectonic's local LaTeX bundle cache by
+    # running a single throwaway compile BEFORE the joblib pool fans
+    # out. Tectonic resolves `\usepackage{...}` against ~/Library/
+    # Caches/Tectonic on every invocation; the FIRST time a high-
+    # parallelism build needs `size10.clo` (or any uncached metric
+    # file), N workers race to read+populate the cache simultaneously
+    # → some get partial reads → "Metric (TFM) file not loadable"
+    # errors. Pre-warming serialises that first fetch so subsequent
+    # workers see a fully-populated cache. Cost: ~5 s on a cold
+    # cache; ~0.5 s on a warm one.
+    _prewarm_tectonic_cache(pandoc, engine_binary)
+
+    header_includes = _header_includes_path(style, margins=margins)
     if not header_includes.exists():
         raise BookBuildError(
             f"header-includes file missing at {header_includes} "
@@ -238,11 +323,32 @@ def to_pdf(
         )
 
     # ---- Front matter chunk ------------------------------------------
-    # Build a minimal front-matter markdown carrying title + TOC.
-    # Rendered once per build; cached under the same cache_dir.
-    front_md = _build_front_matter_md(book)
-    front = _render_front_matter(
-        front_md,
+    # Stage 12 US3: the front matter now includes a 3-column TOC
+    # (Poster | Title | Page). The Page column needs offsets that
+    # depend on the front matter's own page count, which depends on
+    # the TOC's row count — a chicken-and-egg. Solution: render twice.
+    #   v1: TOC with placeholder page values (a fixed "1") — same row
+    #       count + same layout as the real TOC, so its page count
+    #       matches v2.
+    #   v2: re-render with real offsets given v1's page count.
+    # If v2's page count drifts from v1 (rare, only when title widths
+    # vary enough to change line wrap), warn + use v2 anyway; the
+    # offsets stay correct because `assemble` re-measures via pikepdf.
+    from ohbm2026.book.assemble_pdf import _build_toc_markdown
+
+    sorted_entries = tuple(c for c in surviving)  # already in --sort order
+    # Map of poster_id → BookEntry for the TOC's title column.
+    surviving_pid_set = {c.poster_id for c in surviving}
+    book_entries_for_toc = tuple(
+        e for e in book.entries if e.poster_id in surviving_pid_set
+    )
+
+    # Pass 1: front matter with placeholder page values.
+    placeholder_offsets = {pid: 1 for pid in surviving_pid_set}
+    placeholder_toc_md = _build_toc_markdown(book_entries_for_toc, placeholder_offsets)
+    front_md_v1 = _build_front_matter_md(book, toc_block=placeholder_toc_md)
+    front_v1 = _render_front_matter(
+        front_md_v1,
         pandoc_path=pandoc,
         engine_binary=engine_binary,
         engine_version=engine_version,
@@ -252,6 +358,46 @@ def to_pdf(
         cache_dir=cache_dir,
         no_cache=no_cache,
     )
+
+    # Step 2: compute real chunk_offsets given v1's page count.
+    # Each abstract chunk starts after the front matter + the sum of
+    # prior abstract-chunk page counts.
+    real_offsets: dict[int, int] = {}
+    next_page = front_v1.page_count + 1
+    for chunk in surviving:
+        real_offsets[chunk.poster_id] = next_page
+        next_page += chunk.page_count
+
+    # Pass 2: re-render front matter with real page values.
+    real_toc_md = _build_toc_markdown(book_entries_for_toc, real_offsets)
+    front_md_v2 = _build_front_matter_md(book, toc_block=real_toc_md)
+    front = _render_front_matter(
+        front_md_v2,
+        pandoc_path=pandoc,
+        engine_binary=engine_binary,
+        engine_version=engine_version,
+        pandoc_version=pandoc_version,
+        header_includes_path=header_includes_abs,
+        style=style,
+        cache_dir=cache_dir,
+        no_cache=no_cache,
+    )
+
+    if front.page_count != front_v1.page_count:
+        # Drift: title-column width variance pushed v2's row count
+        # past a page boundary that v1 didn't hit. The TOC's printed
+        # page numbers are off by `front.page_count - front_v1.page_count`.
+        # Emit a stderr warning; the build still produces a usable
+        # book, just with a TOC whose page numbers are slightly off.
+        import sys as _sys
+
+        delta = front.page_count - front_v1.page_count
+        print(
+            f"warning: TOC page-count drift detected "
+            f"(v1={front_v1.page_count} → v2={front.page_count}, delta={delta}); "
+            f"TOC page numbers may be off by {delta}. Stage 12.1 will iterate to convergence.",
+            file=_sys.stderr,
+        )
 
     # ---- Assemble ----------------------------------------------------
     draft_dir = output_dir / ".assembly"
@@ -276,11 +422,16 @@ def to_pdf(
     return assembled
 
 
-def _build_front_matter_md(book) -> str:  # type: ignore[no-untyped-def]
-    """Title page + abstract count + TOC marker.
+def _build_front_matter_md(book, *, toc_block: str | None = None) -> str:  # type: ignore[no-untyped-def]
+    """Title page + abstract count + (Stage 12) 3-column TOC.
 
-    The TOC anchors auto-populate via pandoc's `--toc` flag, which the
-    front-matter render uses.
+    The Stage 11.1 default was a pandoc-auto-generated TOC via the
+    `\\tableofcontents` macro. Stage 12 US3 replaces it with a raw-
+    LaTeX `longtable` (Poster | Title | Page), passed in via the
+    optional `toc_block` parameter. When `toc_block` is None the
+    function falls back to the prior `\\tableofcontents` behaviour
+    (no operator-facing flag for this; the caller always passes the
+    real TOC after Stage 12).
     """
 
     lines: list[str] = []
@@ -299,7 +450,10 @@ def _build_front_matter_md(book) -> str:  # type: ignore[no-untyped-def]
         f"_Corpus state-key: `{book.corpus_state_key}`_"
     )
     lines.append("")
-    lines.append("\\tableofcontents")
+    if toc_block is not None:
+        lines.append(toc_block)
+    else:
+        lines.append("\\tableofcontents")
     lines.append("")
     return "\n".join(lines)
 

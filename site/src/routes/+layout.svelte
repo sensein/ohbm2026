@@ -1,5 +1,9 @@
 <script lang="ts">
 	import '../app.css';
+	// KaTeX stylesheet — required for math spans rendered via
+	// `renderMath()` in DetailPanel. Without it math renders as
+	// unstyled HTML and column alignment breaks.
+	import 'katex/dist/katex.min.css';
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { goto } from '$app/navigation';

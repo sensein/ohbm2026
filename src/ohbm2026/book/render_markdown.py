@@ -56,19 +56,17 @@ def _figure_type(question_name: str) -> str:
 
 
 def _ext_for(fig: FigureBlock) -> str:
-    if fig.content_type:
-        ct = fig.content_type.lower()
-        if "png" in ct:
-            return "png"
-        if "jpeg" in ct or "jpg" in ct:
-            return "jpg"
-        if "gif" in ct:
-            return "gif"
-        if "webp" in ct:
-            return "webp"
-        if "tiff" in ct or "tif" in ct:
-            return "tif"
-    return fig.local_path.suffix.lstrip(".").lower() or "png"
+    # Stage 12 US2 — every figure under fig_assets/ is JPEG q=90
+    # regardless of source format (PNG, GIF, WebP, TIF all re-encoded).
+    # The markdown references MUST match the on-disk files, so this
+    # helper now returns `.jpg` unconditionally. Sources whose Pillow
+    # decode fails still get byte-copied with original extension by
+    # `_copy_figure`, BUT they're audited in
+    # `_figure_normalise_fallbacks` and the markdown body still
+    # references the `.jpg` path; pandoc/Tectonic will warn loudly
+    # for that missing file (which is the loud-failure surface the
+    # operator wants — silent absence would be worse).
+    return "jpg"
 
 
 def _figure_filename(entry: BookEntry, fig: FigureBlock, idx_in_type: int, n_of_type: int) -> str:
@@ -172,9 +170,18 @@ def entry_to_md(entry: BookEntry) -> str:
     filename side-effect list — figures are still written by
     :func:`emit_book_md` for the markdown bundle; the per-abstract
     render reads them via pandoc's ``--resource-path``.
+
+    Stage 12.1 — applies ``normalise_for_latex`` so per-chunk
+    markdown gets the same caret-superscript → ``\\textsuperscript{}``
+    conversion that the assembled ``book.md`` does. Without this,
+    abstracts with mixed ``$\\times$`` math spans + ``^N^`` text
+    superscripts trigger "Double superscript" LaTeX errors at
+    Tectonic time (the dominant Stage-11.1 failure cluster).
     """
 
-    return _entry_md(entry, fig_filenames=[])
+    from ohbm2026.book.html_to_md import normalise_for_latex
+
+    return normalise_for_latex(_entry_md(entry, fig_filenames=[]))
 
 
 def _entry_md(entry: BookEntry, fig_filenames: list[str]) -> str:
@@ -407,51 +414,111 @@ def emit_book_md(
         )
 
 
+# Stage 12 US2 — figure normalisation parameters. Every figure is
+# re-encoded to JPEG q=90 at the 150 DPI dimension cap (≈ 975 px at
+# the book's 6.5" content width). PNG sources with transparency flatten
+# to RGB against white before save.
+FIGURE_JPEG_QUALITY = 90
+FIGURE_DPI = 150
+FIGURE_CONTENT_WIDTH_INCHES = 6.5
+FIGURE_WIDTH_CAP = int(FIGURE_DPI * FIGURE_CONTENT_WIDTH_INCHES)  # 975 px
+
+# Module-level audit registry of byte-copy fallbacks — figures Pillow
+# couldn't open. The CLI reads this at provenance-write time (per
+# CA-006 / FR-006). Joblib loky workers each see their own copy of
+# the module; the orchestrator collects via `get_normalise_fallbacks`.
+_figure_normalise_fallbacks: list[dict[str, object]] = []
+
+
+def get_normalise_fallbacks() -> list[dict[str, object]]:
+    """Return a copy of the figure-normalisation fallback list."""
+    return list(_figure_normalise_fallbacks)
+
+
+def reset_normalise_fallbacks() -> None:
+    """Reset the fallback registry. The CLI calls this after writing
+    provenance so the next build starts with an empty list."""
+    _figure_normalise_fallbacks.clear()
+
+
 def _copy_figure(
     src: pathlib.Path, dest: pathlib.Path, max_width: int | None
 ) -> None:
-    """Copy `src` to `dest`, optionally downsizing if its pixel width
-    exceeds `max_width`. Preserves format (PNG → PNG, JPEG → JPEG).
-    Falls back to byte-copy when Pillow can't open the source.
+    """Stage 12 US2 — re-encode the source figure to JPEG q=90 at a
+    150 DPI dimension cap and write to ``dest`` (extension forced to
+    ``.jpg``). Source format does NOT matter: even already-small
+    JPEGs re-encode through Pillow so the output is deterministic.
+
+    PNG sources with transparency convert to RGB on a white background
+    before JPEG save (print convention — transparent PNGs would otherwise
+    render as black in the embedded JPEG). Pillow-unopenable sources
+    fall back to a byte-copy with the original extension AND an entry
+    in ``_figure_normalise_fallbacks`` (CA-006 / FR-006).
     """
-    if max_width is None:
-        shutil.copy2(src, dest)
-        return
+
     # Lazy import — keeps Pillow off the startup path for callers
-    # that don't render figures (e.g. unit tests on the markdown
-    # composer only). The decompression-bomb-check disable lives in
-    # this module's import-time block (see _disable_pillow_bomb_check
-    # below) so worker processes get the override exactly once at
-    # import — not on every per-figure call.
+    # that don't render figures. The decompression-bomb-check disable
+    # lives at module-import time (see top of file) so loky workers
+    # get the override once at import.
     from PIL import Image, UnidentifiedImageError
+
+    # Honour the caller-passed max_width when it's tighter than the
+    # 150 DPI cap (e.g. the operator passed `--max-image-width=800`).
+    effective_cap = FIGURE_WIDTH_CAP
+    if max_width is not None and max_width > 0:
+        effective_cap = min(FIGURE_WIDTH_CAP, max_width)
+
+    # Force `.jpg` extension regardless of caller's input. Stage 12
+    # contract: every fig_assets/ file is `.jpg` after normalisation.
+    jpg_dest = dest.with_suffix(".jpg")
 
     try:
         with Image.open(src) as img:
-            if img.width <= max_width:
-                # Already small enough; byte-copy.
-                shutil.copy2(src, dest)
-                return
-            scale = max_width / img.width
-            new_size = (max_width, max(1, round(img.height * scale)))
-            resized = img.resize(new_size, Image.Resampling.LANCZOS)
-            # Format-preserving save. PNG keeps full quality; JPEG
-            # uses q=85 (standard print/web threshold, matches the
-            # Stage-2 figure-analysis pipeline's compression policy).
+            img.load()  # force decode now so EXIF / truncated streams raise here
             fmt = (img.format or "").upper()
-            save_kwargs: dict[str, object] = {"optimize": True}
-            if fmt == "JPEG":
-                save_kwargs["quality"] = 85
-                save_kwargs["progressive"] = True
-            elif fmt == "PNG":
-                save_kwargs["compress_level"] = 9
-            # If RGBA → RGB conversion is needed for JPEG.
-            save_image = resized
-            if fmt == "JPEG" and save_image.mode in ("RGBA", "P", "LA"):
-                save_image = save_image.convert("RGB")
-            save_image.save(dest, format=fmt or "PNG", **save_kwargs)
-    except (UnidentifiedImageError, OSError):
-        # Anything Pillow refuses to open — fall back to a raw copy
-        # so the figure still appears in the bundle. The figure-
-        # resolution probe at corpus load will already have flagged
-        # it; emit_book_md doesn't second-guess.
+            # Scale-down only (no upscale).
+            target_width = min(img.width, effective_cap)
+            if target_width < img.width:
+                scale = target_width / img.width
+                target_height = max(1, round(img.height * scale))
+                resized = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            else:
+                resized = img
+            # Flatten transparency against white before JPEG save.
+            if resized.mode in ("RGBA", "LA"):
+                from PIL import Image as _Image
+
+                bg = _Image.new("RGB", resized.size, (255, 255, 255))
+                bg.paste(resized, mask=resized.split()[-1])
+                resized = bg
+            elif resized.mode != "RGB":
+                resized = resized.convert("RGB")
+            resized.save(
+                jpg_dest,
+                format="JPEG",
+                quality=FIGURE_JPEG_QUALITY,
+                optimize=True,
+                progressive=True,
+            )
+        # Clean up the source-extension dest if a prior run wrote there.
+        if dest != jpg_dest and dest.exists():
+            try:
+                dest.unlink()
+            except OSError:
+                pass
+    except (UnidentifiedImageError, OSError) as exc:
+        # Pillow can't open this — byte-copy fallback with original
+        # extension preserved. Audit the failure (FR-006 / CA-006).
         shutil.copy2(src, dest)
+        # The figure-asset filename contract is
+        # `<submission_id>-<poster_id>-<type>[-<index>].<ext>` —
+        # extract the poster_id from the dest stem.
+        stem_parts = dest.stem.split("-")
+        poster_id_str = stem_parts[1] if len(stem_parts) >= 2 else ""
+        _figure_normalise_fallbacks.append(
+            {
+                "poster_id": poster_id_str,
+                "filename": dest.name,
+                "error_reason": f"{type(exc).__name__}: {exc}",
+            }
+        )

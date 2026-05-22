@@ -174,7 +174,8 @@
 						// renders for the next step.
 						const card = document.querySelector<HTMLElement>('[data-testid="result-card"]');
 						const posterId = card?.getAttribute('data-poster-id');
-						if (posterId) focusedAbstract.set(posterId);
+						const parsed = posterId ? Number(posterId) : NaN;
+						if (Number.isFinite(parsed)) focusedAbstract.set(parsed);
 					}
 				},
 				{
@@ -284,7 +285,11 @@
 		}
 
 		steps.forEach((s, i) =>
-			tour.addStep({ ...s, buttons: buttons(i === 0, i === steps.length - 1) })
+			// `beforeShowPromise` accepts `() => void | Promise<void>` here but
+			// Shepherd's type signature expects `() => Promise<unknown>`;
+			// the value-level runtime accepts both. Cast through `as any`
+			// rather than rewriting every step to return Promises.
+			tour.addStep({ ...s, buttons: buttons(i === 0, i === steps.length - 1) } as any)
 		);
 
 		tour.on('cancel', () => tourStore.skip());

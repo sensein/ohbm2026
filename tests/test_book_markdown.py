@@ -70,14 +70,16 @@ class TestMarkdownBundle(unittest.TestCase):
     # (d) index-suffix contract
     def test_index_suffix_only_for_repeats(self) -> None:
         files = sorted(p.name for p in (self.outdir / "fig_assets").iterdir())
+        # Stage 12 US2: every fig_assets file is `.jpg` regardless of
+        # source-side extension (PNG / GIF / WebP → JPEG q=90).
         # Abstract 0001: one methods, one results (no -1/-2 suffix).
-        self.assertIn("9000001-0001-methods.png", files)
-        self.assertIn("9000001-0001-results.png", files)
-        self.assertNotIn("9000001-0001-methods-1.png", files)
+        self.assertIn("9000001-0001-methods.jpg", files)
+        self.assertIn("9000001-0001-results.jpg", files)
+        self.assertNotIn("9000001-0001-methods-1.jpg", files)
         # Abstract 0004: TWO results → suffix present.
-        self.assertIn("9000004-0004-results-1.png", files)
-        self.assertIn("9000004-0004-results-2.png", files)
-        self.assertNotIn("9000004-0004-results.png", files)
+        self.assertIn("9000004-0004-results-1.jpg", files)
+        self.assertIn("9000004-0004-results-2.jpg", files)
+        self.assertNotIn("9000004-0004-results.jpg", files)
 
     # (e) determinism
     def test_re_emit_byte_identical(self) -> None:
@@ -150,37 +152,48 @@ class TestFigureResize(unittest.TestCase):
             book, entries=entries, author_index=self.build_author_index(entries)
         )
 
-    def test_resize_when_max_width_below_source(self) -> None:
+    def test_resize_when_max_width_below_cap(self) -> None:
+        # Stage 12 US2: every figure caps at FIGURE_WIDTH_CAP (975 px,
+        # = 150 DPI × 6.5" content width). Passing
+        # `max_image_width=1000` does NOT request 1000 px — it just
+        # confirms the operator is OK with up to 1000 px; the
+        # effective cap is min(975, 1000) = 975.
         from PIL import Image as _Image
+        from ohbm2026.book.render_markdown import FIGURE_WIDTH_CAP
 
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp)
             self.emit_book_md(self._build_book(), out, max_image_width=1000)
             sample = next((out / "fig_assets").iterdir())
             with _Image.open(sample) as img:
-                self.assertEqual(img.width, 1000)
-                self.assertEqual(img.height, 1000)  # 2400×2400 square
+                self.assertEqual(img.width, FIGURE_WIDTH_CAP)
+                # Source is 2400×2400 square → height ≈ width after cap.
+                self.assertEqual(img.height, FIGURE_WIDTH_CAP)
 
-    def test_byte_copy_when_max_width_none(self) -> None:
+    def test_max_width_none_uses_default_cap(self) -> None:
+        # Stage 12: max_image_width=None → use the default 975 px cap.
         from PIL import Image as _Image
+        from ohbm2026.book.render_markdown import FIGURE_WIDTH_CAP
 
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp)
             self.emit_book_md(self._build_book(), out, max_image_width=None)
             sample = next((out / "fig_assets").iterdir())
             with _Image.open(sample) as img:
-                self.assertEqual(img.width, 2400)
+                self.assertEqual(img.width, FIGURE_WIDTH_CAP)
 
-    def test_no_resize_when_source_smaller_than_max(self) -> None:
+    def test_max_width_above_cap_still_capped(self) -> None:
+        # Stage 12: max_image_width=5000 still caps at 975 px (the
+        # operator-supplied value can only tighten the cap, never loosen).
         from PIL import Image as _Image
+        from ohbm2026.book.render_markdown import FIGURE_WIDTH_CAP
 
         with tempfile.TemporaryDirectory() as tmp:
             out = pathlib.Path(tmp)
-            # 5000 > 2400 → source already small enough; expect byte-copy.
             self.emit_book_md(self._build_book(), out, max_image_width=5000)
             sample = next((out / "fig_assets").iterdir())
             with _Image.open(sample) as img:
-                self.assertEqual(img.width, 2400)
+                self.assertEqual(img.width, FIGURE_WIDTH_CAP)
 
 
 if __name__ == "__main__":  # pragma: no cover

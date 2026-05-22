@@ -12,7 +12,7 @@
 	let clipboardStatus: 'idle' | 'copied' | 'error' = 'idle';
 
 	$: byPosterId = (() => {
-		const m = new Map<string, AbstractRecord>();
+		const m = new Map<number, AbstractRecord>();
 		for (const a of abstracts) if (a.poster_id) m.set(a.poster_id, a);
 		return m;
 	})();
@@ -57,7 +57,7 @@
 			setTimeout(() => (clipboardStatus = 'idle'), 2000);
 		}
 	}
-	function openDetail(posterId: string) {
+	function openDetail(posterId: number) {
 		$focusedAbstract = posterId;
 		open = false;
 	}

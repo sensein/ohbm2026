@@ -62,7 +62,13 @@
 			</p>
 		</section>
 	{:else if abstractRecord}
-		<DetailPanel abstract={abstractRecord} {authorsById} {abstractsById} dismissable={false} />
+		<DetailPanel
+			abstract={abstractRecord}
+			{authorsById}
+			{abstractsById}
+			dismissable={false}
+			mode="permalink"
+		/>
 	{/if}
 </div>
 

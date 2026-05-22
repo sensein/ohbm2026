@@ -183,30 +183,173 @@ def _build_index_markdown(
         lines.append("")
         return "\n".join(lines)
 
+    # Stage 12 US4: group entries by Unicode-folded last-name initial
+    # so the back-of-book index opens with ## A / ## B / ... headers
+    # — a 10,000-author flat list is unscannable; letter buckets give
+    # the reader a visual jump-target.
+    buckets: dict[str, list] = {}
     for entry in author_index:
-        pages: list[int] = []
-        for pid in entry.poster_ids:
-            page = poster_to_start.get(pid)
-            if page is None:
-                # Abstract dropped (failure isolation). Skip the page
-                # reference but keep the author present.
-                continue
-            pages.append(page)
-        if not pages:
-            # Every abstract for this author was filtered out.
+        # `entry.sort_key` is `(last_name.casefold(), first_name.casefold())`
+        # per `author_index.py`. The first element is the last name.
+        last_name = entry.sort_key[0] if entry.sort_key else ""
+        letter = _bucket_letter(last_name)
+        buckets.setdefault(letter, []).append(entry)
+
+    # Iterate buckets in the canonical A-Z + Other order. Empty
+    # buckets are skipped (no ## D header if no D-surnames exist).
+    for letter in _BUCKET_ORDER:
+        bucket_entries = buckets.get(letter, ())
+        if not bucket_entries:
             continue
-        # `**Doe, J.**` followed by space + comma-separated page numbers.
-        # Sort + dedupe so the printed back-of-book reads "12, 47, 50"
-        # not "50, 12, 47" — the input ``entry.poster_ids`` is sorted
-        # by poster_id (sort.py contract), but the poster_id→page
-        # mapping is non-monotonic when --sort is `title` or
-        # `first_author`. Explicit sort here keeps the printed index
-        # readable regardless of which --sort flag the operator
-        # passed.
-        sorted_pages = ", ".join(str(p) for p in sorted(set(pages)))
-        lines.append(f"**{entry.display_name}** {sorted_pages}")
-        lines.append("")
+        # Emit the bucket header. Empty bucket-headers are NOT emitted,
+        # but a bucket whose entries are all filtered-out by failure
+        # isolation will surface a header followed by no entries —
+        # collect entries first, then emit the header only if there's
+        # at least one valid page-bearing entry.
+        bucket_block: list[str] = []
+        for entry in bucket_entries:
+            pages: list[int] = []
+            for pid in entry.poster_ids:
+                page = poster_to_start.get(pid)
+                if page is None:
+                    # Abstract dropped (failure isolation). Skip the
+                    # page reference but keep the author present.
+                    continue
+                pages.append(page)
+            if not pages:
+                # Every abstract for this author was filtered out.
+                continue
+            # `**Doe, J.**` followed by space + comma-separated page
+            # numbers. Sort + dedupe so the printed back-of-book reads
+            # "12, 47, 50" not "50, 12, 47" — the input
+            # ``entry.poster_ids`` is sorted by poster_id (sort.py
+            # contract), but the poster_id→page mapping is non-
+            # monotonic when --sort is `title` or `first_author`.
+            sorted_pages = ", ".join(str(p) for p in sorted(set(pages)))
+            bucket_block.append(f"**{entry.display_name}** {sorted_pages}")
+            bucket_block.append("")
+        if bucket_block:
+            lines.append(f"## {letter}")
+            lines.append("")
+            lines.extend(bucket_block)
     return "\n".join(lines)
+
+
+# Stage 12 US4 — bucket letters in canonical order (A-Z plus the
+# Other bucket at the end for non-Latin / numeric / symbol initials).
+_BUCKET_ORDER: tuple[str, ...] = tuple(chr(c) for c in range(ord("A"), ord("Z") + 1)) + ("Other",)
+
+
+# Stage 12 US3 — LaTeX-special character escape map for the new TOC's
+# title column. Without these escapes, abstracts whose titles contain
+# `&` (e.g. "R&R") or `%` would break the longtable row parser.
+_LATEX_SPECIALS = {
+    "\\": "\\textbackslash{}",
+    "{": "\\{",
+    "}": "\\}",
+    "$": "\\$",
+    "&": "\\&",
+    "%": "\\%",
+    "#": "\\#",
+    "_": "\\_",
+    "^": "\\textasciicircum{}",
+    "~": "\\textasciitilde{}",
+}
+
+
+def _latex_escape(text: str) -> str:
+    """Escape LaTeX-special characters for a title cell.
+
+    Per the TOC longtable rendering: titles may contain `&`, `%`, `_`,
+    `#`, `$`, `{`, `}`, `\\` — all of which carry LaTeX semantics and
+    would break the row parser. This helper substitutes each with the
+    standard escape sequence.
+    """
+
+    out: list[str] = []
+    for ch in text:
+        out.append(_LATEX_SPECIALS.get(ch, ch))
+    return "".join(out)
+
+
+def _build_toc_markdown(
+    book_entries,  # tuple[BookEntry, ...]
+    chunk_offsets: dict,  # {poster_id: first_page_1based}
+) -> str:
+    """Stage 12 US3 — emit a 3-column `longtable` TOC.
+
+    Columns: `Poster | Title | Page`. Sorted in the input order (the
+    caller already sorted `book_entries` per the `--sort` flag);
+    rows for abstracts absent from ``chunk_offsets`` (failure-
+    isolated) are omitted.
+
+    The output is markdown wrapping a raw-LaTeX block; pandoc's
+    `markdown+raw_tex` extension passes it through unchanged.
+    """
+
+    lines: list[str] = []
+    lines.append("# Table of Contents {.unnumbered}")
+    lines.append("")
+    lines.append("```{=latex}")
+    # Stage 12.2 — tighten margins to 0.4in on TOC pages only so the
+    # 3-column table uses more horizontal space (fewer line-wraps in
+    # the title column → fewer TOC pages). \newgeometry takes effect
+    # at the next \clearpage; \restoregeometry returns to the
+    # document's base (book) margin after the longtable. Both
+    # commands ship with the `geometry` package which is already
+    # loaded by the tight preset.
+    lines.append("\\newgeometry{margin=0.4in}")
+    # 13cm title column matches the new 0.4in-margin content width
+    # at US letter (7.7" content ≈ 19.5cm; poster col 1.2cm + page
+    # col 1.2cm + gaps 4cm → ~13cm fits the title).
+    lines.append("\\begin{longtable}{r p{13cm} r}")
+    lines.append("\\textbf{Poster} & \\textbf{Title} & \\textbf{Page} \\\\")
+    lines.append("\\hline")
+    lines.append("\\endhead")
+    for entry in book_entries:
+        pid = int(entry.poster_id)
+        page = chunk_offsets.get(pid)
+        if page is None:
+            # Failure-isolated; omit from TOC.
+            continue
+        title_escaped = _latex_escape(str(entry.title or ""))
+        lines.append(f"{pid:04d} & {title_escaped} & {page} \\\\")
+    lines.append("\\end{longtable}")
+    lines.append("\\restoregeometry")
+    lines.append("```")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _bucket_letter(last_name: str) -> str:
+    """Return the bucket-header letter for `last_name`.
+
+    Unicode-fold (NFKD) the FIRST non-whitespace character of the
+    last name, then take its first ASCII-A-Z component. Names whose
+    leading character is not an alpha after folding (digits, symbols,
+    purely non-Latin scripts that don't decompose to ASCII) bucket
+    under ``"Other"``. Per `research.md § R6`.
+
+    Examples:
+    - "Adams"     → "A"
+    - "Östen"     → "O" (umlaut decomposes; first ASCII is O)
+    - "Århus"     → "A"
+    - "Ñoñez"     → "N"
+    - "1st"       → "Other" (first char is a digit; later 's' irrelevant)
+    - "@reply"    → "Other"
+    - ""          → "Other"
+    """
+    import unicodedata
+
+    stripped = (last_name or "").lstrip()
+    if not stripped:
+        return "Other"
+    first = stripped[0]
+    folded = unicodedata.normalize("NFKD", first)
+    for ch in folded:
+        if ch.isascii() and ch.isalpha():
+            return ch.upper()
+    return "Other"
 
 
 def _render_index_appendix(

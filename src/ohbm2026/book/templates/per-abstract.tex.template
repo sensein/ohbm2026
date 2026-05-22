@@ -9,6 +9,11 @@
 % pass 2 from the measured chunk_offsets (see assemble_pdf.py), so
 % indexing here would just bloat .idx files that nobody reads.
 
+% Stage 12 US5 — same tight margins as the assembled book so per-
+% chunk page dimensions match. pikepdf concat across mixed-size
+% chunks works but the visual flow would be off.
+\usepackage[margin=0.65in]{geometry}
+
 \usepackage{graphicx}
 \usepackage{microtype}
 \usepackage{hyperref}
@@ -17,3 +22,10 @@
   linkcolor=black,
   urlcolor=blue,
 }
+
+% Stage 12.2 — author-pasted `\index{Name}` calls (from the author-
+% index emission in render_markdown.py) must compile in isolation
+% even though we don't ship a per-chunk .idx file. `\providecommand`
+% defines `\index` only if it isn't already; with `makeidx` absent
+% this turns the call into a harmless no-op.
+\providecommand{\index}[1]{}

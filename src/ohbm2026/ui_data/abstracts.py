@@ -33,6 +33,24 @@ SCHEMA_VERSION = "abstracts.v1"
 
 _BLOCK_TAGS = re.compile(r"</?(?:p|div|li|ul|ol|h[1-6]|br|tr|table|tbody|thead|section|article)[^>]*>", re.IGNORECASE)
 _TAG = re.compile(r"<[^>]+>")
+_SUP_TAG = re.compile(r"<sup[^>]*>([^<]*)</sup>", re.IGNORECASE)
+_SUB_TAG = re.compile(r"<sub[^>]*>([^<]*)</sub>", re.IGNORECASE)
+
+# Unicode super/sub digit + common-sign maps. Anything not in the
+# map falls back to the source character (untranslated) so we never
+# lose content; the UI renders these characters as-is — they're
+# standard codepoints in every modern web font, no font lookup.
+_SUPER_MAP = str.maketrans({
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+    "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+    "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+    "n": "ⁿ", "i": "ⁱ",
+})
+_SUB_MAP = str.maketrans({
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+    "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+    "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+})
 _WHITESPACE = re.compile(r"[ \t ]+")
 _BLANK_LINES = re.compile(r"\n{3,}")
 
@@ -49,6 +67,14 @@ def _html_to_text(blob: str | None) -> str:
     if not blob:
         return ""
     text = str(blob)
+    # Stage 12.2 — convert `<sup>` / `<sub>` to Unicode super/subscript
+    # glyphs BEFORE stripping all tags so callouts like
+    # ``ref<sup>1,2</sup>`` survive as ``ref¹,²`` instead of being
+    # flattened to the ambiguous ``ref1,2`` that reads as a numeric
+    # value. Math-mode delimiters (``$...$``, ``\(...\)``) pass
+    # through unchanged for client-side KaTeX rendering.
+    text = _SUP_TAG.sub(lambda m: m.group(1).translate(_SUPER_MAP), text)
+    text = _SUB_TAG.sub(lambda m: m.group(1).translate(_SUB_MAP), text)
     # Insert paragraph boundaries before stripping block tags.
     text = _BLOCK_TAGS.sub("\n\n", text)
     # Strip remaining tags.
@@ -58,7 +84,42 @@ def _html_to_text(blob: str | None) -> str:
     # Normalize whitespace + collapse runs of blank lines.
     text = _WHITESPACE.sub(" ", text)
     text = _BLANK_LINES.sub("\n\n", text)
+    # Stage 12.2 — apply the math-mode transforms from the book pipeline so
+    # KaTeX (client-side) can render author-pasted equations. Skips the
+    # LaTeX-specific cleanup steps (caret-super, defang, &-escape) — those
+    # are wrong for the UI text path.
+    text = _prepare_math_for_ui(text)
     return text.strip()
+
+
+def _prepare_math_for_ui(text: str) -> str:
+    """Wrap bare LaTeX math so the client KaTeX renderer can find it.
+
+    Real-corpus reality (Stage 12.2): a non-trivial fraction of authors
+    write raw LaTeX (`\\rho\\left(...)`, `\\begin{matrix}...\\end{matrix}`,
+    `\\thinsp`) directly in the rich-text editor without `$...$` wrapping.
+    The book-pipeline `normalise_for_latex` handles the same patterns for
+    PDF; we reuse three of its passes here so the UI shows rendered math
+    rather than raw backslash source.
+
+    Skipped passes (book-specific): caret-super-to-latex, collapse-caret-
+    runs, defang-unknown-commands, escape-bare-ampersand, Greek-and-math
+    auto-wrap (KaTeX accepts `\\alpha` etc. directly inside `$...$`; the
+    book pipeline's `$\\alpha$` wrap-per-glyph would split math regions
+    in unhelpful ways for UI display).
+    """
+    from ohbm2026.book.html_to_md import (
+        _autowrap_bare_math,
+        _normalise_latex_aliases,
+        _strip_control_chars,
+        _wrap_bare_matrix_environments,
+    )
+
+    text = _strip_control_chars(text)
+    text = _normalise_latex_aliases(text)
+    text = _wrap_bare_matrix_environments(text)
+    text = _autowrap_bare_math(text)
+    return text
 
 
 _SECTION_QUESTION = {
@@ -67,6 +128,9 @@ _SECTION_QUESTION = {
     "results": "Results",
     "conclusion": "Conclusion",
     "references": "References/Citations",
+    # Stage 12 US1: surface the Acknowledgement field so the
+    # permalink page can render it under the verbatim left column.
+    "acknowledgments": "Acknowledgement",
 }
 
 
@@ -522,6 +586,9 @@ def iter_abstracts(
                 "results": _section(questions, "results"),
                 "conclusion": _section(questions, "conclusion"),
                 "references": _section(questions, "references"),
+                # Stage 12 US1 — empty string when corpus's
+                # `Acknowledgement` response is absent or whitespace.
+                "acknowledgments": _section(questions, "acknowledgments"),
             },
             "topics": _topics(questions),
             "methods_checklist": parse_string_list_value(

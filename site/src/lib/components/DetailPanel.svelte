@@ -5,6 +5,13 @@
 	import { cartStore } from '$lib/stores/cart';
 	import { standbySummary } from '$lib/standby';
 	import {
+		PERMALINK_SECTION_KEYS,
+		isClampable,
+		masterToggleLabel,
+		nextStateAfterMasterToggle
+	} from '$lib/permalink_section_state';
+	import { renderMath } from '$lib/render_math';
+	import {
 		loadAllCellsWithTopics,
 		loadAllNeighbors,
 		loadEnrichment,
@@ -29,6 +36,18 @@
 	 * get the full read-everything view.
 	 */
 	export let compact = false;
+	/**
+	 * Stage 12 US1b — render mode. `'panel'` (default) is the
+	 * in-grid drawer's existing click-to-expand caret behaviour, with
+	 * the same 4 verbatim sections (Introduction / Methods / Results /
+	 * Conclusion). `'permalink'` switches every left-column verbatim
+	 * section to a 3-line CSS `line-clamp` preview with per-section
+	 * "Show more" / "Show less" buttons + a column-scoped "Show all" /
+	 * "Collapse all" master toggle, and adds the Acknowledgments
+	 * section to the iteration (when its corpus value is non-empty).
+	 * Set by the permalink page route (`/abstract/<poster_id>/`).
+	 */
+	export let mode: 'panel' | 'permalink' = 'panel';
 
 	let showAllAuthors = false;
 	// Section expansion: each body section starts collapsed; user opens what
@@ -37,6 +56,50 @@
 	let openSections: Record<string, boolean> = {};
 	let openClaims: Record<number, boolean> = {};
 	let openFigures: Record<number, boolean> = {};
+
+	// Stage 12 US1b — separate state for permalink mode where each
+	// section starts in 3-line clamp (NOT hidden) and `expanded[skey]`
+	// flips to true when the per-section "Show more" button is
+	// clicked. Distinct from `openSections` to avoid semantic
+	// confusion (panel-mode default = hidden; permalink-mode default
+	// = clamped-but-visible).
+	let permalinkExpanded: Record<string, boolean> = {};
+
+	function togglePermalinkSection(key: string) {
+		permalinkExpanded = { ...permalinkExpanded, [key]: !permalinkExpanded[key] };
+	}
+
+	function togglePermalinkAll() {
+		// Derive a Map of clampable section keys + their current state,
+		// then flip the whole set via the pure helper.
+		const clampableMap = new Map<string, boolean>();
+		for (const k of PERMALINK_SECTION_KEYS) {
+			const body = abstract?.sections[k as keyof typeof abstract.sections];
+			if (isClampable(body as string | undefined)) {
+				clampableMap.set(k, !!permalinkExpanded[k]);
+			}
+		}
+		const next = nextStateAfterMasterToggle(clampableMap);
+		const merged = { ...permalinkExpanded };
+		for (const [k, v] of next) {
+			merged[k] = v;
+		}
+		permalinkExpanded = merged;
+	}
+
+	$: clampableExpandedMap = (() => {
+		const m = new Map<string, boolean>();
+		if (mode !== 'permalink' || !abstract) return m;
+		for (const k of PERMALINK_SECTION_KEYS) {
+			const body = abstract.sections[k as keyof typeof abstract.sections];
+			if (isClampable(body as string | undefined)) {
+				m.set(k, !!permalinkExpanded[k]);
+			}
+		}
+		return m;
+	})();
+	$: masterLabel = masterToggleLabel(clampableExpandedMap);
+	$: anyClampable = clampableExpandedMap.size > 0;
 
 	function toggleSection(key: string) {
 		openSections = { ...openSections, [key]: !openSections[key] };
@@ -56,6 +119,9 @@
 		openSections = {};
 		openClaims = {};
 		openFigures = {};
+		// Stage 12 US1b: permalink-mode sections reset to clamped on
+		// navigation between abstracts (matches the page-load default).
+		permalinkExpanded = {};
 	}
 
 	// --- Cross-cell cluster membership -----------------------------------
@@ -123,7 +189,7 @@
 		$focusedAbstract = null;
 	}
 
-	function inCart(posterId: string): boolean {
+	function inCart(posterId: number): boolean {
 		return $cartStore.has(posterId);
 	}
 
@@ -432,25 +498,66 @@
 
 		{#snippet bodyBlock()}
 		{#if !compact}
-			{#each [ ['introduction','Introduction'], ['methods','Methods'], ['results','Results'], ['conclusion','Conclusion'] ] as [skey, slabel] (skey)}
+			{#if mode === 'permalink' && anyClampable}
+				<!-- Stage 12 US1b: column-scoped master toggle that
+				     expands every clampable section at once + flips
+				     to "Collapse all" once everything is open. -->
+				<button
+					type="button"
+					class="master-toggle"
+					data-testid="master-toggle"
+					aria-pressed={masterLabel === 'Collapse all'}
+					aria-controls="permalink-verbatim-column"
+					on:click={togglePermalinkAll}
+				>{masterLabel}</button>
+			{/if}
+			<div
+				id={mode === 'permalink' ? 'permalink-verbatim-column' : undefined}
+			>
+				{#each (mode === 'permalink'
+					? [ ['introduction','Introduction'], ['methods','Methods'], ['results','Results'], ['conclusion','Conclusion'], ['acknowledgments','Acknowledgments'] ] as [keyof typeof abstract.sections, string][]
+					: [ ['introduction','Introduction'], ['methods','Methods'], ['results','Results'], ['conclusion','Conclusion'] ] as [keyof typeof abstract.sections, string][]) as [skey, slabel] (skey)}
 				{@const sbody = abstract.sections[skey]}
 				{#if sbody}
-					<section class="section collapsible" data-testid={`section-${skey}`} data-zone="submitter">
-						<button
-							type="button"
-							class="section-header"
-							on:click={() => toggleSection(skey)}
-							aria-expanded={!!openSections[skey]}
+					{#if mode === 'permalink'}
+						{@const clampable = isClampable(sbody)}
+						{@const expanded = !!permalinkExpanded[skey]}
+						<section
+							class="section verbatim-section {clampable ? (expanded ? 'section-expanded' : 'section-clamped') : 'section-short'}"
+							data-testid={`section-${skey}`}
+							data-zone="submitter"
 						>
-							<span class="caret">{openSections[skey] ? '▾' : '▸'}</span>
-							<span class="section-label">{slabel}</span>
-						</button>
-						{#if openSections[skey]}
-							<p class="section-body">{sbody}</p>
-						{/if}
-					</section>
+							<h3 class="section-label section-label-permalink">{slabel}</h3>
+							<p class="section-body" class:section-body-clamped={clampable && !expanded}>{@html renderMath(sbody)}</p>
+							{#if clampable}
+								<button
+									type="button"
+									class="section-toggle"
+									data-testid={`section-toggle-${skey}`}
+									aria-expanded={expanded}
+									on:click={() => togglePermalinkSection(skey)}
+								>{expanded ? 'Show less' : 'Show more'}</button>
+							{/if}
+						</section>
+					{:else}
+						<section class="section collapsible" data-testid={`section-${skey}`} data-zone="submitter">
+							<button
+								type="button"
+								class="section-header"
+								on:click={() => toggleSection(skey)}
+								aria-expanded={!!openSections[skey]}
+							>
+								<span class="caret">{openSections[skey] ? '▾' : '▸'}</span>
+								<span class="section-label">{slabel}</span>
+							</button>
+							{#if openSections[skey]}
+								<p class="section-body">{@html renderMath(sbody)}</p>
+							{/if}
+						</section>
+					{/if}
 				{/if}
-			{/each}
+				{/each}
+			</div>
 		{/if}
 		{/snippet}
 
@@ -1100,6 +1207,64 @@
 		white-space: pre-wrap;
 		padding: 0.4rem 0 0.2rem 1.3rem;
 	}
+
+	/* Stage 12 US1b — permalink-mode brief-preview + show-more. */
+	.verbatim-section {
+		border-top: 1px solid var(--border);
+		padding-top: 0.6rem;
+		padding-bottom: 0.4rem;
+	}
+	.section-label-permalink {
+		margin: 0 0 0.3rem;
+		font-size: 0.85rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--text-muted);
+		font-weight: 600;
+	}
+	.section-body-clamped {
+		display: -webkit-box;
+		-webkit-line-clamp: 3;
+		-webkit-box-orient: vertical;
+		line-clamp: 3;
+		overflow: hidden;
+	}
+	.section-toggle {
+		all: unset;
+		cursor: pointer;
+		margin-top: 0.3rem;
+		font-size: 0.8rem;
+		color: var(--accent, #2c5fa3);
+		font-weight: 600;
+	}
+	.section-toggle:hover {
+		text-decoration: underline;
+	}
+	.section-toggle:focus-visible {
+		outline: 2px solid var(--accent, #2c5fa3);
+		outline-offset: 2px;
+	}
+	.master-toggle {
+		all: unset;
+		cursor: pointer;
+		display: inline-block;
+		margin: 0.4rem 0 0.6rem;
+		padding: 0.3rem 0.7rem;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: var(--bg-sunken, #f4f4f4);
+		font-size: 0.85rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.master-toggle:hover {
+		background: var(--bg-hover, #e8e8e8);
+	}
+	.master-toggle:focus-visible {
+		outline: 2px solid var(--accent, #2c5fa3);
+		outline-offset: 2px;
+	}
+
 	.collapsible {
 		border-top: 1px solid var(--border);
 		padding-top: 0.4rem;

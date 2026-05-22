@@ -1,13 +1,11 @@
 % LaTeX preamble for the plain (book class) PDF rendering — Stage 12
-% TIGHT margin preset (default). Loaded by pandoc via
-% `-H header-includes.tex`.
+% LOOSE margin preset. Loaded by pandoc via `-H header-includes-loose.tex`
+% when the operator passes `ohbmcli book --margins=loose`.
 %
-% Stage 12 US5 — `geometry` package tightens the LaTeX book class's
-% default ~1 in margins to 0.65 in all sides, targeting ≥ 15% page-
-% count reduction on the real corpus. Operators who need to
-% reproduce the pre-Stage-12 layout can pass `--margins=loose` to
-% get `header-includes-loose.tex` instead (no geometry import).
-\usepackage[margin=0.65in]{geometry}
+% Recovers the LaTeX `book` class default margins (~1 in all sides).
+% Use case: reproducing the pre-Stage-12 layout for archival or
+% comparison purposes. No `\usepackage{geometry}` import — the book
+% class default applies as-is.
 
 \usepackage{makeidx}
 \makeindex
