@@ -84,7 +84,42 @@ def _html_to_text(blob: str | None) -> str:
     # Normalize whitespace + collapse runs of blank lines.
     text = _WHITESPACE.sub(" ", text)
     text = _BLANK_LINES.sub("\n\n", text)
+    # Stage 12.2 — apply the math-mode transforms from the book pipeline so
+    # KaTeX (client-side) can render author-pasted equations. Skips the
+    # LaTeX-specific cleanup steps (caret-super, defang, &-escape) — those
+    # are wrong for the UI text path.
+    text = _prepare_math_for_ui(text)
     return text.strip()
+
+
+def _prepare_math_for_ui(text: str) -> str:
+    """Wrap bare LaTeX math so the client KaTeX renderer can find it.
+
+    Real-corpus reality (Stage 12.2): a non-trivial fraction of authors
+    write raw LaTeX (`\\rho\\left(...)`, `\\begin{matrix}...\\end{matrix}`,
+    `\\thinsp`) directly in the rich-text editor without `$...$` wrapping.
+    The book-pipeline `normalise_for_latex` handles the same patterns for
+    PDF; we reuse three of its passes here so the UI shows rendered math
+    rather than raw backslash source.
+
+    Skipped passes (book-specific): caret-super-to-latex, collapse-caret-
+    runs, defang-unknown-commands, escape-bare-ampersand, Greek-and-math
+    auto-wrap (KaTeX accepts `\\alpha` etc. directly inside `$...$`; the
+    book pipeline's `$\\alpha$` wrap-per-glyph would split math regions
+    in unhelpful ways for UI display).
+    """
+    from ohbm2026.book.html_to_md import (
+        _autowrap_bare_math,
+        _normalise_latex_aliases,
+        _strip_control_chars,
+        _wrap_bare_matrix_environments,
+    )
+
+    text = _strip_control_chars(text)
+    text = _normalise_latex_aliases(text)
+    text = _wrap_bare_matrix_environments(text)
+    text = _autowrap_bare_math(text)
+    return text
 
 
 _SECTION_QUESTION = {

@@ -91,6 +91,38 @@ class TestHtmlToTextSupSub(unittest.TestCase):
         out = _html_to_text(r"<p>The value $\alpha=0.05$ holds.</p>")
         self.assertIn("$\\alpha=0.05$", out)
 
+    def test_bare_math_autowrapped_for_katex(self) -> None:
+        """Stage 12.2 — author-pasted raw LaTeX without `$...$` wrapping
+        gets wrapped server-side so KaTeX can render it client-side.
+        Poster 2094 in the real corpus was the canary."""
+        from ohbm2026.ui_data.abstracts import _html_to_text
+
+        out = _html_to_text(
+            r"<p>similarity was defined as \rho\left(s,j\right)=corr(z,j). next sentence</p>"
+        )
+        # The bare `\rho\left(...)` cluster lands inside `$...$` so KaTeX
+        # recognises it as a math span.
+        self.assertIn(r"$\rho\left(s,j\right)=corr(z,j)$", out)
+
+    def test_bare_matrix_wrapped_for_katex(self) -> None:
+        from ohbm2026.ui_data.abstracts import _html_to_text
+
+        out = _html_to_text(
+            r"<p>encoder inputs are \begin{matrix}a&b\\c&d\end{matrix} done.</p>"
+        )
+        self.assertIn(r"$$\begin{matrix}", out)
+        self.assertIn(r"\end{matrix}$$", out)
+
+    def test_thinsp_alias_normalised(self) -> None:
+        from ohbm2026.ui_data.abstracts import _html_to_text
+
+        out = _html_to_text(
+            r"<p>yields \mathrm{out}\mathrm{\thinsp} more text</p>"
+        )
+        self.assertIn(r"\thinspace", out)
+        self.assertNotIn(r"\thinsp ", out)
+        self.assertNotIn(r"\thinsp}", out)
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
