@@ -215,6 +215,7 @@ def normalise_for_latex(text: str) -> str:
     HTML output: the patterns are character-class-driven and don't
     touch ASCII or already-converted `$...$` math spans.
     """
+    text = _strip_control_chars(text)
     text = _fold_math_alphanumerics(text)
     text = _normalise_unicode_super_sub(text)
     text = _normalise_greek_and_math(text)
@@ -229,7 +230,144 @@ def normalise_for_latex(text: str) -> str:
     # provenance.failed_abstracts[]).
     text = _caret_super_to_latex(text)
     text = _collapse_caret_runs(text)
+    text = _escape_bare_ampersand(text)
+    text = _defang_unknown_commands(text)
     return text
+
+
+# C0 (U+0000-U+001F) and C1 (U+0080-U+009F) control characters,
+# plus zero-width and bidi-marker codepoints that authors paste in
+# unintentionally (Word's "smart" non-printing markers, soft hyphens,
+# the BOM, etc.). Latin Modern can't represent them and Tectonic
+# raises "Text line contains an invalid character" → whole abstract
+# fails to render. Preserve newline, tab, and carriage return so we
+# don't destroy line structure.
+_SAFE_CONTROL_CHARS = {"\n", "\t", "\r"}
+
+
+def _strip_control_chars(text: str) -> str:
+    """Remove C0/C1 control codepoints and zero-width markers that
+    Tectonic refuses to typeset.
+
+    Examples observed in the corpus (Stage 12.1 / 12.2 failures):
+    - U+0002 (STX) inside "Nat\\x02ural Science Foundation" (poster 995)
+    - U+000B (vertical tab) breaking a multi-line author affiliation
+      (poster 2024)
+    """
+    out: list[str] = []
+    for ch in text:
+        cp = ord(ch)
+        if ch in _SAFE_CONTROL_CHARS:
+            out.append(ch)
+            continue
+        if cp < 0x20:
+            continue
+        if 0x7F <= cp <= 0x9F:
+            continue
+        # Zero-width + bidi markers
+        if cp in (0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF, 0x00AD):
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+# Escape any bare `&` (not already `\&`, not part of an HTML entity)
+# to `\&`. Pandoc normally escapes `&` in markdown body text, but
+# leaks the literal through when neighbouring `$...$` math spans
+# confuse its inline parser (observed in posters 913 + 1898 where
+# `... $\pm$ ...; H&Y ...` produced an unescaped `H&Y` in the .tex →
+# LaTeX "Misplaced alignment tab" error).
+_BARE_AMP_RE = re.compile(r"(?<!\\)&(?!amp;|lt;|gt;|quot;|apos;|nbsp;|#\d+;|#x[0-9a-fA-F]+;|[a-zA-Z]+;)")
+
+
+def _escape_bare_ampersand(text: str) -> str:
+    return _BARE_AMP_RE.sub(r"\\&", text)
+
+
+# Whitelist of LaTeX commands we intentionally emit OR pandoc emits
+# in normal markdown→latex conversion. Anything else looking like
+# `\Capitalized` or `\R` outside our control is most likely an
+# author-pasted typo with a stray backslash (observed: `\State` for
+# "State", `\R1` for "R1" in grant-IDs). We defang these by stripping
+# the leading backslash so the bare word renders as text.
+_KNOWN_COMMAND_PREFIXES = frozenset({
+    # Pandoc-emitted text commands
+    "textbf", "textit", "textsuperscript", "textsubscript", "emph",
+    "textbackslash", "textless", "textgreater",
+    "textasciitilde", "textasciicircum", "textendash", "textemdash",
+    # Pandoc-emitted structural commands
+    "section", "subsection", "subsubsection", "paragraph", "label",
+    "footnote", "footnotemark", "footnotetext", "cite", "ref", "url", "href",
+    "item", "begin", "end", "includegraphics", "caption", "centering",
+    "newline", "par", "newpage", "clearpage", "hline", "tabular",
+    "figure", "table", "ldots", "cdots", "quad", "qquad",
+    "hspace", "vspace", "strut", "tightlist", "pandocbounded",
+    "providecommand", "def", "labelenumi", "arabic", "setcounter",
+    "printindex", "tableofcontents", "index", "makeindex",
+    # Greek letters (we emit these via _normalise_greek_and_math)
+    "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta",
+    "eta", "theta", "vartheta", "iota", "kappa", "lambda", "mu", "nu",
+    "xi", "pi", "varpi", "rho", "varrho", "sigma", "varsigma", "tau",
+    "upsilon", "phi", "varphi", "chi", "psi", "omega",
+    "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+    "Iota", "Kappa", "Lambda", "Mu", "Nu", "Xi", "Pi", "Rho", "Sigma",
+    "Tau", "Upsilon", "Phi", "Chi", "Psi", "Omega",
+    # Math operators we emit
+    "to", "gets", "leftrightarrow", "Rightarrow", "Leftarrow",
+    "Leftrightarrow", "leq", "geq", "neq", "approx", "equiv", "sim",
+    "propto", "infty", "partial", "nabla", "sum", "prod", "int",
+    "in", "notin", "subset", "supset", "cap", "cup", "emptyset",
+    "pm", "mp", "times", "div", "surd", "ast", "cdot", "circ", "prime",
+    "star", "forall", "exists", "frac", "sqrt", "mathbb", "mathbf",
+    "mathit", "mathrm", "mathcal",
+    # Math delimiters + sizing (authors quote these often in equations)
+    "left", "right", "big", "Big", "bigg", "Bigg",
+    "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr",
+    "bigm", "Bigm", "biggm", "Biggm",
+    "langle", "rangle", "lvert", "rvert", "lVert", "rVert",
+    "vert", "Vert",
+    # Math accents
+    "hat", "widehat", "tilde", "widetilde", "bar", "overline",
+    "underline", "dot", "ddot", "vec", "overrightarrow", "overleftarrow",
+    "overbrace", "underbrace",
+    # Math functions
+    "sin", "cos", "tan", "cot", "sec", "csc",
+    "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
+    "log", "ln", "exp", "lim", "limsup", "liminf",
+    "sup", "inf", "min", "max", "arg", "det", "dim", "ker",
+    "gcd", "lcm", "mod", "deg",
+    # Spacing
+    "thinspace", "negthinspace", "thinsp", "negthinsp",
+    "medspace", "thickspace",
+})
+
+# Match `\CamelCase` or `\R` style commands that are NOT followed by
+# `{` (we don't touch `\command{...}` forms — those are more likely
+# real commands and false-positive risk is higher). Only Latin
+# letters; anything else is unaffected.
+_UNKNOWN_CMD_RE = re.compile(r"\\([A-Za-z]+)(?![A-Za-z\{])")
+
+
+def _defang_unknown_commands(text: str) -> str:
+    """Strip the leading backslash from `\\Command` patterns that
+    aren't in our known whitelist. Targets author-pasted typos like
+    `\\State Key Laboratory` (poster 1791) where the backslash is
+    spurious and LaTeX errors out with "Undefined control sequence".
+
+    Only defangs forms NOT followed by an opening brace — `\\foo{...}`
+    is more likely to be a real LaTeX call (e.g. an author quoting
+    a citation macro) and we err on the side of letting LaTeX itself
+    raise the error, rather than silently transforming the call.
+    """
+
+    def _sub(m: "re.Match[str]") -> str:
+        name = m.group(1)
+        if name in _KNOWN_COMMAND_PREFIXES:
+            return m.group(0)
+        # Strip the backslash; the word stays as text.
+        return name
+
+    return _UNKNOWN_CMD_RE.sub(_sub, text)
 
 
 # Pandoc's `^...^` superscript syntax pairs ONE opening + ONE closing
@@ -289,21 +427,71 @@ def _normalise_greek_and_math(text: str) -> str:
     spans don't collapse because that's harder to undo and the
     rendered PDF treats `$\\alpha$ $+$ $\\beta$` identically to
     `$\\alpha + \\beta$` once you ignore the (invisible) spacing.
+
+    Stage 12.2 — when a Greek/math glyph is ALREADY inside an
+    author-written `$...$` math span, we MUST NOT re-wrap it in
+    another `$...$` pair. Doing so closes the outer span prematurely
+    and reopens it later, producing broken nesting like
+    ``$A = diag(e^{$\\alpha$})$`` → pandoc renders this as
+    ``\\(A = diag(e^{\\)\\alpha\\(})\\)`` which Tectonic rejects with
+    "Missing }" (observed: poster 455). Split the text by `$...$`
+    spans first; inside math regions emit the LaTeX command bare
+    (no `$` wrap); outside math regions wrap as before.
     """
+    parts = _split_by_math_spans(text)
+    out: list[str] = []
+    for chunk, in_math in parts:
+        if in_math:
+            # Already in math mode — emit bare commands, no extra `$`.
+            chunk = _GREEK_RE.sub(
+                lambda m: _GREEK_LATEX[m.group(0)], chunk
+            )
+            chunk = _MATH_OP_RE.sub(
+                lambda m: _MATH_OP_LATEX[m.group(0)], chunk
+            )
+            out.append(chunk)
+        else:
+            chunk = _GREEK_RE.sub(
+                lambda m: f"${_GREEK_LATEX[m.group(0)]}$", chunk
+            )
 
-    def _greek(m: "re.Match[str]") -> str:
-        return f"${_GREEK_LATEX[m.group(0)]}$"
+            def _mathop(m: "re.Match[str]") -> str:
+                repl = _MATH_OP_LATEX[m.group(0)]
+                if repl.startswith("\\"):
+                    return f"${repl}$"
+                return repl
 
-    def _mathop(m: "re.Match[str]") -> str:
-        repl = _MATH_OP_LATEX[m.group(0)]
-        # ASCII fallback (e.g. − → -) doesn't need math mode.
-        if repl.startswith("\\"):
-            return f"${repl}$"
-        return repl
+            chunk = _MATH_OP_RE.sub(_mathop, chunk)
+            out.append(chunk)
+    return "".join(out)
 
-    text = _GREEK_RE.sub(_greek, text)
-    text = _MATH_OP_RE.sub(_mathop, text)
-    return text
+
+# Match author-written inline-math spans (`$...$`). Single-dollar
+# only — display math (`$$...$$`) is handled by recognising the
+# balanced pair as TWO `$...$` regions with an empty inside, which
+# is harmless. The non-greedy body excludes `$` so we don't span
+# across multiple math regions. Backslash-escaped `\$` (literal
+# dollar sign) is NOT treated as a delimiter.
+_MATH_SPAN_RE = re.compile(r"(?<!\\)\$([^$]*?)(?<!\\)\$")
+
+
+def _split_by_math_spans(text: str) -> list[tuple[str, bool]]:
+    """Return ``[(chunk, in_math), ...]`` covering ``text`` end-to-end.
+
+    Inside math spans (``in_math=True``) the chunk includes the
+    opening `$` and closing `$` so reassembly via ``"".join`` round-
+    trips exactly. Outside math, the chunk is plain text.
+    """
+    parts: list[tuple[str, bool]] = []
+    cursor = 0
+    for m in _MATH_SPAN_RE.finditer(text):
+        if m.start() > cursor:
+            parts.append((text[cursor : m.start()], False))
+        parts.append((m.group(0), True))
+        cursor = m.end()
+    if cursor < len(text):
+        parts.append((text[cursor:], False))
+    return parts
 
 
 def html_to_pandoc_md(html: str) -> str:

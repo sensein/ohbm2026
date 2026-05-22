@@ -27,6 +27,7 @@ import argparse
 import datetime as _dt
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -122,6 +123,21 @@ def render_one(
         capture_output=True,
         text=True,
     )
+
+    # Stage 12.2 — Tectonic font-cache race retry. Despite the
+    # one-shot pre-warm in render_via_pandoc, ~4/3,164 chunks in the
+    # smoke still hit "Metric (TFM) file not loadable" on the shared
+    # `size10.clo` cache entry. The retry serialises onto the now-
+    # populated cache and recovers cleanly (~0.5 s extra). Retry only
+    # on that specific signature; everything else fails fast as before.
+    if proc.returncode != 0 and _is_font_cache_race(proc.stderr or ""):
+        proc = subprocess.run(
+            argv,
+            input=md_body,
+            capture_output=True,
+            text=True,
+        )
+
     if proc.returncode != 0:
         if tmp_path.exists():
             try:
@@ -157,6 +173,26 @@ def render_one(
         cache_hit=False,
         pandoc_stderr=None,
     )
+
+
+_FONT_CACHE_RACE_RE = re.compile(
+    r"(size10\.clo.*Metric \(TFM\) file not loadable|"
+    r"Metric \(TFM\) file not loadable.*size10\.clo)",
+    re.DOTALL,
+)
+
+
+def _is_font_cache_race(stderr: str) -> bool:
+    """Detect the Tectonic shared-cache race on `size10.clo`.
+
+    Triggered when N joblib workers spawn ~simultaneously, each
+    racing to populate the same metric-file cache entry; some get
+    partial reads. The pre-warm in render_via_pandoc covers most of
+    them but doesn't fully eliminate the race — observed ~4/3,164
+    in the Stage 12.2 smoke. A one-time retry serialises onto the
+    now-populated cache.
+    """
+    return bool(_FONT_CACHE_RACE_RE.search(stderr))
 
 
 def _tail(text: str, *, max_bytes: int) -> str:

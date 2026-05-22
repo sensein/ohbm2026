@@ -22,3 +22,10 @@
   linkcolor=black,
   urlcolor=blue,
 }
+
+% Stage 12.2 — author-pasted `\index{Name}` calls (from the author-
+% index emission in render_markdown.py) must compile in isolation
+% even though we don't ship a per-chunk .idx file. `\providecommand`
+% defines `\index` only if it isn't already; with `makeidx` absent
+% this turns the call into a harmless no-op.
+\providecommand{\index}[1]{}

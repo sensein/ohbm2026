@@ -291,7 +291,18 @@ def _build_toc_markdown(
     lines.append("# Table of Contents {.unnumbered}")
     lines.append("")
     lines.append("```{=latex}")
-    lines.append("\\begin{longtable}{r p{10cm} r}")
+    # Stage 12.2 — tighten margins to 0.4in on TOC pages only so the
+    # 3-column table uses more horizontal space (fewer line-wraps in
+    # the title column → fewer TOC pages). \newgeometry takes effect
+    # at the next \clearpage; \restoregeometry returns to the
+    # document's base (book) margin after the longtable. Both
+    # commands ship with the `geometry` package which is already
+    # loaded by the tight preset.
+    lines.append("\\newgeometry{margin=0.4in}")
+    # 13cm title column matches the new 0.4in-margin content width
+    # at US letter (7.7" content ≈ 19.5cm; poster col 1.2cm + page
+    # col 1.2cm + gaps 4cm → ~13cm fits the title).
+    lines.append("\\begin{longtable}{r p{13cm} r}")
     lines.append("\\textbf{Poster} & \\textbf{Title} & \\textbf{Page} \\\\")
     lines.append("\\hline")
     lines.append("\\endhead")
@@ -304,6 +315,7 @@ def _build_toc_markdown(
         title_escaped = _latex_escape(str(entry.title or ""))
         lines.append(f"{pid:04d} & {title_escaped} & {page} \\\\")
     lines.append("\\end{longtable}")
+    lines.append("\\restoregeometry")
     lines.append("```")
     lines.append("")
     return "\n".join(lines)
