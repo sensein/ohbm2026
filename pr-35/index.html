@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!--
+  Stage 9 (spec 009-conference-subpath FR-105): static redirect island.
+
+  This file lives at the gh-pages publish root (production AND every
+  per-PR preview root AND the staging `/sandbox/` root) and bounces
+  any visitor who lands at the bare `<cname>/`, `<cname>/pr-<N>/`,
+  or `<cname>/sandbox/` into the conference shell.
+
+  gh-pages cannot serve a true HTTP 301 (it's static-only), so this is
+  the closest equivalent: a `<meta http-equiv="refresh">` directive
+  plus a JS `location.replace`. Browsers fire both before the first
+  paint, so the perceptual hop count is ≤ 1. `location.replace` (vs.
+  `location.href = …`) does not leave a back-button entry, mirroring
+  the 301 contract.
+
+  The target path is composed at runtime from `window.location.pathname`
+  so the same file works at the gh-pages root (target `/ohbm2026/`),
+  at every per-PR root (target `/pr-<N>/ohbm2026/`), and at the
+  sandbox root (target `/sandbox/ohbm2026/`).
+
+  Query and hash are preserved so deep-link query strings (e.g.
+  `?utm_source=…`) survive.
+-->
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<title>Abstract Atlas — redirecting to OHBM 2026</title>
+	<meta name="robots" content="noindex">
+	<link rel="canonical" href="/ohbm2026/">
+	<script>
+		(function () {
+			var p = window.location.pathname;
+			// Two prefix shapes share this redirect island: per-PR previews
+			// (`/pr-<N>/`) and the staging sandbox (`/sandbox/`). Detect
+			// either so the island works without per-deploy customisation.
+			var prefixMatch = p.match(/^(\/(?:pr-\d+|sandbox))\//);
+			var prefix = prefixMatch ? prefixMatch[1] : '';
+			var target = prefix + '/ohbm2026/' + window.location.search + window.location.hash;
+			window.location.replace(target);
+		})();
+	</script>
+	<!-- No-JS fallback (text-mode browsers, scripting-disabled sandboxes):
+	     0-second meta-refresh and a manual link. Without JS we can't detect
+	     the PR-preview prefix, so this lands on the production conference
+	     home — acceptable as a worst-case fallback. -->
+	<meta http-equiv="refresh" content="0; url=/ohbm2026/">
+</head>
+<body>
+	<noscript>
+		<p>Redirecting to <a href="/ohbm2026/">the OHBM 2026 Atlas</a>.</p>
+	</noscript>
+</body>
+</html>
