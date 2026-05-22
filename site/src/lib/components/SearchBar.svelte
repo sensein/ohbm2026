@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { get } from 'svelte/store';
-	import { goto } from '$app/navigation';
-	import { base } from '$app/paths';
 	import { navigatorMode, posterIdUndoBuffer, searchQuery } from '$lib/stores/selection';
 	import {
 		filterSuggestions,
@@ -43,31 +41,30 @@
 	// re-clamp the active index so we don't point past the new list.
 	$: if (activeIndex >= result.visible.length) activeIndex = -1;
 
-	$: canNavigate =
-		inNavigatorMode &&
-		(result.exactMatch !== null ||
-			(activeIndex >= 0 && activeIndex < result.visible.length));
 	$: activeOptionId =
 		activeIndex >= 0 && activeIndex < result.visible.length
 			? `search-id-option-${result.visible[activeIndex].posterId}`
 			: '';
 
-	async function navigateTo(posterId: number) {
-		// Clear the undo buffer once we commit — any Escape after this
-		// point should NOT roll back to the pre-`g` query.
-		posterIdUndoBuffer.set(null);
-		await goto(`${base}/abstract/${posterId}/`);
-	}
+	// User has explicitly dismissed the dropdown (Escape, or selection
+	// committed) — keep it hidden until the next keystroke. Cleared on
+	// any input event so further typing re-opens it.
+	let dismissed = false;
+	$: open = inNavigatorMode && !dismissed;
+	$: void $searchQuery, (dismissed = false); // re-open on any input change
 
-	async function commit() {
-		if (!inNavigatorMode) return;
-		if (activeIndex >= 0 && activeIndex < result.visible.length) {
-			await navigateTo(result.visible[activeIndex].posterId);
-			return;
-		}
-		if (result.exactMatch !== null) {
-			await navigateTo(result.exactMatch.posterId);
-		}
+	/**
+	 * Commit a poster id selection by writing `id:<id>` to the search
+	 * query — this narrows the result list to exactly that id via the
+	 * filter pipeline in `+page.svelte`. Dismisses the dropdown so the
+	 * card is visible. Does NOT navigate.
+	 */
+	function commit(posterId: number) {
+		// Consume the undo buffer; an Escape after a commit should not
+		// roll back to the pre-`g` query.
+		posterIdUndoBuffer.set(null);
+		searchQuery.set(`id:${posterId}`);
+		dismissed = true;
 	}
 
 	function onInputKeydown(e: KeyboardEvent) {
@@ -83,10 +80,18 @@
 				(activeIndex - 1 + result.visible.length) % result.visible.length;
 		} else if (e.key === 'Enter') {
 			e.preventDefault();
-			// FR-008 undo buffer is consumed by Enter (Escape can no
-			// longer restore the pre-`g` query after a successful
-			// commit). Always clear it on commit attempts.
-			commit();
+			// If a suggestion is highlighted, commit it. Otherwise
+			// just close the dropdown — the result list already shows
+			// the prefix-match set so there's nothing else to do.
+			if (activeIndex >= 0 && activeIndex < result.visible.length) {
+				commit(result.visible[activeIndex].posterId);
+			} else if (result.exactMatch !== null) {
+				// Single exact match already in the bar — narrow to it
+				// and dismiss the dropdown so the user can see the card.
+				commit(result.exactMatch.posterId);
+			} else {
+				dismissed = true;
+			}
 		} else if (e.key === 'Escape' && !helpOpen) {
 			// Stage 14 — Escape restores the undo buffer IF the user
 			// hasn't typed any further keystrokes since `g` fired.
@@ -97,6 +102,9 @@
 			if (undo !== null && value === 'id:') {
 				searchQuery.set(undo);
 				posterIdUndoBuffer.set(null);
+			} else {
+				// No undo to restore — just close the dropdown.
+				dismissed = true;
 			}
 		}
 	}
@@ -144,7 +152,7 @@
 	}
 
 	function onOptionClick(posterId: number) {
-		navigateTo(posterId);
+		commit(posterId);
 	}
 </script>
 
@@ -168,9 +176,9 @@
 		data-testid="search-input"
 		role={inNavigatorMode ? 'combobox' : undefined}
 		aria-autocomplete={inNavigatorMode ? 'list' : undefined}
-		aria-expanded={inNavigatorMode ? true : undefined}
+		aria-expanded={inNavigatorMode ? open : undefined}
 		aria-controls={inNavigatorMode ? 'search-id-listbox' : undefined}
-		aria-activedescendant={inNavigatorMode && activeOptionId
+		aria-activedescendant={open && activeOptionId
 			? activeOptionId
 			: undefined}
 		on:keydown={onInputKeydown}
@@ -196,7 +204,7 @@
 			data-testid="search-help-toggle"
 		>?</button>
 	</div>
-	{#if inNavigatorMode}
+	{#if open}
 		<ul
 			id="search-id-listbox"
 			class="id-listbox"

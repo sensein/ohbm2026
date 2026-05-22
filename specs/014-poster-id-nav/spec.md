@@ -11,7 +11,8 @@
 
 - Q: How should the input restrict selection to available ids? → A: Autocomplete dropdown showing only ids that exist in the live corpus. Free-typing an unmatched id is structurally impossible: the submit affordance stays disabled until the value resolves to exactly one available id.
 - Q: With autocomplete, what does typing `12` match? → A: PREFIX match on the integer string (after stripping leading zeros from the query). `12` matches ids whose decimal string starts with `12`: `12`, `120–129`, `1200–1299`. It does NOT match `1012`, `0212`, or any id whose integer string contains `12` only mid-position. Trimmed query `12` therefore surfaces displayed forms `0012`, `0120`–`0129`, and `1200`–`1299`.
-- Q: Should the navigator live in a separate input or in the existing search bar? → A: Reuse the existing search bar via an `id:` operator. Typing `id:` at the start of the search query puts the bar into "poster navigator" mode: the normal result list hides and an autocomplete dropdown of available ids appears under the bar. Selecting one (Enter / click) navigates to its permalink. Other operators in the same query are ignored while in this mode. No separate `<PosterIdInput>` component is created.
+- Q: Should the navigator live in a separate input or in the existing search bar? → A: Reuse the existing search bar via an `id:` operator. Typing `id:` at the start of the search query puts the bar into "poster navigator" mode: an autocomplete dropdown of available ids appears under the bar AND the existing result list filters to abstracts whose poster_id's decimal form starts with the typed digits. Other operators in the same query are ignored while in this mode. No separate `<PosterIdInput>` component is created.
+- Q: What does selecting a suggestion do? → A: Selecting (Enter on a highlighted suggestion, Enter on an exact-match query, or clicking a row in the dropdown) commits the choice by setting the search-bar value to `id:<that-id>` — which narrows the result list to that ONE abstract. The user then clicks the card to drill in. Selecting a suggestion does NOT navigate to the permalink page.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -41,8 +42,10 @@ never offers a value that does not match an available id.
 1. **Given** the home page is loaded and the user knows poster id `2094`,
    **When** the user types `id:2094` (or `id:02094` with leading zero) into
    the search bar and presses Enter,
-   **Then** the dropdown collapses to the single exact match `2094` and
-   the browser navigates to `/abstract/2094/`.
+   **Then** the dropdown collapses to a single exact match `2094`, the
+   result list narrows to exactly that one card, the search bar value
+   becomes `id:2094`, and the browser stays on the home page (no
+   navigation).
 2. **Given** the user has typed `id:12` into the search bar,
    **When** the dropdown renders,
    **Then** it lists every existing id whose integer string starts with
@@ -142,10 +145,12 @@ permalink page.
 - **FR-001**: The existing `<SearchBar>` MUST recognize an `id:`
   operator at the start of the query and switch into "poster
   navigator" mode while present.
-- **FR-002**: On submission of a navigator-mode query that resolves to
-  exactly one available id (via exact integer match or via picking the
-  only remaining suggestion), the application MUST navigate to the
-  abstract permalink for that poster id.
+- **FR-002**: On submission of a navigator-mode query that resolves
+  to exactly one available id (via exact integer match or via picking
+  a suggestion from the dropdown), the application MUST set the
+  search-bar value to `id:<that-id>` and let the existing result-list
+  filter narrow to that single abstract. The application MUST NOT
+  navigate away from the home page on commit.
 - **FR-003**: The operator's digit payload MUST accept leading zeros
   (`id:0345`, `id:345`, `id:00345` all equivalent) and surrounding
   whitespace stripped before matching.
