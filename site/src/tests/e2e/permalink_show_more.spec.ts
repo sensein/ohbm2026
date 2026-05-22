@@ -28,10 +28,16 @@ test.describe('Stage 12 US1b — permalink brief-preview + show-more', () => {
 		// find one with a clampable Methods section.
 		const cards = page.getByTestId('result-card');
 		const candidateCount = Math.min(6, await cards.count());
-		let found = false;
+		// Snapshot poster ids BEFORE navigating; otherwise iteration 1+ tries
+		// to read attributes off the permalink page (no result cards there)
+		// and Playwright times out at 30s.
+		const posterIds: string[] = [];
 		for (let i = 0; i < candidateCount; i++) {
-			const posterId = await cards.nth(i).getAttribute('data-poster-id');
-			if (!posterId) continue;
+			const pid = await cards.nth(i).getAttribute('data-poster-id');
+			if (pid) posterIds.push(pid);
+		}
+		let found = false;
+		for (const posterId of posterIds) {
 			await page.goto(`./abstract/${encodeURIComponent(posterId)}/`);
 			const methodsSection = page.getByTestId('section-methods');
 			// Wait for the permalink page to settle.
@@ -76,10 +82,16 @@ test.describe('Stage 12 US1b — permalink brief-preview + show-more', () => {
 		await expect(page.getByTestId('result-card').first()).toBeVisible({ timeout: 8000 });
 		const cards = page.getByTestId('result-card');
 		const candidateCount = Math.min(6, await cards.count());
-		let found = false;
+		// Snapshot all candidate poster ids BEFORE navigating away; otherwise
+		// iteration 1+ tries to read attributes off the permalink page which
+		// has no result cards (Playwright then times out at 30s).
+		const posterIds: string[] = [];
 		for (let i = 0; i < candidateCount; i++) {
-			const posterId = await cards.nth(i).getAttribute('data-poster-id');
-			if (!posterId) continue;
+			const pid = await cards.nth(i).getAttribute('data-poster-id');
+			if (pid) posterIds.push(pid);
+		}
+		let found = false;
+		for (const posterId of posterIds) {
 			await page.goto(`./abstract/${encodeURIComponent(posterId)}/`);
 			const master = page.getByTestId('master-toggle');
 			if (await master.count()) {
@@ -121,10 +133,15 @@ test.describe('Stage 12 US1b — permalink brief-preview + show-more', () => {
 		await expect(page.getByTestId('result-card').first()).toBeVisible({ timeout: 8000 });
 		const cards = page.getByTestId('result-card');
 		const candidateCount = Math.min(10, await cards.count());
-		let found = false;
+		// Snapshot poster ids BEFORE navigating; see comment in the master-toggle
+		// test for the same gotcha.
+		const posterIds: string[] = [];
 		for (let i = 0; i < candidateCount; i++) {
-			const posterId = await cards.nth(i).getAttribute('data-poster-id');
-			if (!posterId) continue;
+			const pid = await cards.nth(i).getAttribute('data-poster-id');
+			if (pid) posterIds.push(pid);
+		}
+		let found = false;
+		for (const posterId of posterIds) {
 			await page.goto(`./abstract/${encodeURIComponent(posterId)}/`);
 			const ack = page.getByTestId('section-acknowledgments');
 			if (await ack.count()) {
