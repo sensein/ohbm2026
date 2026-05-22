@@ -63,3 +63,15 @@ _showMap.subscribe((v) => {
 });
 
 export const showMap = _showMap;
+
+/** Stage 14 — `id:` operator navigator mode flag. Set by SearchBar
+ *  whenever `parseIdOperator(value)` returns non-null. Consumed by
+ *  the home route to gate the result list (hide when true). */
+export const navigatorMode = writable<boolean>(false);
+
+/** Stage 14 — undo buffer for the `g` shortcut. When `g` fires from
+ *  outside any input, the SearchBar saves the prior value here and
+ *  replaces it with `id:`. An Escape pressed BEFORE any further
+ *  keystroke pops the buffer and restores. Null when no undo is
+ *  pending. */
+export const posterIdUndoBuffer = writable<string | null>(null);

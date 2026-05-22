@@ -14,7 +14,7 @@
 		type Manifest,
 		type TopicShard
 	} from '$lib/shards';
-	import { activeFilters, authorChips, cartOnly, focusedAbstract, lassoSelection, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
+	import { activeFilters, authorChips, cartOnly, focusedAbstract, lassoSelection, navigatorMode, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
 	import { lexicalSearch, parseQuery, queryForSemantic } from '$lib/filter';
 	import { filterByFacets, recomputeFacets, type FacetCellContext } from '$lib/facets';
 	import SearchBar from '$lib/components/SearchBar.svelte';
@@ -346,7 +346,10 @@
 <div class="home" class:has-focus={focused !== null}>
 	<div class="top-row">
 		<div class="search-row">
-			<SearchBar />
+			<SearchBar {abstractsByPosterId} />
+			<span class="kbd-hint" data-testid="goto-kbd-hint" aria-hidden="true">
+				<kbd>g</kbd> jump to poster id
+			</span>
 			{#if $authorChips.size > 0}
 				<div class="author-chips" data-testid="author-chips">
 					<span class="chips-label">authors:</span>
@@ -492,16 +495,18 @@
 			<div class="facet-pane" class:open={showFacets} data-testid="facet-pane">
 				<FacetSidebar counts={facetCounts} />
 			</div>
-			<div class="list-pane">
-				<ResultList
-					{abstracts}
-					{authorsById}
-					{filteredIds}
-					{semanticScores}
-					lexicalIds={lexicalIds}
-					lexicalExactness={lexicalExactness}
-					{defaultRank}
-				/>
+			<div class="list-pane" class:hidden={$navigatorMode}>
+				{#if !$navigatorMode}
+					<ResultList
+						{abstracts}
+						{authorsById}
+						{filteredIds}
+						{semanticScores}
+						lexicalIds={lexicalIds}
+						lexicalExactness={lexicalExactness}
+						{defaultRank}
+					/>
+				{/if}
 			</div>
 			<div class="detail-pane" class:active={focused !== null}>
 				{#if focused}
@@ -541,6 +546,25 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.4rem;
+	}
+	.kbd-hint {
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		padding-left: 0.2rem;
+	}
+	.kbd-hint kbd {
+		display: inline-block;
+		padding: 0.05rem 0.35rem;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 0.7rem;
+		background: var(--bg-subtle);
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		color: var(--text);
+		margin-right: 0.25rem;
+	}
+	.search-row:focus-within .kbd-hint {
+		visibility: hidden;
 	}
 	.author-chips {
 		display: flex;

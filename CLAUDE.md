@@ -168,49 +168,39 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/013-book-layout-polish/plan.md`. The companion design
-artefacts under the same directory — `research.md`, `data-model.md`,
-`contracts/cli.md`, `contracts/permalink-page.md`, and `quickstart.md`
-— pin Stage 12: six bundled stories landing on top of Stage 11.1.
+at `specs/014-poster-id-nav/plan.md`. The companion design artefacts
+under the same directory — `research.md`, `data-model.md`,
+`contracts/poster-id-input.md`, and `quickstart.md` — pin Stage 14: a
+UI-only "Go to poster" input that lets attendees jump straight to an
+abstract by number.
 
-**US1 — acknowledgments on the permalink page**: the data-package
-abstracts envelope gains a `sections.acknowledgments` field; the
-website's permalink page (`/abstract/<poster_id>/`) renders it
-under the existing verbatim-section list. The in-grid
-`DetailPanel.svelte` side drawer is INTENTIONALLY unchanged.
+**US1 — Jump-to-poster input on the home + permalink pages**: a
+small `<PosterIdInput>` component mounted in both routes. Submit
+parses `0345` / `345` / ` 345 ` to the integer id, validates against
+the in-memory `abstractsByPosterId` map (the Stage-10 single-parquet
+lookup), and calls SvelteKit's `goto('/abstract/<id>/')` on success.
+Invalid / not-found ids show an inline `aria-live` error and keep
+the user on the home page.
 
-**US1b — brief-preview UX on the permalink page**: five
-left-column verbatim sections (Introduction, Methods, Results,
-Conclusion, Acknowledgments) default to a CSS `line-clamp: 3`
-preview. Per-section "Show more"/"Show less" buttons + a
-column-scoped "Show all"/"Collapse all" master toggle.
-Implemented via a `mode: 'panel' | 'permalink'` prop on
-`DetailPanel.svelte` so the in-grid drawer is untouched.
+**US2 — Keyboard shortcut**: pressing `g` (no modifiers) from
+anywhere on the home or permalink pages focuses the
+PosterIdInput. The handler ignores `g` when another input /
+textarea / contenteditable is already focused.
 
-**US2 — normalised figure assets**: `_copy_figure` always
-re-encodes every figure to JPEG quality 90 at a 150 DPI dimension
-cap (≈ 975 px wide). Byte-copy fallback on Pillow
-UnidentifiedImageError; audit log in
-`provenance.figures_normalised_with_fallback[]`.
-
-**US3 — 3-column TOC**: the book's table of contents becomes a
-LaTeX `longtable` with `Poster | Title | Page` columns, sorted
-by poster_id, sourced from the assembler's `chunk_offsets`.
-Replaces pandoc's default flat-section TOC.
-
-**US4 — author-index bucket headers**: `_build_index_markdown`
-groups entries by Unicode-folded last-name initial and emits a
-`## A`, `## B`, …, `## Z`, `## Other` heading before each bucket.
-
-**US5 — tighter book margins**: new `--margins {tight,loose}`
-flag (default `tight`). LaTeX `\usepackage[margin=0.65in]{geometry}`
-for the tight preset, targeting ≥ 15% page-count reduction.
-
-System deps unchanged from Stage 11.1 (`pandoc` + Tectonic).
-No new optional extras. The Stage-11.1 markdown bundle path
-is untouched.
+Pure client-side feature: no parquet rebuild, no Python changes, no
+new external dependencies. Pure-function parser/validator lives at
+`site/src/lib/goto_poster.ts`; the Svelte component is a thin render
+layer. vitest covers the parser; Playwright covers the full flow.
 
 Previous-stage plans:
+- Stage 12 book layout polish + acknowledgments + permalink UX:
+  `specs/013-book-layout-polish/plan.md`. Six bundled stories:
+  acknowledgments on the permalink page, brief-preview UX with
+  show-more, JPEG-q90 @ 150 DPI figure normalisation, 3-column
+  TOC longtable, author-index letter buckets, tight book margins.
+  Shipped in PR #34 (Stage 12.2 also closed 12 real-corpus
+  LaTeX failures + wired KaTeX math + Unicode super/subscript in
+  section bodies).
 - Stage 11.1 book PDF + standby + DOCX retire + CI telemetry:
   `specs/012-stage11-followups/plan.md` (per-abstract parallel +
   cached PDF; standby INT8 schema; DOCX retirement; CI telemetry

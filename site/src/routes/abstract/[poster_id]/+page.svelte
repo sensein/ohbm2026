@@ -9,6 +9,7 @@
 		type AuthorRecord
 	} from '$lib/shards';
 	import DetailPanel from '$lib/components/DetailPanel.svelte';
+	import SearchBar from '$lib/components/SearchBar.svelte';
 
 	let abstractRecord: AbstractRecord | null = null;
 	let authorsById: Map<number, AuthorRecord> = new Map();
@@ -48,6 +49,9 @@
 <div class="permalink-page">
 	<nav class="back">
 		<a href={`${base}/`}>← all abstracts</a>
+		<div class="permalink-search">
+			<SearchBar abstractsByPosterId={abstractsById} />
+		</div>
 	</nav>
 
 	{#if !loaded}
@@ -79,6 +83,12 @@
 		gap: 1rem;
 		width: 100%;
 	}
+	.back {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
 	.back a {
 		color: #2c5fa3;
 		text-decoration: none;
@@ -86,6 +96,11 @@
 	}
 	.back a:hover {
 		text-decoration: underline;
+	}
+	.permalink-search {
+		flex: 1 1 14rem;
+		min-width: 12rem;
+		max-width: 28rem;
 	}
 	.not-found {
 		background: #fff8f8;
