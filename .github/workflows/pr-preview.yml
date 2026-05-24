@@ -1,5 +1,12 @@
 name: pr-preview
 
+# Stage 15 (spec 015-neuroscape-context, T049): mirrors the
+# multi-mode build in `deploy-ui.yml`. Each PR preview produces
+# three per-mode bundles under `/pr-<N>/`:
+#   • atlas-root → `/pr-<N>/`        (cross-conference landing page)
+#   • ohbm2026   → `/pr-<N>/ohbm2026/` (existing OHBM 2026 site)
+#   • neuroscape → `/pr-<N>/neuroscape/` (NeuroScape PubMed subsite)
+
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -26,7 +33,11 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     environment:
       name: pr-preview-${{ github.event.pull_request.number }}
-      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}/ohbm2026/
+      # The environment URL points at the bare-root cross-conference
+      # landing page now that atlas-root is the root. The two sibling
+      # subsites are reachable from the landing page's outbound
+      # header links (LandingPageHeader).
+      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}/
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,26 +73,40 @@ jobs:
         # the merge instead of failing at deploy time.
         run: PYTHONPATH=src python -m ohbm2026.ui_data.link_check specs/008-ui-rewrite/contracts/references.yaml
 
-      - name: Build site (PR preview)
+      - name: Build all three SITE_MODE bundles (T049)
         working-directory: site
         env:
-          BASE_PATH: /pr-${{ github.event.pull_request.number }}/ohbm2026
+          BASE_PATH_ROOT: /pr-${{ github.event.pull_request.number }}
+          STAGE_ROOT_RELATIVE: site/publish
           VITE_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
           VITE_BUILD_AT: ${{ github.event.pull_request.head.repo.pushed_at }}
+          VITE_DATA_PACKAGE_URL_ATLAS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_ATLAS }}
+          VITE_DATA_PACKAGE_URL_OHBM2026: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_OHBM2026 || vars.OHBM2026_UI_DATA_PACKAGE_URL }}
+          VITE_DATA_PACKAGE_URL_NEUROSCAPE: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE }}
+          # Legacy single-var fallback honoured by `loader.ts` for one
+          # deploy cycle.
           VITE_DATA_PACKAGE_URL: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL }}
         run: |
+          set -euo pipefail
           export VITE_BUILD_SHA_SHORT="${VITE_BUILD_SHA:0:7}"
-          pnpm build
+          STAGE_ROOT="../${STAGE_ROOT_RELATIVE}"
+          rm -rf "$STAGE_ROOT"
 
-      - name: Stage publish tree (conference subpath rework — FR-104)
-        # Same shape as production: the SvelteKit build moves under
-        # /ohbm2026/ inside the per-PR namespace, and the redirect island
-        # sits at the PR root so /pr-<N>/ bounces to /pr-<N>/ohbm2026/.
-        run: |
-          mkdir -p site/publish/ohbm2026
-          cp -r site/build/. site/publish/ohbm2026/
-          cp site/conference-root-redirect/index.html site/publish/index.html
-          cp site/conference-root-redirect/404.html site/publish/404.html
+          build_mode() {
+            local mode="$1"
+            local base_path="$2"
+            local dest="$3"
+            echo "::group::Build SITE_MODE=$mode BASE_PATH=$base_path → $dest"
+            rm -rf build .svelte-kit/output
+            VITE_SITE_MODE="$mode" BASE_PATH="$base_path" pnpm build
+            mkdir -p "$dest"
+            cp -r build/. "$dest/"
+            echo "::endgroup::"
+          }
+
+          build_mode atlas-root  "$BASE_PATH_ROOT"             "$STAGE_ROOT"
+          build_mode ohbm2026    "$BASE_PATH_ROOT/ohbm2026"    "$STAGE_ROOT/ohbm2026"
+          build_mode neuroscape  "$BASE_PATH_ROOT/neuroscape"  "$STAGE_ROOT/neuroscape"
 
       - name: Publish to gh-pages /pr-${{ github.event.pull_request.number }}
         uses: peaceiris/actions-gh-pages@v3
