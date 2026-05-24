@@ -20,7 +20,13 @@
   (point list / cluster table / dimensionality) call `Plotly.react`.
 -->
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+
+	const dispatch = createEventDispatcher<{
+		pointclick: { kind: 'ohbm2026' | 'neuroscape'; id: number };
+		lassoselect: { ohbm2026_ids: number[]; neuroscape_ids: number[] };
+		lassoclear: void;
+	}>();
 
 	type PlotlyApi = typeof import('plotly.js-gl3d-dist-min');
 
@@ -328,17 +334,48 @@
 		// that arrives MORE than 100 ms after our last tick must be a
 		// user-driven move — pause auto-rotate so the visitor can
 		// inspect the scene without fighting us.
-		(plotEl as unknown as { on: (e: string, cb: () => void) => void }).on(
-			'plotly_relayout',
-			() => {
-				if (!autoRotate) return;
-				const gap = performance.now() - lastRotateTickTs;
-				if (gap > 100) {
-					autoRotate = false;
-					stopRotate();
-				}
+		const el = plotEl as unknown as {
+			on: (e: string, cb: (data: unknown) => void) => void;
+		};
+		el.on('plotly_relayout', () => {
+			if (!autoRotate) return;
+			const gap = performance.now() - lastRotateTickTs;
+			if (gap > 100) {
+				autoRotate = false;
+				stopRotate();
 			}
-		);
+		});
+		// T046 — point click dispatches a `pointclick` event with the
+		// point's customdata ({kind, id}). The parent (`+page.svelte`
+		// atlas-root branch) opens the AtlasRootDetailPanel using this.
+		el.on('plotly_click', (raw: unknown) => {
+			const data = raw as { points?: Array<{ customdata?: unknown }> };
+			const first = data.points?.[0];
+			const cd = first?.customdata as { kind?: string; id?: number } | undefined;
+			if (cd && typeof cd.kind === 'string' && typeof cd.id === 'number') {
+				dispatch('pointclick', { kind: cd.kind as 'ohbm2026' | 'neuroscape', id: cd.id });
+			}
+		});
+		// T047 — lasso/box selection dispatches a `lassoselect` event
+		// with all selected customdatas grouped by kind so the parent
+		// can show the two-section grouped result list.
+		el.on('plotly_selected', (raw: unknown) => {
+			const data = raw as { points?: Array<{ customdata?: unknown }> };
+			const ohbm: number[] = [];
+			const neuro: number[] = [];
+			for (const pt of data.points ?? []) {
+				const cd = pt.customdata as { kind?: string; id?: number } | undefined;
+				if (!cd || typeof cd.id !== 'number') continue;
+				if (cd.kind === 'ohbm2026') ohbm.push(cd.id);
+				else if (cd.kind === 'neuroscape') neuro.push(cd.id);
+			}
+			dispatch('lassoselect', { ohbm2026_ids: ohbm, neuroscape_ids: neuro });
+		});
+		// Clicking on empty plot space deselects; dispatch a clear
+		// event so the parent can collapse any lasso result list.
+		el.on('plotly_deselect', () => {
+			dispatch('lassoclear');
+		});
 		relayoutHandlerAttached = true;
 	}
 

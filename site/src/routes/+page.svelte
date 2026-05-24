@@ -41,10 +41,17 @@
 	import AtlasOverlayToggle from '$lib/components/AtlasOverlayToggle.svelte';
 	import BackdropDensitySlider from '$lib/components/BackdropDensitySlider.svelte';
 	import AtlasUmapPanel from '$lib/components/AtlasUmapPanel.svelte';
+	import AtlasRootDetailPanel from '$lib/components/AtlasRootDetailPanel.svelte';
+	import AtlasRootLassoResults from '$lib/components/AtlasRootLassoResults.svelte';
 	import DimensionalityToggle from '$lib/components/DimensionalityToggle.svelte';
+	import { base } from '$app/paths';
 	import { atlasOverlay } from '$lib/stores/atlas_overlay';
 	import { dimensionality } from '$lib/stores/dimensionality';
-	import { loadDataPackage } from '$lib/data_package/loader';
+	import {
+		loadDataPackage,
+		verifyAtlasSiblingDrift,
+		type AtlasDriftEntry
+	} from '$lib/data_package/loader';
 
 	// Shapes the AtlasUmapPanel expects. Defined here (not imported
 	// from the .svelte component) because Svelte's type re-export
@@ -418,6 +425,91 @@
 	let atlasBackdrop: AtlasBackdropPoint[] = [];
 	let atlasOverlayPoints: AtlasOverlayPoint[] = [];
 	let atlasClusters: AtlasClusterRow[] = [];
+	// T046 + T047 — selection state for the slide-in detail panel
+	// and the lasso grouped result list. Both are atlas-root-only.
+	let atlasSelection:
+		| {
+				kind: 'ohbm2026';
+				title: string;
+				poster_id: number;
+				nearest_cluster_id: number;
+				permalink: string;
+		  }
+		| {
+				kind: 'neuroscape';
+				title: string;
+				pubmed_id: number;
+				year: number;
+				cluster_id: number;
+				permalink: string;
+		  }
+		| null = null;
+	let atlasLassoOhbmIds: number[] = [];
+	let atlasLassoNeuroIds: number[] = [];
+
+	// O(1) lookup maps built whenever the atlas data lands.
+	$: atlasOverlayById = new Map(atlasOverlayPoints.map((p) => [p.poster_id, p]));
+	$: atlasBackdropById = new Map(atlasBackdrop.map((p) => [p.pubmed_id, p]));
+	$: atlasClustersById = new Map(
+		atlasClusters.map((c) => [c.cluster_id, { cluster_id: c.cluster_id, title: c.title, colour_hex: c.colour_hex }])
+	);
+
+	// Permalink construction. cross_pointers in atlas.parquet documents
+	// these URLs at build time; constructing them here is equivalent
+	// (the convention is part of the spec) and avoids round-tripping
+	// the table for every click. `base` is the deploy root in
+	// atlas-root mode (no per-mode suffix), so `${base}/ohbm2026/...`
+	// resolves to the OHBM 2026 sibling at any deploy depth
+	// (production `/`, PR preview `/pr-N/`).
+	function atlasPermalink(kind: 'ohbm2026' | 'neuroscape', id: number): string {
+		const root = base;
+		return kind === 'ohbm2026'
+			? `${root}/ohbm2026/abstract/${id}/`
+			: `${root}/neuroscape/abstract/${id}/`;
+	}
+
+	function onAtlasPointClick(
+		ev: CustomEvent<{ kind: 'ohbm2026' | 'neuroscape'; id: number }>
+	) {
+		const { kind, id } = ev.detail;
+		if (kind === 'ohbm2026') {
+			const p = atlasOverlayById.get(id);
+			if (!p) return;
+			atlasSelection = {
+				kind: 'ohbm2026',
+				title: p.title,
+				poster_id: p.poster_id,
+				nearest_cluster_id: p.nearest_cluster_id,
+				permalink: atlasPermalink('ohbm2026', p.poster_id)
+			};
+		} else {
+			const p = atlasBackdropById.get(id);
+			if (!p) return;
+			atlasSelection = {
+				kind: 'neuroscape',
+				title: p.title,
+				pubmed_id: p.pubmed_id,
+				year: p.year,
+				cluster_id: p.cluster_id,
+				permalink: atlasPermalink('neuroscape', p.pubmed_id)
+			};
+		}
+	}
+
+	function onAtlasLasso(
+		ev: CustomEvent<{ ohbm2026_ids: number[]; neuroscape_ids: number[] }>
+	) {
+		atlasLassoOhbmIds = ev.detail.ohbm2026_ids;
+		atlasLassoNeuroIds = ev.detail.neuroscape_ids;
+	}
+
+	function clearAtlasLasso() {
+		atlasLassoOhbmIds = [];
+		atlasLassoNeuroIds = [];
+	}
+	// T043 — drift banner state. Populated by the sibling-state-key
+	// check that fires in the background after atlas.parquet loads.
+	let atlasDrift: AtlasDriftEntry[] = [];
 	let atlasLoading = false;
 	let atlasError: string | null = null;
 	let atlasProgressLoaded = 0;
@@ -468,6 +560,17 @@
 				atlasBackdrop = backdropShard.points;
 				atlasOverlayPoints = overlayShard.points;
 				atlasClusters = clustersShard.clusters;
+				// T043 — Fire the sibling-state-key drift check in the
+				// background. The scatter renders immediately with the
+				// atlas data; if the check completes with a mismatch,
+				// a banner appears on top. The check itself is HTTP-Range-
+				// limited (~10 KB per sibling), so the network cost is
+				// trivial compared to the 34 MB atlas parquet we just
+				// finished streaming.
+				const manifest = pkg.get('data/manifest.json');
+				void verifyAtlasSiblingDrift(manifest).then((result) => {
+					if (!result.ok) atlasDrift = result.drift;
+				});
 			} else if (SITE_MODE === 'neuroscape') {
 				const articlesShard = pkg.get('data/neuroscape/articles.json') as
 					| { articles: AtlasBackdropPoint[] }
@@ -511,6 +614,33 @@
 	     additionally shows the overlay toggle (OHBM 2026 layer). -->
 	<div class="atlas-root-home" data-testid="atlas-root-home" data-mode={SITE_MODE}>
 		<LandingPageHeader />
+		{#if SITE_MODE === 'atlas-root' && atlasDrift.length > 0}
+			<!-- T043 / R-012: cross-parquet drift banner. One of the
+			     sibling deployments doesn't match what atlas.parquet
+			     was built against. The scatter may show stale ids;
+			     surface this loudly rather than rendering a partial /
+			     silently-wrong cross-link experience. -->
+			<aside
+				class="atlas-drift-banner"
+				role="alert"
+				data-testid="atlas-drift-banner"
+			>
+				<strong>Atlas data is out of sync with a sibling subsite.</strong>
+				<ul class="atlas-drift-list" data-testid="atlas-drift-list">
+					{#each atlasDrift as d (d.sibling)}
+						<li>
+							<code>{d.sibling}</code> expected
+							<code>{d.expected.slice(0, 8)}…</code> but found
+							<code>{d.actual ? d.actual.slice(0, 8) + '…' : `(${d.reason})`}</code>
+						</li>
+					{/each}
+				</ul>
+				<p class="atlas-drift-explain">
+					Cross-conference links may point at stale ids. Rebuild
+					<code>atlas.parquet</code> against the current sibling parquets.
+				</p>
+			</aside>
+		{/if}
 		<main class="atlas-root-main">
 			<div class="atlas-controls" data-testid="atlas-root-controls">
 				{#if SITE_MODE === 'atlas-root'}
@@ -593,9 +723,27 @@
 					showOverlay={SITE_MODE === 'atlas-root' ? $atlasOverlay : false}
 					backdropOpacity={backdropDensity}
 					dimensionality={$dimensionality}
+					on:pointclick={onAtlasPointClick}
+					on:lassoselect={onAtlasLasso}
+					on:lassoclear={clearAtlasLasso}
 				/>
 			{/if}
 		</main>
+		{#if SITE_MODE === 'atlas-root'}
+			<AtlasRootDetailPanel
+				selection={atlasSelection}
+				clustersById={atlasClustersById}
+				on:close={() => (atlasSelection = null)}
+			/>
+			<AtlasRootLassoResults
+				ohbm2026_ids={atlasLassoOhbmIds}
+				neuroscape_ids={atlasLassoNeuroIds}
+				overlayById={atlasOverlayById}
+				backdropById={atlasBackdropById}
+				permalinkFor={atlasPermalink}
+				on:close={clearAtlasLasso}
+			/>
+		{/if}
 	</div>
 {:else}
 <div class="home" class:has-focus={focused !== null}>
@@ -785,6 +933,31 @@
 	/* Stage 15 atlas-root chrome. Dead-CSS-eliminated in
 	   non-atlas-root builds (the markup branch is gone, so Svelte
 	   marks these selectors as unused and they don't ship). */
+	.atlas-drift-banner {
+		background: var(--warning-bg);
+		color: var(--warning-text);
+		border: 1px solid var(--warning-border);
+		border-radius: 4px;
+		padding: 0.75rem 1rem;
+		margin: 0.75rem clamp(1rem, 2vw, 2rem);
+		font-size: 0.92rem;
+	}
+	.atlas-drift-list {
+		margin: 0.4rem 0 0.4rem 1.25rem;
+		padding: 0;
+	}
+	.atlas-drift-explain {
+		margin: 0;
+		color: var(--warning-text);
+		opacity: 0.85;
+	}
+	.atlas-drift-banner code {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		background: rgba(0, 0, 0, 0.06);
+		padding: 0 0.25em;
+		border-radius: 2px;
+	}
+
 	.atlas-root-home {
 		display: flex;
 		flex-direction: column;

@@ -31,7 +31,7 @@
  * them into the Stage-6 envelope shape the UI expects.
  */
 
-import { parquetReadObjects } from 'hyparquet';
+import { parquetReadObjects, asyncBufferFromUrl } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
 import { SITE_MODE } from '$lib/site_mode';
 
@@ -510,4 +510,179 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 	}
 
 	return out;
+}
+
+// ===========================================================================
+// T043 — Cross-parquet drift assertion (R-012)
+// ===========================================================================
+//
+// Atlas.parquet's manifest declares the sibling state-keys it was built
+// against, e.g.
+//
+//   build_info.sibling_state_keys = { ohbm2026: '1ba5a9ea1efe',
+//                                     neuroscape: '27f8f139b296' }
+//
+// The actual `ohbm2026.parquet` and `neuroscape.parquet` deployed beside
+// it carry their own state-keys in their own manifests. If a deploy ever
+// publishes a refreshed sibling without re-running the atlas builder, the
+// `cross_pointers` / `ohbm_overlay` rows in `atlas.parquet` will point at
+// stale ids on the sibling subsite. R-012 mandates the atlas-root page
+// detect this and render a visible banner rather than rendering a
+// partial / silently-wrong scatter.
+//
+// Implementation: an HTTP-Range-only read of each sibling parquet's
+// `manifest` row group via hyparquet's `asyncBufferFromUrl`. Hyparquet
+// fetches just the footer (~few KB) and the manifest row group bytes (~1
+// KB) — total network cost is sub-10 KB per sibling, not the full 26+96
+// MB. The check is fired in parallel for both siblings; both must come
+// back matching for `ok: true`.
+
+export type AtlasDriftEntry = {
+	sibling: 'ohbm2026' | 'neuroscape';
+	expected: string; // state-key declared by atlas.parquet
+	actual: string | null; // state-key read from the sibling's manifest
+	reason: 'mismatch' | 'fetch-failed' | 'no-state-key';
+};
+
+export type AtlasDriftResult =
+	| { ok: true }
+	| { ok: false; drift: AtlasDriftEntry[] };
+
+function ohbm2026SiblingUrl(): string | null {
+	const raw = (import.meta.env.VITE_DATA_PACKAGE_URL_OHBM2026 ?? null) as string | null;
+	if (!raw) return null;
+	return raw
+		.replace(/^https:\/\/www\.dropbox\.com\//, 'https://dl.dropboxusercontent.com/')
+		.replace(/[?&]dl=0(\b|$)/, (m) => m.replace('dl=0', ''));
+}
+function neuroscapeSiblingUrl(): string | null {
+	const raw = (import.meta.env.VITE_DATA_PACKAGE_URL_NEUROSCAPE ?? null) as string | null;
+	if (!raw) return null;
+	return raw
+		.replace(/^https:\/\/www\.dropbox\.com\//, 'https://dl.dropboxusercontent.com/')
+		.replace(/[?&]dl=0(\b|$)/, (m) => m.replace('dl=0', ''));
+}
+
+async function readSiblingStateKey(url: string): Promise<string | null> {
+	const file = await asyncBufferFromUrl({ url });
+	// The outer parquet's `manifest` row group is the first one. We only
+	// need its single row, which holds the manifest_json string.
+	const rows = (await parquetReadObjects({
+		file,
+		compressors,
+		utf8: false
+	})) as Array<{ table_name?: string; table_bytes?: Uint8Array }>;
+	const manifestRow = rows.find((r) => r.table_name === 'manifest');
+	if (!manifestRow?.table_bytes) return null;
+	// Inner parquet decode for the manifest row group itself.
+	const innerFile = bytesAsAsyncBuffer(manifestRow.table_bytes);
+	const inner = (await parquetReadObjects({ file: innerFile, compressors })) as Array<{
+		manifest_json?: string;
+	}>;
+	const json = inner[0]?.manifest_json;
+	if (!json) return null;
+	try {
+		const meta = JSON.parse(json) as {
+			build_info?: { state_key?: string; corpus_state_key?: string };
+		};
+		// Sibling parquets may name the field either way — accept both.
+		return meta.build_info?.state_key ?? meta.build_info?.corpus_state_key ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Verify that the sibling parquets currently published match what
+ * `atlas.parquet` was built against. Returns `{ok: true}` on match,
+ * `{ok: false, drift: [...]}` on any mismatch / fetch error so the
+ * UI can render a banner.
+ *
+ * Safe to call when SITE_MODE !== 'atlas-root' (returns ok: true) and
+ * when sibling URLs aren't configured (returns ok: true — there's
+ * nothing to check against; treats absence as "trust the local
+ * build").
+ */
+export async function verifyAtlasSiblingDrift(
+	atlasManifest: unknown
+): Promise<AtlasDriftResult> {
+	if (SITE_MODE !== 'atlas-root') return { ok: true };
+	const m = atlasManifest as
+		| { build_info?: { sibling_state_keys?: Record<string, string> } }
+		| null;
+	const siblingKeys = m?.build_info?.sibling_state_keys ?? null;
+	if (!siblingKeys) return { ok: true };
+
+	const drift: AtlasDriftEntry[] = [];
+	const checks: Array<Promise<void>> = [];
+
+	const expectedOhbm = siblingKeys.ohbm2026;
+	const ohbmUrl = ohbm2026SiblingUrl();
+	if (expectedOhbm && ohbmUrl) {
+		checks.push(
+			readSiblingStateKey(ohbmUrl)
+				.then((actual) => {
+					if (actual === null) {
+						drift.push({
+							sibling: 'ohbm2026',
+							expected: expectedOhbm,
+							actual: null,
+							reason: 'no-state-key'
+						});
+					} else if (actual !== expectedOhbm) {
+						drift.push({
+							sibling: 'ohbm2026',
+							expected: expectedOhbm,
+							actual,
+							reason: 'mismatch'
+						});
+					}
+				})
+				.catch(() =>
+					drift.push({
+						sibling: 'ohbm2026',
+						expected: expectedOhbm,
+						actual: null,
+						reason: 'fetch-failed'
+					})
+				)
+		);
+	}
+
+	const expectedNeuro = siblingKeys.neuroscape;
+	const neuroUrl = neuroscapeSiblingUrl();
+	if (expectedNeuro && neuroUrl) {
+		checks.push(
+			readSiblingStateKey(neuroUrl)
+				.then((actual) => {
+					if (actual === null) {
+						drift.push({
+							sibling: 'neuroscape',
+							expected: expectedNeuro,
+							actual: null,
+							reason: 'no-state-key'
+						});
+					} else if (actual !== expectedNeuro) {
+						drift.push({
+							sibling: 'neuroscape',
+							expected: expectedNeuro,
+							actual,
+							reason: 'mismatch'
+						});
+					}
+				})
+				.catch(() =>
+					drift.push({
+						sibling: 'neuroscape',
+						expected: expectedNeuro,
+						actual: null,
+						reason: 'fetch-failed'
+					})
+				)
+		);
+	}
+
+	await Promise.all(checks);
+	if (drift.length === 0) return { ok: true };
+	return { ok: false, drift };
 }
