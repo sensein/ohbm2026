@@ -105,7 +105,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--ohbm2026-parquet",
         type=Path,
         required=True,
-        help="Path to the canonical (renamed) ohbm2026.parquet — its manifest's state_key is embedded into atlas.parquet's sibling_state_keys.",
+        help="Path to the canonical (renamed) ohbm2026.parquet — its manifest's corpus_state_key is embedded into atlas.parquet's sibling_state_keys.",
+    )
+    p.add_argument(
+        "--ohbm2026-corpus",
+        type=Path,
+        default=Path("data/primary/abstracts.json"),
+        help="Path to the OHBM 2026 corpus JSON (data/primary/abstracts.json by default). The CLI joins (submission_id → poster_id, title) headers from this file with the Stage-2 vectors from the voyage_stage2_published recipe.",
     )
     p.add_argument(
         "--output-root",
@@ -168,7 +174,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def read_ohbm2026_state_key(ohbm2026_parquet: Path) -> str:
-    """Read the ``state_key`` from ``ohbm2026.parquet``'s manifest row.
+    """Read the corpus state_key from ``ohbm2026.parquet``'s manifest row.
+
+    The Stage-10 OHBM 2026 manifest stores the corpus identifier as
+    ``build_info.corpus_state_key`` (the rename from earlier specs).
+    A 'state_key' fallback exists for any future shape that uses that
+    name directly.
 
     Reuses the Stage-10 ``parquet_single`` outer/inner shape: the
     outer table has one ``manifest`` row whose ``table_bytes`` is an
@@ -184,7 +195,16 @@ def read_ohbm2026_state_key(ohbm2026_parquet: Path) -> str:
         if name == "manifest":
             inner = pq.read_table(io.BytesIO(bytes(blob)))
             manifest = json.loads(inner.column("manifest_json").to_pylist()[0])
-            return str(manifest.get("build_info", {}).get("state_key", ""))
+            build_info = manifest.get("build_info", {})
+            sk = build_info.get("corpus_state_key") or build_info.get("state_key")
+            if not sk:
+                raise NeuroScapeInputError(
+                    "ohbm2026.parquet manifest has neither corpus_state_key nor state_key",
+                    file=str(ohbm2026_parquet),
+                    expected="build_info.corpus_state_key OR build_info.state_key",
+                    actual=json.dumps(list(build_info.keys())),
+                )
+            return str(sk)
     raise NeuroScapeInputError(
         "ohbm2026.parquet has no manifest row",
         file=str(ohbm2026_parquet),
@@ -193,64 +213,99 @@ def read_ohbm2026_state_key(ohbm2026_parquet: Path) -> str:
     )
 
 
-def _read_ohbm_articles(
-    ohbm2026_parquet: Path,
+def _read_ohbm_corpus_headers(
+    abstracts_corpus_path: Path,
 ) -> dict[int, tuple[int, str]]:
-    """Read ``(poster_id, title)`` for every abstract in ``ohbm2026.parquet``,
-    keyed by submission_id.
+    """Read ``(poster_id, title)`` for every abstract in the OHBM 2026
+    corpus JSON, keyed by Oxford submission_id.
+
+    Stage 10 retired ``submission_id`` from the published parquet's
+    ``abstracts`` row group (poster_id is the only user-facing
+    identifier there). But the embedding bundles under
+    ``data/outputs/embeddings/neuroscape/<component>__<sk>/`` still
+    use submission_id as their join key, so the CLI loads
+    submission_id → (poster_id, title) from the canonical raw corpus
+    instead of from the published parquet.
     """
 
-    import pyarrow.parquet as pq
+    if not abstracts_corpus_path.exists():
+        raise NeuroScapeInputError(
+            f"OHBM 2026 corpus JSON not found: {abstracts_corpus_path}",
+            file=str(abstracts_corpus_path),
+            expected="data/primary/abstracts.json (or other --ohbm2026-corpus path)",
+            actual="<missing>",
+        )
 
-    table = pq.read_table(ohbm2026_parquet)
-    names = table.column("table_name").to_pylist()
-    bodies = table.column("table_bytes").to_pylist()
-    for name, blob in zip(names, bodies):
-        if name == "abstracts":
-            inner = pq.read_table(io.BytesIO(bytes(blob)))
-            # Stage 10 schema: the abstracts inner table carries
-            # `submission_id` (or `id`), `poster_id`, and `title`.
-            cols = set(inner.column_names)
-            sub_col = "submission_id" if "submission_id" in cols else "id"
-            sub_ids = inner.column(sub_col).to_pylist()
-            poster_ids = inner.column("poster_id").to_pylist()
-            titles = inner.column("title").to_pylist()
-            return {
-                int(s): (int(p), str(t))
-                for s, p, t in zip(sub_ids, poster_ids, titles)
-            }
-    raise NeuroScapeInputError(
-        "ohbm2026.parquet has no abstracts row",
-        file=str(ohbm2026_parquet),
-        expected="abstracts outer row",
-        actual="<missing>",
-    )
+    payload = json.loads(abstracts_corpus_path.read_text(encoding="utf-8"))
+    # The canonical raw corpus is either a list of abstract records or
+    # an envelope {"abstracts": [...]}. Both shapes have been observed
+    # across Stage-1 revisions; accept either.
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("abstracts"), list):
+        records = payload["abstracts"]
+    else:
+        raise NeuroScapeInputError(
+            "OHBM 2026 corpus JSON has unexpected top-level shape",
+            file=str(abstracts_corpus_path),
+            expected="list[dict] or {'abstracts': list[dict]}",
+            actual=type(payload).__name__,
+        )
+
+    out: dict[int, tuple[int, str]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        sub_id = record.get("id") or record.get("submission_id")
+        # poster_id field: the corpus stores it as `poster_id` after
+        # Stage 1 normalization (program_code → poster_id mapping).
+        poster_id = record.get("poster_id")
+        title = record.get("title") or ""
+        if sub_id is None or poster_id is None:
+            continue
+        try:
+            out[int(sub_id)] = (int(poster_id), str(title))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def load_ohbm_corpus(
     ohbm2026_parquet: Path,
     voyage_bundle_id: str,
     *,
+    abstracts_corpus_path: Path | None = None,
     bundles_root: Path | None = None,
 ) -> tuple[list[OhbmInputRecord], str]:
     """Build the ``list[OhbmInputRecord]`` the orchestrator expects.
 
     Returns ``(records, ohbm2026_state_key)``.
 
-    Pulls Stage-2 vectors via the existing
-    :func:`ohbm2026.embed.compose.compose_recipe` five-component
-    recipe. Abstracts present in ``ohbm2026.parquet`` but missing a
-    Stage-2 vector are dropped here — the orchestrator's projector
-    would otherwise mark them as failures; dropping at corpus-load
-    time keeps the failure semantics tighter (an abstract without a
-    Stage-2 vector isn't a *projection* failure, it's an *input*
-    omission).
+    - ``ohbm2026_state_key`` is read from ``ohbm2026.parquet``'s
+      manifest (``build_info.corpus_state_key``) and is what gets
+      embedded into ``atlas.parquet/manifest.sibling_state_keys.ohbm2026``.
+    - The ``(submission_id → poster_id, title)`` join keys are read
+      from the canonical OHBM 2026 corpus JSON (defaults to
+      ``data/primary/abstracts.json``); Stage 10 retired
+      submission_id from the published parquet, but the embedding
+      bundles still key on it.
+    - Stage-2 vectors come via
+      :func:`ohbm2026.embed.compose.compose_recipe` with the five-
+      component voyage_stage2_published recipe.
+
+    Abstracts present in the corpus but missing a Stage-2 vector are
+    dropped here — the orchestrator's projector would otherwise mark
+    them as failures; dropping at corpus-load time keeps the failure
+    semantics tighter (an abstract without a Stage-2 vector is an
+    *input* omission, not a *projection* failure).
     """
 
     from ohbm2026.embed.compose import compose_recipe
 
     ohbm2026_state_key = read_ohbm2026_state_key(ohbm2026_parquet)
-    headers = _read_ohbm_articles(ohbm2026_parquet)
+    headers = _read_ohbm_corpus_headers(
+        abstracts_corpus_path or Path("data/primary/abstracts.json")
+    )
 
     composed = compose_recipe(
         list(_STAGE2_RECIPE),
@@ -350,7 +405,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         ohbm_records, ohbm2026_state_key = load_ohbm_corpus(
-            args.ohbm2026_parquet, args.voyage_bundle
+            args.ohbm2026_parquet,
+            args.voyage_bundle,
+            abstracts_corpus_path=args.ohbm2026_corpus,
         )
 
         cfg = AtlasBuildConfig(
