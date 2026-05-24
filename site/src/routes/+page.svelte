@@ -40,6 +40,33 @@
 	import LandingPageHeader from '$lib/components/LandingPageHeader.svelte';
 	import AtlasOverlayToggle from '$lib/components/AtlasOverlayToggle.svelte';
 	import BackdropDensitySlider from '$lib/components/BackdropDensitySlider.svelte';
+	import AtlasUmapPanel from '$lib/components/AtlasUmapPanel.svelte';
+	import { atlasOverlay } from '$lib/stores/atlas_overlay';
+	import { loadDataPackage } from '$lib/data_package/loader';
+
+	// Shapes the AtlasUmapPanel expects. Defined here (not imported
+	// from the .svelte component) because Svelte's type re-export
+	// path is unreliable across the build.
+	type AtlasBackdropPoint = {
+		pubmed_id: number;
+		cluster_id: number;
+		umap_3d: [number, number, number];
+		title: string;
+		year: number;
+	};
+	type AtlasOverlayPoint = {
+		submission_id: number;
+		poster_id: number;
+		umap_3d: [number, number, number];
+		title: string;
+		nearest_cluster_id: number;
+	};
+	type AtlasClusterRow = {
+		cluster_id: number;
+		title: string;
+		colour_hex: string;
+		palette_tier: 'primary' | 'secondary';
+	};
 
 	let manifest: Manifest | null = null;
 	let abstracts: AbstractRecord[] = [];
@@ -380,6 +407,53 @@
 	// contracts/atlas-root-ui.md). When SITE_MODE !== 'atlas-root' this
 	// variable is unused and tree-shaken.
 	let backdropDensity = 0.25;
+
+	// Stage 15 — atlas.parquet hydration state. Loaded lazily on mount
+	// when SITE_MODE === 'atlas-root'. Mobile detection (R-011) is
+	// deferred to the AtlasUmapPanel; for now the full backdrop loads
+	// unconditionally.
+	let atlasBackdrop: AtlasBackdropPoint[] = [];
+	let atlasOverlayPoints: AtlasOverlayPoint[] = [];
+	let atlasClusters: AtlasClusterRow[] = [];
+	let atlasLoading = false;
+	let atlasError: string | null = null;
+
+	async function loadAtlasData() {
+		if (SITE_MODE !== 'atlas-root') return;
+		if (atlasLoading || atlasBackdrop.length > 0) return;
+		atlasLoading = true;
+		try {
+			const pkg = await loadDataPackage();
+			if (!pkg) {
+				atlasError = 'Atlas data package URL not configured.';
+				return;
+			}
+			const backdropShard = pkg.get('data/atlas/backdrop_full.json') as
+				| { points: AtlasBackdropPoint[] }
+				| undefined;
+			const overlayShard = pkg.get('data/atlas/ohbm_overlay.json') as
+				| { points: AtlasOverlayPoint[] }
+				| undefined;
+			const clustersShard = pkg.get('data/atlas/clusters.json') as
+				| { clusters: AtlasClusterRow[] }
+				| undefined;
+			if (!backdropShard || !overlayShard || !clustersShard) {
+				atlasError = 'Atlas data package is missing one of the expected row groups.';
+				return;
+			}
+			atlasBackdrop = backdropShard.points;
+			atlasOverlayPoints = overlayShard.points;
+			atlasClusters = clustersShard.clusters;
+		} catch (err) {
+			atlasError = `failed to load atlas data: ${(err as Error)?.message ?? String(err)}`;
+		} finally {
+			atlasLoading = false;
+		}
+	}
+
+	onMount(() => {
+		void loadAtlasData();
+	});
 </script>
 
 {#if SITE_MODE === 'atlas-root'}
@@ -394,11 +468,23 @@
 				<AtlasOverlayToggle />
 				<BackdropDensitySlider bind:value={backdropDensity} />
 			</div>
-			<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-placeholder">
-				<p class="placeholder-text">
-					Cross-conference atlas scatter — wiring in progress (US1 T045).
-				</p>
-			</div>
+			{#if atlasError}
+				<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-error" role="alert">
+					<p class="placeholder-text">{atlasError}</p>
+				</div>
+			{:else if atlasLoading && atlasBackdrop.length === 0}
+				<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-loading">
+					<p class="placeholder-text">Loading cross-conference atlas…</p>
+				</div>
+			{:else}
+				<AtlasUmapPanel
+					backdropPoints={atlasBackdrop}
+					overlayPoints={atlasOverlayPoints}
+					clusters={atlasClusters}
+					showOverlay={$atlasOverlay}
+					backdropOpacity={backdropDensity}
+				/>
+			{/if}
 		</main>
 	</div>
 {:else}
