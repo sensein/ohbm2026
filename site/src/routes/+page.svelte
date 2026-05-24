@@ -518,7 +518,13 @@
 				<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-error" role="alert">
 					<p class="placeholder-text">{atlasError}</p>
 				</div>
-			{:else if atlasLoading && atlasBackdrop.length === 0}
+			{:else if atlasBackdrop.length === 0}
+				<!-- Render the loading placeholder whenever data hasn't
+				     populated yet — covers SSR (atlasLoading=false), the
+				     client-hydration window (atlasLoading=true,
+				     atlasBackdrop=[]), AND any future case where the
+				     load is retried. The user always sees a visible
+				     "Loading…" state instead of a blank/empty panel. -->
 				<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-loading">
 					<p class="placeholder-text">
 						Loading {SITE_MODE === 'atlas-root' ? 'cross-conference atlas' : 'NeuroScape atlas'}…
@@ -534,6 +540,11 @@
 							value={atlasProgressPercent}
 							max="100"
 							data-testid="atlas-loading-progressbar"
+						></progress>
+					{:else if atlasProgressLoaded > 0}
+						<!-- Indeterminate bar when the server didn't expose
+						     Content-Length and we only know "bytes so far". -->
+						<progress class="atlas-progress" data-testid="atlas-loading-indeterminate"
 						></progress>
 					{/if}
 				</div>
