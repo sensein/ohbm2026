@@ -562,15 +562,24 @@
 				atlasOverlayPoints = overlayShard.points;
 				atlasClusters = clustersShard.clusters;
 				// T043 — Fire the sibling-state-key drift check in the
-				// background. The scatter renders immediately with the
-				// atlas data; if the check completes with a mismatch,
-				// a banner appears on top. The check itself is HTTP-Range-
-				// limited (~10 KB per sibling), so the network cost is
-				// trivial compared to the 34 MB atlas parquet we just
-				// finished streaming.
+				// background. Banner shows ONLY on `mismatch` (confirmed
+				// state-key disagreement). fetch-failed / no-state-key
+				// are ambiguous — could be transient network, CORS
+				// preflight on Range requests, or a sibling not yet
+				// deployed — and are logged for debuggability without
+				// alarming the visitor. R-012 calls for a visible
+				// banner on real drift; "we couldn't check" is a
+				// different signal.
 				const manifest = pkg.get('data/manifest.json');
 				void verifyAtlasSiblingDrift(manifest).then((result) => {
-					if (!result.ok) atlasDrift = result.drift;
+					if (result.ok) return;
+					const confirmed = result.drift.filter((d) => d.reason === 'mismatch');
+					const noisy = result.drift.filter((d) => d.reason !== 'mismatch');
+					if (noisy.length > 0) {
+						// eslint-disable-next-line no-console
+						console.warn('[atlas-root] sibling state-key check skipped:', noisy);
+					}
+					if (confirmed.length > 0) atlasDrift = confirmed;
 				});
 			} else if (SITE_MODE === 'neuroscape') {
 				const articlesShard = pkg.get('data/neuroscape/articles.json') as
