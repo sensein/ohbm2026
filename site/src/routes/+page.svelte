@@ -28,6 +28,18 @@
 	import { semanticStatus } from '$lib/search/semantic';
 	import { cartStore } from '$lib/stores/cart';
 	import CartDrawer from '$lib/components/CartDrawer.svelte';
+	// Stage 15 (spec 015-neuroscape-context, FR-008/FR-009/FR-013/FR-014):
+	// the bare-root cross-conference atlas landing page mounts a small
+	// chrome (header + binary toggle + density slider) in place of the
+	// existing OHBM-2026-only home page. SITE_MODE is a build-time
+	// constant (Vite substitutes `import.meta.env.VITE_SITE_MODE` at
+	// compile time), so the {#if SITE_MODE === 'atlas-root'} branch
+	// below is dead-code eliminated in the 'ohbm2026' / 'neuroscape'
+	// builds — FR-022 byte-identity is preserved.
+	import { SITE_MODE } from '$lib/site_mode';
+	import LandingPageHeader from '$lib/components/LandingPageHeader.svelte';
+	import AtlasOverlayToggle from '$lib/components/AtlasOverlayToggle.svelte';
+	import BackdropDensitySlider from '$lib/components/BackdropDensitySlider.svelte';
 
 	let manifest: Manifest | null = null;
 	let abstracts: AbstractRecord[] = [];
@@ -362,8 +374,34 @@
 		for (const id of small) if (large.has(id)) out.add(id);
 		return out;
 	}
+
+	// Stage 15 — backdrop opacity for the bare-root atlas landing page
+	// (FR-013). Not persisted (defaults to 0.25 on every visit per
+	// contracts/atlas-root-ui.md). When SITE_MODE !== 'atlas-root' this
+	// variable is unused and tree-shaken.
+	let backdropDensity = 0.25;
 </script>
 
+{#if SITE_MODE === 'atlas-root'}
+	<!-- Stage 15 bare-root cross-conference atlas landing page. The
+	     UmapPanel adapter (T045) lands the actual scatter; for now the
+	     route exists, the chrome renders, and the binary toggle +
+	     density slider are wired to their stores. -->
+	<div class="atlas-root-home" data-testid="atlas-root-home">
+		<LandingPageHeader />
+		<main class="atlas-root-main">
+			<div class="atlas-controls" data-testid="atlas-root-controls">
+				<AtlasOverlayToggle />
+				<BackdropDensitySlider bind:value={backdropDensity} />
+			</div>
+			<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-placeholder">
+				<p class="placeholder-text">
+					Cross-conference atlas scatter — wiring in progress (US1 T045).
+				</p>
+			</div>
+		</main>
+	</div>
+{:else}
 <div class="home" class:has-focus={focused !== null}>
 	<div class="top-row">
 		<div class="search-row">
@@ -545,8 +583,44 @@
 		</div>
 	{/if}
 </div>
+{/if}
 
 <style>
+	/* Stage 15 atlas-root chrome. Dead-CSS-eliminated in
+	   non-atlas-root builds (the markup branch is gone, so Svelte
+	   marks these selectors as unused and they don't ship). */
+	.atlas-root-home {
+		display: flex;
+		flex-direction: column;
+		min-height: 100vh;
+	}
+	.atlas-root-main {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		padding: 1rem 1.25rem;
+		gap: 1rem;
+	}
+	.atlas-controls {
+		display: flex;
+		gap: 1rem;
+		align-items: center;
+		flex-wrap: wrap;
+	}
+	.atlas-scatter-placeholder {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px dashed var(--color-border, rgba(0, 0, 0, 0.2));
+		border-radius: 6px;
+		min-height: 50vh;
+	}
+	.placeholder-text {
+		color: var(--color-text-muted, #666);
+		margin: 0;
+	}
+
 	.home {
 		display: flex;
 		flex-direction: column;

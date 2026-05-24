@@ -13,6 +13,14 @@
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import Tour from '$lib/components/Tour.svelte';
 	import { tourStore, tourFlags } from '$lib/stores/tour';
+	// Stage 15 (spec 015-neuroscape-context): the bare-root cross-
+	// conference atlas landing page uses its own minimal shell
+	// (`LandingPageHeader` is rendered by `+page.svelte`'s atlas-root
+	// branch). Skip the OHBM-2026-only chrome when SITE_MODE is
+	// 'atlas-root'. SITE_MODE is a build-time constant so the
+	// non-atlas branch tree-shakes in ohbm2026 / neuroscape builds
+	// — FR-022 byte-identity preserved.
+	import { SITE_MODE } from '$lib/site_mode';
 
 	const FEEDBACK_REPO = 'sensein/ohbm2026';
 
@@ -138,9 +146,26 @@
 </script>
 
 <svelte:head>
-	<title>OHBM 2026 Atlas (beta)</title>
+	{#if SITE_MODE === 'atlas-root'}
+		<title>Abstract Atlas — OHBM 2026 in the NeuroScape neuroscience landscape</title>
+	{:else}
+		<title>OHBM 2026 Atlas (beta)</title>
+	{/if}
 </svelte:head>
 
+{#if SITE_MODE === 'atlas-root'}
+	<!-- Stage 15 atlas-root build: the landing page renders its own
+	     header chrome via `LandingPageHeader` in `+page.svelte`'s
+	     atlas-root branch. The slot is the entire page; we wrap it
+	     only in the BuildInfo footer so the deploy SHA / data state-
+	     key stays visible. -->
+	<div class="atlas-root-shell">
+		<main class="atlas-root-slot">
+			<slot />
+		</main>
+		<BuildInfoFooter deployBuildInfo={envBuildInfo} {dataBuildInfo} />
+	</div>
+{:else}
 <div class="shell">
 	<header>
 		<div class="header-row">
@@ -238,8 +263,23 @@
 
 	<BuildInfoFooter deployBuildInfo={envBuildInfo} {dataBuildInfo} />
 </div>
+{/if}
 
 <style>
+	/* Stage 15 atlas-root layout shell. Dead-CSS-eliminated in
+	   non-atlas-root builds when Svelte sees the markup branch is
+	   gone. */
+	.atlas-root-shell {
+		min-height: 100vh;
+		display: flex;
+		flex-direction: column;
+	}
+	.atlas-root-slot {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+	}
+
 	.shell {
 		min-height: 100vh;
 		display: flex;
