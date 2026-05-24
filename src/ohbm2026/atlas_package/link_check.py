@@ -77,8 +77,17 @@ DEFAULT_LINKS: tuple[dict[str, str], ...] = (
         "url": "https://abstractatlas.brainkb.org/",
     },
     {
+        # NCBI's E-utilities bare directory returns 400 to any
+        # request (it requires a specific endpoint). Use `einfo.fcgi`
+        # with `db=pubmed` — the cheapest valid call: returns 200
+        # via the GET fallback inside `_head()` (NCBI's HEAD is 405).
+        # This still verifies that (a) the host is reachable, (b)
+        # the entrez/eutils path is live, and (c) PubMed is a
+        # configured E-utilities database. The runtime fetch (R-015)
+        # hits `efetch.fcgi`; success on `einfo.fcgi` implies the
+        # E-utilities surface is up.
         "name": "ncbi_eutils_base",
-        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+        "url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi?db=pubmed",
     },
 )
 
