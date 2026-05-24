@@ -83,7 +83,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Container format for the emitted data package. "
             "`parquet-single` (default) is the canonical Stage-10 export — "
-            "one `data.parquet` file with all logical tables as per-row "
+            "one `ohbm2026.parquet` file (renamed from `data.parquet` in "
+            "Stage 15 / spec 015 FR-022) with all logical tables as per-row "
             "Parquet blobs. `gzip-json-shards` is the Stage-6 legacy "
             "emitter, kept for one-off dev comparisons."
         ),

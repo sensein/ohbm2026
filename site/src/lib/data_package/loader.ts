@@ -2,13 +2,28 @@
  * Runtime data-package loader.
  *
  * The deployed site doesn't bundle any data. At runtime, the client
- * fetches the single `data.parquet` file from `VITE_DATA_PACKAGE_URL`
- * (a Dropbox / CDN URL), parses it via `hyparquet`, and returns a
+ * fetches a single `*.parquet` file from a per-deployment env var,
+ * parses it via `hyparquet`, and returns a
  * `Map<path, JsonValue | Uint8Array>` whose keys are the legacy
  * shard paths (`data/manifest.json`, `data/cells/<key>.json`, ...).
  * UI consumers in `$lib/shards` keep their existing import surface
  * unchanged; the map shape is identical to the old tarball loader's
  * output so no Stage-6 component needed a refactor.
+ *
+ * Stage 15 (spec 015-neuroscape-context, FR-022) renamed the
+ * canonical OHBM 2026 file from `data.parquet` to
+ * `ohbm2026.parquet` and split the URL by deployment mode:
+ *
+ *   - `VITE_DATA_PACKAGE_URL_OHBM2026` → `ohbm2026.parquet` (the
+ *     `/ohbm2026/` SvelteKit build reads this).
+ *   - `VITE_DATA_PACKAGE_URL_NEUROSCAPE` → `neuroscape.parquet`
+ *     (the `/neuroscape/` build reads this; landed via T069).
+ *   - `VITE_DATA_PACKAGE_URL_ATLAS` → `atlas.parquet` (the bare-root
+ *     cross-conference build reads this; landed via T042).
+ *
+ * The legacy `VITE_DATA_PACKAGE_URL` is honoured as a fallback for
+ * one deploy cycle so a stale GitHub Actions repo variable does not
+ * silently break production.
  *
  * The outer Parquet file has one row per logical table, with the
  * table's own Parquet bytes in a `table_bytes` BLOB column. We decode
@@ -18,11 +33,35 @@
 
 import { parquetReadObjects } from 'hyparquet';
 import { compressors } from 'hyparquet-compressors';
+import { SITE_MODE } from '$lib/site_mode';
 
 let packageCache: Promise<Map<string, unknown> | null> | null = null;
 
+function pickRawUrl(): string | undefined {
+	const env = import.meta.env;
+	// Stage-15 per-mode URL variables. The legacy single
+	// `VITE_DATA_PACKAGE_URL` is honoured as a final fallback so a
+	// not-yet-updated deploy-workflow repo variable doesn't break
+	// production silently.
+	if (SITE_MODE === 'neuroscape') {
+		return (env.VITE_DATA_PACKAGE_URL_NEUROSCAPE ?? env.VITE_DATA_PACKAGE_URL) as
+			| string
+			| undefined;
+	}
+	if (SITE_MODE === 'atlas-root') {
+		return (env.VITE_DATA_PACKAGE_URL_ATLAS ?? env.VITE_DATA_PACKAGE_URL) as
+			| string
+			| undefined;
+	}
+	// SITE_MODE === 'ohbm2026' (default): prefer the new per-mode
+	// variable; fall back to the legacy single variable.
+	return (env.VITE_DATA_PACKAGE_URL_OHBM2026 ?? env.VITE_DATA_PACKAGE_URL) as
+		| string
+		| undefined;
+}
+
 export function getDataPackageUrl(): string | null {
-	const url = import.meta.env.VITE_DATA_PACKAGE_URL;
+	const url = pickRawUrl();
 	if (!url) return null;
 	// Dropbox shared links served via `www.dropbox.com` redirect (HTTP 302)
 	// to `*.dl.dropboxusercontent.com`, but the redirect step itself lacks

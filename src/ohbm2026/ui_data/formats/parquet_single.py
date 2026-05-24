@@ -1,12 +1,16 @@
 """Stage-10 canonical: single-file Parquet container.
 
-One ``data.parquet`` file containing every logical table as a row,
-where each row holds serialized Parquet bytes for that table in a
-``table_bytes`` BLOB column. ``row_group_size=1`` is used so each
-row lands in its own row group — the Parquet footer then carries
-explicit per-row-group byte offsets, which the browser-side decoder
-can use to issue an HTTP Range request for exactly one logical
-table at a time (Phase-4 lazy load).
+One ``ohbm2026.parquet`` file (renamed from ``data.parquet`` in
+Stage 15 / spec 015-neuroscape-context FR-022 + SC-008 so the three
+sibling deployments at ``/``, ``/ohbm2026/``, ``/neuroscape/`` each
+read a uniquely-named parquet — see
+:data:`DEFAULT_OUTPUT_FILENAME` below) containing every logical
+table as a row, where each row holds serialized Parquet bytes for
+that table in a ``table_bytes`` BLOB column. ``row_group_size=1``
+is used so each row lands in its own row group — the Parquet
+footer then carries explicit per-row-group byte offsets, which the
+browser-side decoder can use to issue an HTTP Range request for
+exactly one logical table at a time (Phase-4 lazy load).
 
 This is the only Parquet variant compatible with the project's
 single-URL deploy model: the SvelteKit bundle is the only thing
@@ -97,6 +101,16 @@ def _facets_to_arrow(facets: Mapping[str, Any]) -> dict[str, list[str]]:
 # index columns on `abstracts`. Loader accepts both shapes for one
 # deploy cycle.
 PARQUET_FORMAT_VERSION = "parquet-single.v2"
+
+
+# Stage 15 (spec 015-neuroscape-context, FR-022 + SC-008): the
+# emitted single-file parquet was renamed from ``data.parquet`` to
+# ``ohbm2026.parquet`` so the three sibling deployments at ``/``,
+# ``/ohbm2026/``, and ``/neuroscape/`` each consume a uniquely-named
+# parquet. The byte content for a given input envelope is unchanged
+# by the rename — see ``tests/test_ohbm2026_parquet_rename.py`` for
+# the enforcing test.
+DEFAULT_OUTPUT_FILENAME = "ohbm2026.parquet"
 
 
 def _collect_standby_by_poster(envelope: Mapping[str, Any]) -> dict[int, dict]:
@@ -300,7 +314,7 @@ def write(
 ) -> set[Path]:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    target = out / "data.parquet"
+    target = out / DEFAULT_OUTPUT_FILENAME
 
     entries: list[tuple[str, bytes]] = []
 

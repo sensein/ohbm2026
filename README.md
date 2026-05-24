@@ -182,6 +182,40 @@ Optional, depending on which branch of the pipeline you run:
 - Voyage API access for Voyage embeddings
 - OpenAlex API key for authenticated reference matching
 
+### Stage 15 prerequisites (`ohbmcli build-atlas-package`)
+
+Stage 15 (spec `015-neuroscape-context`) builds the cross-conference
+atlas landing page and the new `/neuroscape/` subsite. Operators
+running `ohbmcli build-atlas-package` need the NeuroScape v1.0.1
+release on disk under `data/inputs/neuroscape-source/v101/` with this
+layout (gitignored):
+
+```text
+data/inputs/neuroscape-source/v101/
+└── Data/
+    ├── CSV/
+    │   ├── neuroscience_articles_1999-2023.csv   # one row per article: pmid, title, abstract, year, cluster_id, journal, doi, …
+    │   ├── neuroscience_clusters_1999-2023.csv   # cluster_id → title, description, keywords, focus, …
+    │   └── neuroscience_dimensions_1999-2023.csv # dimension axis labels (optional)
+    ├── HDF5/
+    │   ├── DomainEmbeddings/                     # 2307 `shard_*.h5` files — Stage-2 vectors (64-dim, ~200 articles/shard)
+    │   └── VoyageAIEmbeddings/                   # Stage-1 vectors (Voyage 1024-dim; not used by Stage-15 pipeline)
+    └── Models/
+        ├── domain_embedding_model.pth            # NeuroScape Stage-2 model checkpoint (sha 8a8e6931…)
+        └── discipline_classification_model.pth   # not used by Stage-15 pipeline
+```
+
+Scale: 461,316 articles across 175 clusters (the upstream clusters
+CSV holds 2,632 entries but only 175 are used at the top level — the
+Stage-15 orchestrator filters to clusters that appear in the articles
+CSV's `Cluster ID` column, mirroring the convention already used by
+`scripts/derive_neuroscape_centroids.py`).
+
+See [specs/015-neuroscape-context/quickstart.md](specs/015-neuroscape-context/quickstart.md)
+for the full operator runbook (download + rebuild + upload + deploy).
+The release is published on Zenodo; the orchestrator does not
+redistribute it.
+
 ## Environment Variables
 
 Create `.env` from [.env.sample](.env.sample).

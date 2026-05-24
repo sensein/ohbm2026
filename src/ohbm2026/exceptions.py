@@ -70,6 +70,13 @@ __all__ = [
     "Stage6Error",
     "BookBuildError",
     "PerAbstractRenderError",
+    "Stage15Error",
+    "NeuroScapeInputError",
+    "UmapFitError",
+    "OhbmProjectionError",
+    "CrossParquetDriftError",
+    "AtlasProvenanceError",
+    "AtlasLinkCheckError",
 ]
 
 
@@ -360,6 +367,164 @@ class PerAbstractRenderError(BookBuildError):
         self.poster_id = poster_id
         self.cache_key = cache_key
         self.pandoc_exit_code = pandoc_exit_code
+
+
+class Stage15Error(OhbmStageError):
+    """Base for any failure originating inside Stage 15 (build-atlas-package).
+
+    Concrete subclasses cover the five error paths enumerated in
+    ``specs/015-neuroscape-context/research.md#R-009`` plus the shared
+    provenance + link-check rules. Each subclass carries structured
+    kwargs so the orchestrator and tests can inspect failure context
+    without regex-matching message strings.
+    """
+
+
+class NeuroScapeInputError(Stage15Error):
+    """NeuroScape v1.0.1 release inputs are missing, malformed, or drifted.
+
+    Raised by ``atlas_package.neuroscape_loader.discover_inputs`` when a
+    required file is absent, the HDF5 shard manifest SHA does not match
+    the previously recorded ``hdf5_shard_manifest_sha256``, or the
+    article/cluster CSV columns no longer match the discovered schema.
+    Carries (``file``, ``expected``, ``actual``) so the operator can fix
+    the source layout without re-running diagnostics (CA-007).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        file: str | None = None,
+        expected: str | None = None,
+        actual: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.file = file
+        self.expected = expected
+        self.actual = actual
+
+
+class UmapFitError(Stage15Error):
+    """The UMAP fit step failed (numerical, OOM, or input-shape error).
+
+    Raised when ``umap_fit.fit`` cannot produce a valid 2D or 3D
+    embedding — most often because the input vector matrix contains
+    non-finite values (NaN / inf) or because the matrix is singular at
+    the requested ``n_neighbors``. Carries (``reason``, ``n_vectors``)
+    so the orchestrator can include the failure in provenance.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        n_vectors: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.n_vectors = n_vectors
+
+
+class OhbmProjectionError(Stage15Error):
+    """One or more OHBM 2026 abstracts could not be projected into the
+    NeuroScape UMAP space.
+
+    Aggregate semantic (R-009): the projector collects every failing
+    ``submission_id`` during the projection pass and the orchestrator
+    re-raises this exception ONCE at the end with the full id list.
+    A single bad record never aborts a 3K-record projection mid-stream
+    (resumability — Principle III).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failed_submission_ids: list[int] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.failed_submission_ids = list(failed_submission_ids or [])
+
+
+class CrossParquetDriftError(Stage15Error):
+    """The three publishable parquets have drifted out of agreement.
+
+    Raised by ``parquet_writer`` at build time when the ``clusters``
+    row group of ``neuroscape.parquet`` is not row-for-row equal to
+    the ``clusters`` row group of ``atlas.parquet``, OR when
+    ``atlas.parquet/manifest.sibling_state_keys`` references a
+    ``state_key`` that is not present in the corresponding sibling
+    parquet's manifest. Browser-side ``loader.ts`` surfaces the same
+    condition as a visible UI error banner at view time (R-012).
+
+    Carries (``parquet``, ``field``, ``expected``, ``actual``) so the
+    operator can identify the offending field without scanning the
+    full output.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        parquet: str | None = None,
+        field: str | None = None,
+        expected: str | None = None,
+        actual: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.parquet = parquet
+        self.field = field
+        self.expected = expected
+        self.actual = actual
+
+
+class AtlasProvenanceError(ProvenanceError, Stage15Error):
+    """Stage 15 provenance record cannot be written safely.
+
+    Specialises the shared :class:`ProvenanceError` so callers can
+    catch either "any provenance violation" or "specifically a Stage
+    15 provenance violation". Raised when a Stage 15 provenance field
+    contains an absolute path (starts with ``/``) or a user-home-
+    relative path (starts with ``~``) — both violate CA-008 (paths
+    must be repo-relative so the bundle is portable).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        field: str | None = None,
+        expected: str | None = None,
+        actual: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.field = field
+        self.expected = expected
+        self.actual = actual
+
+
+class AtlasLinkCheckError(Stage15Error):
+    """A build-time link-check against an external URL returned 4xx / 5xx.
+
+    Scope is narrow per R-013: only the small fixed set of non-PubMed-
+    record URLs is pre-checked (NeuroScape Zenodo / citation / OHBM
+    2026 site / cross-conference landing page / NCBI E-utilities
+    base). Per-PubMed-record URLs are validated at view time by the
+    runtime PubMed fetch (R-015), not at build time.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        url: str | None = None,
+        status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.url = url
+        self.status = status
 
 
 class CommunityResolutionDegenerate(Warning):

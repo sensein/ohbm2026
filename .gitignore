@@ -46,3 +46,13 @@ data/cache/analysis/
 data/provenance/analysis/
 data/inputs/neuroscape/
 bench/
+
+# Stage 15 artifact roots (spec 015-neuroscape-context, Principle II)
+data/inputs/neuroscape-source/
+data/cache/atlas-umap/
+data/cache/atlas-projection/
+data/cache/atlas-neighbours/
+data/cache/atlas-runs/
+data/outputs/atlas-package/
+data/outputs/parquets/
+data/provenance/neuroscape_context_provenance__*.json

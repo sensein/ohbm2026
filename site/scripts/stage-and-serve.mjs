@@ -59,25 +59,34 @@ async function stage() {
 	await cp(join(REDIRECT_DIR, 'index.html'), join(PUBLISH_DIR, 'index.html'));
 	await cp(join(REDIRECT_DIR, '404.html'), join(PUBLISH_DIR, '404.html'));
 	// Stage a data package so the e2e tests can run against real data
-	// without hitting the production Dropbox URL. Stage 10 ships parquet
-	// (`data.parquet`); the legacy tarball path was removed.
+	// without hitting the production Dropbox URL. Stage 10 shipped a
+	// single parquet; Stage 15 (spec 015-neuroscape-context FR-022)
+	// renamed it `data.parquet → ohbm2026.parquet` so the three
+	// sibling deployments at `/`, `/ohbm2026/`, `/neuroscape/` each
+	// read a uniquely-named parquet.
 	//
 	// Three sources, in preference order:
-	//   1. `OHBM2026_LOCAL_PARQUET` env var — an absolute path to a
-	//      `data.parquet` (e.g. the maintainer's local Dropbox sync at
-	//      `~/MIT Dropbox/.../ohbm2026/data.parquet`). Copied verbatim.
+	//   1. `OHBM2026_LOCAL_PARQUET` env var — an absolute path to an
+	//      `ohbm2026.parquet` (e.g. the maintainer's local Dropbox sync
+	//      at `~/MIT Dropbox/.../ohbm2026/ohbm2026.parquet`). Copied
+	//      verbatim to the new canonical filename.
 	//   2. `OHBM2026_LOCAL_TARBALL` env var — legacy fallback for the
 	//      Stage-6 tarball shape. Kept around so an older bundle still
 	//      works for ad-hoc dev. (Will be removed once Stage 11 lands.)
 	//   3. `site/static/data/` — re-tarred on the fly (Stage-6 shape).
 	//
-	// The build must have been done with `VITE_DATA_PACKAGE_URL`
-	// pointing at the URL served here (parquet → `…/data.parquet`,
-	// tarball → `…/data-package.tar.gz`).
+	// The build must have been done with the per-mode URL env var
+	// pointing at the file served here. For Stage 15 the variables
+	// split per `SITE_MODE`:
+	//   - SITE_MODE=ohbm2026   → VITE_DATA_PACKAGE_URL_OHBM2026   → ohbm2026.parquet
+	//   - SITE_MODE=neuroscape → VITE_DATA_PACKAGE_URL_NEUROSCAPE → neuroscape.parquet
+	//   - SITE_MODE=atlas-root → VITE_DATA_PACKAGE_URL_ATLAS      → atlas.parquet
+	// The legacy `VITE_DATA_PACKAGE_URL` is still honoured by the
+	// loader as a one-cycle fallback so a stale build keeps working.
 	const localParquet = process.env.OHBM2026_LOCAL_PARQUET;
 	if (localParquet && existsSync(localParquet)) {
-		await cp(localParquet, join(PUBLISH_DIR, 'data.parquet'));
-		console.log(`stage-and-serve: data-package = ${localParquet} (parquet)`);
+		await cp(localParquet, join(PUBLISH_DIR, 'ohbm2026.parquet'));
+		console.log(`stage-and-serve: data-package = ${localParquet} → ohbm2026.parquet (parquet)`);
 		return;
 	}
 	const tarOut = join(PUBLISH_DIR, 'data-package.tar.gz');
