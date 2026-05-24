@@ -50,13 +50,26 @@
 		     deployment (a separately-built bundle under /ohbm2026/
 		     and /neuroscape/), NOT an in-app route. Without it the
 		     atlas-root prerender step would fail because no
-		     /ohbm2026/ route exists inside this bundle. -->
-		<a class="nav-link" href={OHBM2026_HREF} rel="external" data-testid="nav-ohbm2026"
-			>Browse OHBM 2026 abstracts <span class="arrow">→</span></a
-		>
-		<a class="nav-link" href={NEUROSCAPE_HREF} rel="external" data-testid="nav-neuroscape"
-			>Browse the NeuroScape PubMed atlas <span class="arrow">→</span></a
-		>
+		     /ohbm2026/ route exists inside this bundle.
+
+		     T071 — surface every sibling EXCEPT the one we're on.
+		     atlas-root shows both subsite links; ohbm2026 shows root
+		     + neuroscape; neuroscape shows root + ohbm2026. -->
+		{#if SITE_MODE !== 'atlas-root'}
+			<a class="nav-link" href={HOME_HREF} rel="external" data-testid="nav-root"
+				>Browse the cross-conference atlas <span class="arrow">→</span></a
+			>
+		{/if}
+		{#if SITE_MODE !== 'ohbm2026'}
+			<a class="nav-link" href={OHBM2026_HREF} rel="external" data-testid="nav-ohbm2026"
+				>Browse OHBM 2026 abstracts <span class="arrow">→</span></a
+			>
+		{/if}
+		{#if SITE_MODE !== 'neuroscape'}
+			<a class="nav-link" href={NEUROSCAPE_HREF} rel="external" data-testid="nav-neuroscape"
+				>Browse the NeuroScape PubMed atlas <span class="arrow">→</span></a
+			>
+		{/if}
 	</nav>
 	<div class="header-controls" data-testid="atlas-root-header-controls">
 		<ThemeToggle />

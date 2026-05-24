@@ -44,6 +44,7 @@
 	import AtlasRootDetailPanel from '$lib/components/AtlasRootDetailPanel.svelte';
 	import AtlasRootLassoResults from '$lib/components/AtlasRootLassoResults.svelte';
 	import DimensionalityToggle from '$lib/components/DimensionalityToggle.svelte';
+	import NeuroscapeBrowsePanel from '$lib/components/NeuroscapeBrowsePanel.svelte';
 	import { base } from '$app/paths';
 	import { atlasOverlay } from '$lib/stores/atlas_overlay';
 	import { dimensionality } from '$lib/stores/dimensionality';
@@ -650,10 +651,35 @@
 				<BackdropDensitySlider bind:value={backdropDensity} />
 				{#if SITE_MODE === 'neuroscape'}
 					<span class="neuroscape-tag" data-testid="neuroscape-mode-tag"
-						>NeuroScape PubMed atlas <em>· browse/search coming soon</em></span
+						>NeuroScape PubMed atlas · 1999–2023</span
 					>
 				{/if}
 			</div>
+			{#if SITE_MODE === 'neuroscape' && atlasBackdrop.length > 0}
+				<!-- T067 — NeuroScape browse panel. Title search + paginated
+				     result list bound to neuroscape.parquet's articles +
+				     clusters. Clicking a row navigates to /neuroscape/
+				     abstract/<pubmed_id>/; clicking the inline "On atlas"
+				     control navigates with ?focus=… so the scatter can
+				     centre + highlight the point (focus handler reads URL
+				     params on mount + reactively). -->
+				<NeuroscapeBrowsePanel
+					articles={atlasBackdrop}
+					clustersById={atlasClustersById}
+					on:focus={(ev) => {
+						// In-page navigation rather than a full reload — Svelte
+						// reactivity picks up the new ?focus param via $page.url
+						// (the +layout.svelte instance is reused).
+						const url = new URL(window.location.href);
+						url.searchParams.set('focus', String(ev.detail.pubmed_id));
+						url.searchParams.set('cluster', String(ev.detail.cluster_id));
+						window.history.pushState({}, '', url);
+						// Scroll the scatter section into view as a visible cue.
+						const el = document.querySelector('[data-testid="atlas-umap-panel"]');
+						if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+					}}
+				/>
+			{/if}
 			{#if atlasError}
 				<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-error" role="alert">
 					<p class="placeholder-text">{atlasError}</p>
