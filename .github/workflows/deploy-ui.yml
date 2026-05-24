@@ -234,6 +234,20 @@ jobs:
           build_mode ohbm2026    "$BASE_PATH_ROOT/ohbm2026"    "$STAGE_ROOT/ohbm2026"
           build_mode neuroscape  "$BASE_PATH_ROOT/neuroscape"  "$STAGE_ROOT/neuroscape"
 
+          # Stage 15 — install the multi-mode-aware 404 redirect at
+          # the deploy root. gh-pages serves the ROOT 404.html for any
+          # unresolved path; the atlas-root build's SvelteKit-generated
+          # 404.html only knows the atlas-root home route, so a deep
+          # link like <host>/neuroscape/abstract/<pubmed_id>/ would
+          # 404 into the wrong SPA. The shim in
+          # conference-root-redirect/404.html detects the subpath
+          # (/ohbm2026/ vs /neuroscape/ vs neither) and bounces with
+          # ?spa=<original-path> to the right mode's SvelteKit shell,
+          # which `+layout.svelte` handles via the existing
+          # spa-restore path in onMount.
+          cp conference-root-redirect/404.html "$STAGE_ROOT/404.html"
+          echo "404 redirect shim installed at $STAGE_ROOT/404.html ($(wc -c < "$STAGE_ROOT/404.html") bytes)"
+
       - name: Publish to gh-pages
         uses: peaceiris/actions-gh-pages@v3
         with:

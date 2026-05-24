@@ -108,6 +108,20 @@ jobs:
           build_mode ohbm2026    "$BASE_PATH_ROOT/ohbm2026"    "$STAGE_ROOT/ohbm2026"
           build_mode neuroscape  "$BASE_PATH_ROOT/neuroscape"  "$STAGE_ROOT/neuroscape"
 
+          # Stage 15 — gh-pages serves the PR-root 404.html (the first
+          # one found walking up from the requested path) for any
+          # unresolved path under /pr-N/. The atlas-root build's
+          # SvelteKit-generated 404.html only handles atlas-root home
+          # routes; a deep link like
+          # /pr-N/neuroscape/abstract/<pubmed_id>/ would 404 into the
+          # atlas-root SPA shell and lose its target. Overwrite with
+          # the multi-mode-aware redirect shim from
+          # conference-root-redirect/404.html, which bounces each
+          # mode's deep link to that mode's own SPA via
+          # ?spa=<original-path>.
+          cp conference-root-redirect/404.html "$STAGE_ROOT/404.html"
+          echo "404 redirect shim installed at $STAGE_ROOT/404.html ($(wc -c < "$STAGE_ROOT/404.html") bytes)"
+
       - name: Publish to gh-pages /pr-${{ github.event.pull_request.number }}
         uses: peaceiris/actions-gh-pages@v3
         with:
