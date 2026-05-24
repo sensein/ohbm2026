@@ -168,31 +168,54 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/014-poster-id-nav/plan.md`. The companion design artefacts
-under the same directory — `research.md`, `data-model.md`,
-`contracts/poster-id-input.md`, and `quickstart.md` — pin Stage 14: a
-UI-only "Go to poster" input that lets attendees jump straight to an
-abstract by number.
+at `specs/015-neuroscape-context/plan.md`. The companion design
+artefacts under the same directory — `research.md`, `data-model.md`,
+`contracts/parquet-schemas.md`, `contracts/atlas-root-ui.md`,
+`contracts/cli-build-atlas-package.md`, and `quickstart.md` — pin
+Stage 15: a cross-conference atlas landing page at the bare root
+(replacing the Stage 9 meta-refresh redirect) plus a new NeuroScape
+PubMed subsite at `/neuroscape/`, with the existing `/ohbm2026/`
+site **untouched** beyond a data-loader path string change.
 
-**US1 — Jump-to-poster input on the home + permalink pages**: a
-small `<PosterIdInput>` component mounted in both routes. Submit
-parses `0345` / `345` / ` 345 ` to the integer id, validates against
-the in-memory `abstractsByPosterId` map (the Stage-10 single-parquet
-lookup), and calls SvelteKit's `goto('/abstract/<id>/')` on success.
-Invalid / not-found ids show an inline `aria-live` error and keep
-the user on the home page.
+**Architecture — three sibling deployments on one gh-pages host**:
+`abstractatlas.brainkb.org/` (atlas-root mode; binary "Show OHBM
+2026 overlay" toggle on a NeuroScape PubMed backdrop colour-coded
+by cluster); `/ohbm2026/` (unchanged); `/neuroscape/` (new; full
+~600K-article PubMed corpus with search + detail). One SvelteKit
+project, three build modes via `SITE_MODE` env + `BASE_PATH`.
 
-**US2 — Keyboard shortcut**: pressing `g` (no modifiers) from
-anywhere on the home or permalink pages focuses the
-PosterIdInput. The handler ignores `g` when another input /
-textarea / contenteditable is already focused.
+**Three-parquet data layout**: `ohbm2026.parquet` (renamed from
+`data.parquet`, content-identical), `neuroscape.parquet` (new — full
+NeuroScape 1999–2023 corpus + cluster table + k=20 neighbours +
+lexical search index), `atlas.parquet` (new — landing-page scatter
+rows pointing into the two siblings by stable id; bodies NOT
+duplicated). `atlas.parquet`'s `build_info` embeds the two sibling
+state-keys for drift detection — the browser-side loader surfaces a
+visible error banner on mismatch, never a silent partial scatter.
 
-Pure client-side feature: no parquet rebuild, no Python changes, no
-new external dependencies. Pure-function parser/validator lives at
-`site/src/lib/goto_poster.ts`; the Svelte component is a thin render
-layer. vitest covers the parser; Playwright covers the full flow.
+**New Python orchestrator `ohbmcli build-atlas-package`** reads the
+NeuroScape v1.0.1 release (HDF5 shards + CSVs + checkpoint, same
+inputs as `scripts/derive_neuroscape_centroids.py`), fits a
+deterministic 2D + 3D UMAP on Stage-2 vectors (seed=0,
+n_neighbors=30, min_dist=0.10, metric=cosine), projects OHBM 2026
+abstracts via `umap.transform` using the existing
+`voyage_stage2_published` recipe, and emits `neuroscape.parquet` +
+`atlas.parquet`. Two caches (UMAP fit, per-abstract projection)
+make a second invocation byte-identical and <60s.
+
+**Constitution-critical guarantees**: byte-identical `/ohbm2026/`
+build output before vs after this change (FR-022 / SC-008, CI-
+enforced); precise typed exceptions across the new
+`Stage15Error` subtree for every error path (FR-026); link-checked
+PubMed/DOI/citation URLs at build time block the deploy
+(FR-024 / SC-006); no new credentials needed; all new artefact
+roots are gitignored.
 
 Previous-stage plans:
+- Stage 14 poster-id navigator: `specs/014-poster-id-nav/plan.md`
+  (extended the existing `<SearchBar>` with an `id:` operator and
+  autocomplete dropdown over the in-memory `abstractsByPosterId`
+  map; pure client-side, no parquet rebuild). Shipped in PR #35.
 - Stage 12 book layout polish + acknowledgments + permalink UX:
   `specs/013-book-layout-polish/plan.md`. Six bundled stories:
   acknowledgments on the permalink page, brief-preview UX with
