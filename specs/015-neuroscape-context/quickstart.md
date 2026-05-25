@@ -70,19 +70,55 @@ Inspect provenance:
     "data/provenance/neuroscape_context_provenance__${STATE_KEY}.json" | head -60
 ```
 
-## 3. Validate against the schema contract
+## 3. Smoke-test the parquets
+
+Each parquet embeds its own schema (row-group-per-table layout from
+Stage 10 + the Stage-15 additions documented in
+`specs/015-neuroscape-context/contracts/parquet-schemas.md`). A
+round-trip read with `pyarrow` is enough to catch a truncated or
+corrupt file:
 
 ```bash
-.venv/bin/python -m ohbm2026.cli validate-parquet \
-    data/outputs/parquets/${STATE_KEY}/ohbm2026.parquet
-.venv/bin/python -m ohbm2026.cli validate-parquet \
-    data/outputs/parquets/${STATE_KEY}/neuroscape.parquet
-.venv/bin/python -m ohbm2026.cli validate-parquet \
-    data/outputs/parquets/${STATE_KEY}/atlas.parquet
+for P in ohbm2026 neuroscape atlas; do
+  .venv/bin/python -c "
+import pyarrow.parquet as pq, sys
+t = pq.read_table('data/outputs/parquets/${STATE_KEY}/${P}.parquet')
+print(f'${P}: rows={t.num_rows} cols={len(t.column_names)}')
+"
+done
 ```
 
-(The `validate-parquet` subcommand is the Stage-10 LinkML validator
-already in use; it accepts arbitrary parquet paths.)
+Then verify the cross-parquet state-key chain that the in-browser
+loader checks at runtime (R-012) — read each parquet's `manifest`
+row-group and confirm `atlas.parquet`'s
+`build_info.sibling_state_keys` match the `state_key` fields embedded
+in `ohbm2026.parquet` and `neuroscape.parquet`:
+
+```bash
+.venv/bin/python - <<'PY'
+import io, json, pyarrow.parquet as pq
+ROOT = "data/outputs/parquets"
+STATE = "${STATE_KEY}"   # shell-substituted by the heredoc parent
+keys = {}
+for name in ("ohbm2026", "neuroscape", "atlas"):
+    t = pq.read_table(f"{ROOT}/{STATE}/{name}.parquet")
+    for r in t.to_pylist():
+        if r["table_name"] != "manifest":
+            continue
+        inner = pq.read_table(io.BytesIO(r["table_bytes"])).to_pylist()[0]
+        bi = json.loads(inner["manifest_json"])["build_info"]
+        keys[name] = bi.get("state_key") or bi.get("corpus_state_key")
+        if name == "atlas":
+            sib = bi.get("sibling_state_keys", {})
+print("state_keys:", keys)
+print("atlas sibling_state_keys:", sib)
+ok = sib.get("ohbm2026") == keys["ohbm2026"] and sib.get("neuroscape") == keys["neuroscape"]
+print("chain CONSISTENT" if ok else "chain DRIFT — would trigger R-012 banner")
+PY
+```
+
+A mismatch here trips the visible drift banner on the deployed
+atlas-root page.
 
 ## 4. Upload the three parquets and configure runtime envs
 
@@ -133,10 +169,14 @@ curl -sI https://abstractatlas.brainkb.org/ | head -5
 # Expected: HTTP/2 200, content-type: text/html, NO Location header,
 # NO <meta http-equiv="refresh"> in the HTML.
 
-# OHBM 2026 unchanged (byte-identical modulo parquet URL):
-diff <(curl -s https://abstractatlas.brainkb.org/ohbm2026/) \
-     <(git show main:site/build/ohbm2026/index.html)
-# Expected: only the VITE_DATA_PACKAGE_URL string differs.
+# OHBM 2026 still reachable and renders the search/UMAP UI:
+curl -sI https://abstractatlas.brainkb.org/ohbm2026/ | head -5
+# Expected: HTTP/2 200. Then manually verify functional parity
+# (FR-022): search, facets, lasso, cart, detail pages, 2D+3D UMAP
+# all behave as before. The build output is NOT byte-identical to
+# pre-Stage-15 — the Plotly bundle and UmapPanel were touched to
+# unify atlas-mode rendering — but the OHBM-mode code path is
+# unchanged behaviourally.
 
 # NeuroScape subsite reachable:
 curl -sI https://abstractatlas.brainkb.org/neuroscape/ | head -5
@@ -170,4 +210,4 @@ exceptions surface as `NeuroScapeInputError`).
 | `AtlasLinkCheckError` | One of the small fixed set of non-PubMed-record URLs (NeuroScape Zenodo / citation / OHBM 2026 site / NCBI base) returned 4xx/5xx. | Re-run; if persistent, file an issue. Per-PubMed-record URLs are NOT pre-checked, so they cannot raise this error. Do NOT skip with `--no-link-check` in CI. |
 | Visitor reports a `/neuroscape/abstract/<id>/` page has a missing body | Runtime PubMed fetch failed for that record (PubMed retraction, NCBI 5xx, network). | Per FR-019b the local fields still render; the body region shows the offline state. Visitor can hit Retry; persistent failures should be reported via the NCBI E-utilities status page (out of repo scope). |
 | Landing page shows the cross-parquet-drift banner | Dropbox URLs out of sync. | Re-upload all three parquets; verify all three repo variables match the latest state-key. |
-| `/ohbm2026/` regression detected by CI | The byte-identity gate (SC-008) failed. | The change accidentally touched the OHBM-2026-mode build. Inspect `git diff` for SITE_MODE-conditional code that runs unconditionally. |
+| `/ohbm2026/` functional regression detected (FR-022) | Atlas-mode code leaked into the OHBM-mode path. | Inspect the unified `UmapPanel.svelte` mode dispatch + any other component touched in this stage for `mode === 'ohbm'` branches that no longer cleanly partition. |

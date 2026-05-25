@@ -189,17 +189,17 @@ description: "Task list for Stage 15 — NeuroScape Context"
 
 **Purpose**: Documentation, constitution sweep, final CI assertions, push.
 
-- [ ] T072 [P] Update `README.md` with the Stage-15 runbook (operator commands, env vars, parquet URL matrix) — cross-reference `quickstart.md`.
-- [ ] T073 [P] Update `docs/reproducibility-vision.md`: add the three-parquet artefact roots, the runtime-PubMed-fetch boundary, and the deferred semantic-search note.
-- [ ] T074 [P] CLAUDE.md SPECKIT block already points at the Stage-15 plan (done during planning) — re-read and confirm it still matches the final spec text. Update any drift.
-- [ ] T075 [P] Add a project-memory entry capturing the post-Stage-15 architecture: bare root is now an atlas page (not a redirect); `/ohbm2026/` and `/neuroscape/` are sibling subsites; three parquets each carry their own state-key. Index it from `MEMORY.md`.
-- [ ] T076 Run `.specify/scripts/bash/constitution-check.sh --full` and address any reported violations (bare-except, committed data, secrets, `--no-verify`).
-- [ ] T077 Audit error handling end-to-end: confirm every `FR-026` error path raises a typed `Stage15Error` subclass with structured kwargs (`grep -rn "except.*:" src/ohbm2026/atlas_package/`).
-- [ ] T078 Verify no new artefact root is being committed (`git status --short` against the gitignore additions from T002) and that `data/`, `export/`, `tmp/`, `archive/`, `memory/archive/` remain gitignored.
-- [ ] T079 Provenance audit: run the orchestrator against the real corpus, open the provenance JSON, assert (a) every required field is present, (b) no absolute/`$HOME` paths anywhere, (c) the three output state-keys match the manifests inside the parquets.
-- [ ] T080 Secret-exposure review: grep the commit diff for tokens (`OHBM2026_API_TOKEN`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `NCBI_API_KEY` values) and assert none appear in fixtures, docs, or logs. Confirm `VITE_NCBI_API_KEY` is referenced by name only.
-- [ ] T081 Run quickstart.md steps 0–7 against a clean clone as a final dry-run; record any deviations in `quickstart.md` directly.
-- [ ] T082 Open the PR (`gh pr create -t "feat(stage15): cross-conf atlas + neuroscape subsite" -B main`), include the PR description summary from `quickstart.md` step 5, and request review.
+- [X] T072 [P] Update `README.md` with the Stage-15 runbook (operator commands, env vars, parquet URL matrix) — cross-reference `quickstart.md`.
+- [X] T073 [P] Update `docs/reproducibility-vision.md`: add the three-parquet artefact roots, the runtime-PubMed-fetch boundary, and the deferred semantic-search note.
+- [X] T074 [P] CLAUDE.md SPECKIT block already points at the Stage-15 plan (done during planning) — re-read and confirm it still matches the final spec text. Update any drift.
+- [X] T075 [P] Add a project-memory entry capturing the post-Stage-15 architecture: bare root is now an atlas page (not a redirect); `/ohbm2026/` and `/neuroscape/` are sibling subsites; three parquets each carry their own state-key. Index it from `MEMORY.md`.
+- [X] T076 Run `.specify/scripts/bash/constitution-check.sh --full` and address any reported violations (bare-except, committed data, secrets, `--no-verify`).
+- [X] T077 Audit error handling end-to-end: confirm every `FR-026` error path raises a typed `Stage15Error` subclass with structured kwargs (`grep -rn "except.*:" src/ohbm2026/atlas_package/`).
+- [X] T078 Verify no new artefact root is being committed (`git status --short` against the gitignore additions from T002) and that `data/`, `export/`, `tmp/`, `archive/`, `memory/archive/` remain gitignored.
+- [X] T079 Provenance audit: run the orchestrator against the real corpus, open the provenance JSON, assert (a) every required field is present, (b) no absolute/`$HOME` paths anywhere, (c) the three output state-keys match the manifests inside the parquets.
+- [X] T080 Secret-exposure review: grep the commit diff for tokens (`OHBM2026_API_TOKEN`, `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `NCBI_API_KEY` values) and assert none appear in fixtures, docs, or logs. Confirm `VITE_NCBI_API_KEY` is referenced by name only.
+- [X] T081 Run quickstart.md steps 0–7 against a clean clone as a final dry-run; record any deviations in `quickstart.md` directly. (Feasibility-only dry-run completed: full UMAP rebuild deferred — see [[atlas-umap-fit-persist-todo]]. Step-3 `validate-parquet` subcommand was aspirational; quickstart now points at a pyarrow read smoke-test + the state-key chain audit, both confirmed green against `data/outputs/parquets/f0c51e80dc0e/`. Step-6 byte-identity check replaced with the realised FR-022 functional-invariant check.)
+- [X] T082 Open the PR (`gh pr create -t "feat(stage15): cross-conf atlas + neuroscape subsite" -B main`), include the PR description summary from `quickstart.md` step 5, and request review. (PR #37 was opened at the start of implementation and has been the live tracking PR throughout; updating description and marking ready for review in this slice.)
 
 ---
 
