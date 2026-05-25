@@ -1,0 +1,80 @@
+name: deploy-root-404
+#
+# Surgical "root-404-only" publisher. Updates ONLY the gh-pages
+# root `/404.html` from `site/conference-root-redirect/404.html`,
+# without touching the rest of the deployed tree.
+#
+# Why this exists. gh-pages serves a SINGLE root `/404.html` for
+# every unresolved path host-wide — sub-directory 404.html files
+# are NOT honoured. The full `deploy-ui.yml` workflow does update
+# this file (it's the atlas-root build's 404.html), but only as
+# part of a complete production deploy that ALSO rebuilds + ships
+# the `/ohbm2026/`, `/neuroscape/`, and atlas-root SvelteKit
+# bundles. That's unsafe to run on `main` until the spec-015 site
+# code lands, because main's `+page.svelte` doesn't have the
+# `/neuroscape/` or atlas-root branches yet — the rebuilt bundles
+# would render the OHBM 2026 home at every URL.
+#
+# This workflow is a workaround for that gap: it lets the new
+# multi-mode 404 shim get to the gh-pages root without rebuilding
+# the sibling bundles. The shim has loop-safety built in
+# (`?spa=` re-entry detection), so deploying it to production
+# before /neuroscape/ exists is harmless — visitors typing a
+# /neuroscape/<n>/ URL just bounce to the atlas-root home
+# (current behaviour: bounce to /ohbm2026/, slightly different but
+# not worse).
+#
+# Trigger: workflow_dispatch only. Manual on purpose — this is a
+# rare maintenance operation, not a per-commit deploy.
+#
+# `keep_files: true` is critical — without it,
+# peaceiris/actions-gh-pages would wipe the entire gh-pages branch
+# (deleting every published PR-preview + /ohbm2026/ + /sandbox/),
+# which would be catastrophic.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  publish-root-404:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Stage just the 404.html
+        run: |
+          set -euo pipefail
+          src=site/conference-root-redirect/404.html
+          if [ ! -f "$src" ]; then
+            echo "::error::Expected $src to exist on main; aborting." >&2
+            exit 1
+          fi
+          rm -rf out
+          mkdir -p out
+          cp "$src" out/404.html
+          echo "Staged $(wc -c < out/404.html) bytes at out/404.html"
+          # Sanity-check the staged file is actually the multi-mode
+          # shim, not some legacy version. If `neuroscape` is absent
+          # from the content, the source on main is stale — abort
+          # before we ship a regression.
+          if ! grep -q 'neuroscape' out/404.html; then
+            echo "::error::Staged 404.html missing 'neuroscape' branch; refusing to deploy." >&2
+            exit 1
+          fi
+
+      - name: Publish to gh-pages root (keep all other files)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: out
+          publish_branch: gh-pages
+          # NO destination_dir — empty means the gh-pages root, which
+          # is exactly the file gh-pages serves on every 404.
+          keep_files: true
+          enable_jekyll: false
+          commit_message: 'deploy(root-404): publish multi-mode shim'
