@@ -155,10 +155,15 @@
 					? $cartOhbmPosterIds.has(r.id)
 					: $cartNeuroPubmedIds.has(r.id)}
 			<li class="ar-row">
-				<a
+				<!-- Row click opens the inline detail panel (local third
+				     pane). The "Full details" link beside the cart icon
+				     is the explicit path to the sibling permalink page
+				     when the user wants the full view. Same pattern as
+				     OHBM 2026's ResultList + NeuroscapeBrowsePanel. -->
+				<button
+					type="button"
 					class="ar-row-link"
-					href={permalinkFor(r.kind, r.id)}
-					rel="external"
+					on:click={() => dispatch('select', { kind: r.kind, id: r.id })}
 					data-testid={`atlas-root-result-row-${r.kind}`}
 				>
 					<div class="ar-row-head">
@@ -177,7 +182,7 @@
 						{/if}
 					</div>
 					<div class="ar-title">{r.title}</div>
-				</a>
+				</button>
 				<div class="ar-row-actions">
 					<CartIconButton
 						kind={r.kind}
@@ -185,15 +190,15 @@
 						{inCart}
 						testidPrefix="atlas-root-row-cart"
 					/>
-					<button
-						type="button"
-						class="ar-show-atlas"
-						title="Show details inline"
-						on:click={() => dispatch('select', { kind: r.kind, id: r.id })}
-						data-testid="atlas-root-row-select"
+					<a
+						class="ar-detail-link"
+						href={permalinkFor(r.kind, r.id)}
+						rel="external"
+						title={`Open full detail page on /${r.kind === 'ohbm2026' ? 'ohbm2026' : 'neuroscape'}/`}
+						data-testid={`atlas-root-row-detail-link-${r.kind}`}
 					>
-						Details
-					</button>
+						Full details ↗
+					</a>
 				</div>
 			</li>
 		{/each}
@@ -245,11 +250,13 @@
 		background: var(--bg-subtle);
 	}
 	.ar-row-link {
+		all: unset;
+		cursor: pointer;
 		flex: 1 1 auto;
 		display: flex;
 		flex-direction: column;
 		gap: 0.2rem;
-		text-decoration: none;
+		text-align: left;
 		color: var(--text);
 		min-width: 0;
 	}
@@ -300,18 +307,16 @@
 		align-items: flex-end;
 		flex-shrink: 0;
 	}
-	.ar-show-atlas {
-		all: unset;
-		cursor: pointer;
-		padding: 0.35rem 0.6rem;
-		border-radius: 3px;
-		font-size: 0.78rem;
-		color: var(--accent);
-		border: 1px solid var(--accent);
-		background: transparent;
+	.ar-detail-link {
+		font-size: 0.72rem;
+		color: var(--text-muted);
+		text-decoration: none;
 		white-space: nowrap;
+		padding: 0.2rem 0.4rem;
+		border-radius: 3px;
 	}
-	.ar-show-atlas:hover {
+	.ar-detail-link:hover {
+		color: var(--accent);
 		background: var(--accent-soft-bg);
 	}
 	.ar-more {
