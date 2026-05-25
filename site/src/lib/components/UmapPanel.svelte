@@ -670,16 +670,19 @@
 		);
 		const customdata = points.map((p) => ({ kind: 'neuroscape', id: p.pubmed_id }));
 		const symbol = useShapes ? points.map((p) => atlasShape2D(p.cluster_id)) : undefined;
-		// In 2D lasso mode the unselected backdrop stays VISIBLE but
-		// dim — gives the visitor context for where the selection
-		// lives within the full corpus. Pre-fix unselected was 0.02
-		// (almost invisible against a dense backdrop); 0.10 keeps a
-		// soft carpet showing through.
+		// In 2D lasso mode the unselected backdrop stays VISIBLE so
+		// the cluster carpet remains readable as context for where
+		// the selection sits inside the corpus. Bump from
+		// `Math.max(opacity * 2, 0.10)` to `Math.max(opacity * 4,
+		// 0.20)`: with the default 0.05 backdrop opacity that's
+		// 0.20 unselected (was 0.10), enough that cluster colours
+		// are recognisable while still leaving the selected points
+		// pop visually distinct at opacity 1.0.
 		const selectedConfig = selectedIdx.length
 			? {
 					selectedpoints: selectedIdx,
 					selected: { marker: { opacity: 1 } },
-					unselected: { marker: { opacity: Math.max(opacity * 2, 0.1) } }
+					unselected: { marker: { opacity: Math.max(opacity * 4, 0.2) } }
 			  }
 			: {};
 		if (is3d) {
