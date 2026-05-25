@@ -1,40 +1,35 @@
 <!DOCTYPE html>
 <!--
-  Stage 9 (spec 009-conference-subpath FR-105 + FR-107): smart root 404.
+  Stage 9 + Stage 15 (spec 015-neuroscape-context): smart root 404.
 
   gh-pages serves a SINGLE `404.html` from the publishing-source root
-  for every path that doesn't resolve to a static file. This file
-  therefore handles two distinct cases:
+  for every path that doesn't resolve to a static file. With the
+  Stage 15 three-mode deployment (`/`, `/ohbm2026/`, `/neuroscape/`),
+  this single file has to hand a deep-linked request off to the RIGHT
+  per-mode SvelteKit shell:
 
-  1. **Direct-load of a deep link inside the conference subpath**, e.g.
-     `<cname>/ohbm2026/abstract/M-AM-101/`. The SvelteKit static
-     adapter cannot pre-render dynamic `[id]` routes, so the request
-     404s and lands here. We bounce to the SvelteKit shell at
-     `<base>/?spa=<encoded-original-path>` — the existing Stage-6
-     handler in `+layout.svelte`'s `onMount` reads the `?spa=` query,
-     decodes the path, and calls `goto()` to render the right route.
+  1. **Path inside `/ohbm2026/`** (e.g. `<host>/ohbm2026/abstract/<n>/`) →
+     bounce to `<host>/ohbm2026/?spa=<encoded-original-path>`. The
+     OHBM 2026 SvelteKit shell at `/ohbm2026/index.html` boots, reads
+     `?spa=` in `+layout.svelte`'s `onMount`, and `goto`s the deep link.
 
-  2. **Legacy or genuinely-unknown root-level path**, e.g.
-     `<cname>/abstract/M-AM-101` (no `/ohbm2026/` prefix) or
-     `<cname>/something-random`. Per FR-106 we accept losing the path
-     component and bounce to `<cname>/ohbm2026/`.
+  2. **Path inside `/neuroscape/`** (e.g.
+     `<host>/neuroscape/abstract/<pubmed_id>/`) → bounce to
+     `<host>/neuroscape/?spa=…`. Same SvelteKit handoff, different
+     bundle.
 
-  PR previews introduce a `/pr-<N>/` prefix and the staging sandbox
-  introduces a `/sandbox/` prefix — both have to be honoured in both
-  branches. We detect them from the request URL at runtime so the
-  SAME file works at the gh-pages root AND at every per-PR root AND
-  at the sandbox root.
+  3. **Path inside the atlas-root deploy** (e.g. `<host>/some-random/`)
+     — no subroutes exist there yet, so bounce to the atlas-root home.
 
-  Relative paths like `./ohbm2026/` are NOT safe here — the browser
+  PR previews add a `/pr-<N>/` prefix and the legacy staging used
+  `/sandbox/` — both have to be honoured in every branch. The prefix
+  is detected from the request URL so the SAME file works at the
+  gh-pages root, at every per-PR root, and at the sandbox root.
+
+  Relative paths like `./neuroscape/` are NOT safe here — the browser
   resolves them against the REQUEST URL, not the file's gh-pages
-  location, so a request to `<cname>/some/deep/path/` would resolve
-  `./ohbm2026/` to `<cname>/some/deep/path/ohbm2026/`. Absolute paths
-  composed from the detected prefix are correct in every case.
-
-  No SvelteKit boot here — that would require duplicating the hash-
-  stable module-preload tags from `site/build/404.html`, which change
-  on every build. The `?spa=` handoff is cheap, clean, and reuses the
-  layout-side handler that's already covered by US2 tests.
+  location. Absolute paths composed from the detected prefix are
+  correct in every case.
 -->
 <html lang="en">
 <head>
@@ -47,34 +42,49 @@
 			var search = window.location.search;
 			var hash = window.location.hash;
 			// Detect the prefix the user landed under (per-PR preview or
-			// the sandbox staging root) so absolute redirects compose
-			// correctly.
+			// the legacy sandbox staging root) so absolute redirects
+			// compose correctly.
 			var prefixMatch = p.match(/^(\/(?:pr-\d+|sandbox))\//);
 			var prefix = prefixMatch ? prefixMatch[1] : '';
-			// Match conference subpath under whichever prefix is in play.
-			var m = p.match(/^(\/(?:pr-\d+|sandbox))?\/ohbm2026\//);
-			if (m) {
-				// Inside the conference — hand the deep-link to the SvelteKit
-				// shell via the existing `?spa=` query handoff (see
-				// `site/src/routes/+layout.svelte` `onMount`).
-				var base = (m[1] || '') + '/ohbm2026';
+
+			// 1. Inside /neuroscape/ → bounce to that bundle's SPA shell.
+			var ns = p.match(/^(\/(?:pr-\d+|sandbox))?\/neuroscape\//);
+			if (ns) {
+				var nsBase = (ns[1] || '') + '/neuroscape';
 				var stash = p + search + hash;
 				try { sessionStorage.setItem('ohbm2026.spa.redirect', stash); } catch (e) {}
-				window.location.replace(base + '/?spa=' + encodeURIComponent(stash));
+				window.location.replace(nsBase + '/?spa=' + encodeURIComponent(stash));
 				return;
 			}
-			// Outside the conference subpath — bounce to the conference home.
-			// The original path component is lost (acceptable per FR-106).
-			window.location.replace(prefix + '/ohbm2026/' + search + hash);
+
+			// 2. Inside /ohbm2026/ → bounce to that bundle's SPA shell.
+			var m = p.match(/^(\/(?:pr-\d+|sandbox))?\/ohbm2026\//);
+			if (m) {
+				var base = (m[1] || '') + '/ohbm2026';
+				var stash2 = p + search + hash;
+				try { sessionStorage.setItem('ohbm2026.spa.redirect', stash2); } catch (e) {}
+				window.location.replace(base + '/?spa=' + encodeURIComponent(stash2));
+				return;
+			}
+
+			// 3. Outside any known subsite → bounce to the atlas-root
+			// home for the current prefix. (No deep-link recovery; the
+			// atlas-root build has no sub-routes today.)
+			window.location.replace((prefix || '') + '/' + search + hash);
 		})();
 	</script>
-	<!-- No-JS fallback: a 2-second meta-refresh + a manual link to the
-	     conference home. Deep-link recovery requires JS and is best-effort. -->
-	<meta http-equiv="refresh" content="2; url=/ohbm2026/">
+	<!-- No-JS fallback: a 2-second meta-refresh + a manual link to
+	     each subsite. Deep-link recovery requires JS and is best-effort. -->
+	<meta http-equiv="refresh" content="2; url=/">
 </head>
 <body>
 	<noscript>
-		<p>Page not found. <a href="/ohbm2026/">Open the OHBM 2026 Atlas</a>.</p>
+		<p>Page not found. Try one of:</p>
+		<ul>
+			<li><a href="/">Cross-conference atlas</a></li>
+			<li><a href="/ohbm2026/">OHBM 2026 Atlas</a></li>
+			<li><a href="/neuroscape/">NeuroScape PubMed Atlas</a></li>
+		</ul>
 	</noscript>
 </body>
 </html>
