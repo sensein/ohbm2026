@@ -41,9 +41,13 @@ test.describe('US1: atlas-root landing-page smoke', () => {
 		expect(html).not.toMatch(/<meta[^>]*http-equiv\s*=\s*["']refresh["']/i);
 	});
 
-	test('LandingPageHeader renders with both outbound subsite links', async ({ page }) => {
+	test('SiteHeader + AtlasSubsiteNav render with both outbound subsite links', async ({ page }) => {
 		await page.goto('/');
-		await expect(page.getByTestId('landing-page-header')).toBeVisible();
+		// SiteHeader (the unified site chrome) is present on every
+		// subsite build; AtlasSubsiteNav (the hub-and-spoke nav strip)
+		// is only mounted on atlas-root.
+		await expect(page.getByTestId('site-header')).toBeVisible();
+		await expect(page.getByTestId('atlas-subsite-nav')).toBeVisible();
 		const ohbmLink = page.getByTestId('nav-ohbm2026');
 		const neuroLink = page.getByTestId('nav-neuroscape');
 		await expect(ohbmLink).toBeVisible();

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { base } from '$app/paths';
+	import { SITE_MODE } from '$lib/site_mode';
 
 	let openStages: Record<string, boolean> = {};
 	let openTldrs: Record<string, boolean> = {};
@@ -60,14 +61,26 @@
 </script>
 
 <svelte:head>
-	<title>About · OHBM 2026 Atlas</title>
+	{#if SITE_MODE === 'atlas-root'}
+		<title>About · Abstract Atlas</title>
+	{:else if SITE_MODE === 'neuroscape'}
+		<title>About · NeuroScape PubMed Atlas</title>
+	{:else}
+		<title>About · OHBM 2026 Atlas</title>
+	{/if}
 </svelte:head>
 
 <div class="about-page">
 	<nav class="back"><a href={`${base}/`}>← back to atlas</a></nav>
 
 	<header>
-		<h1>About the OHBM 2026 Atlas</h1>
+		{#if SITE_MODE === 'atlas-root'}
+			<h1>About Abstract Atlas</h1>
+		{:else if SITE_MODE === 'neuroscape'}
+			<h1>About the NeuroScape PubMed Atlas</h1>
+		{:else}
+			<h1>About the OHBM 2026 Atlas</h1>
+		{/if}
 		<p class="lead">
 			A search-and-browse interface for every accepted OHBM 2026 abstract. Each abstract
 			is the submitter's own text; everything else on the site — clusters, related-abstract
@@ -77,18 +90,55 @@
 	</header>
 
 	<section class="overview">
-		<p>
-			Reading 3,000+ abstracts to find the ones you care about isn't realistic for most
-			people. This atlas tries to make that browsable: a free-text + faceted search, a
-			2D + 3D map of the corpus coloured by topic cluster, AI-extracted highlights of each
-			abstract's claims and figures, and a lightweight saved-list export.
-		</p>
+		{#if SITE_MODE === 'atlas-root'}
+			<p>
+				The cross-conference landing page — currently Abstract Atlas — puts the
+				3,240 OHBM 2026 abstracts in the context of a much larger neuroscience
+				literature snapshot: NeuroScape PubMed, ~461,000 articles from 1999–2023
+				embedded with the NeuroScape Stage-2 model and clustered into 175 topical
+				groups. Both layers share the same UMAP, so OHBM 2026 work appears as an
+				overlay on the broader landscape; a binary toggle hides the overlay if
+				you only want to browse the PubMed backdrop. From here you can drop into
+				either site directly (OHBM 2026 ·
+				<a href="../neuroscape/" rel="external">NeuroScape PubMed</a>);
+				the subsites are independently rebuildable and link back to this hub.
+			</p>
+		{:else if SITE_MODE === 'neuroscape'}
+			<p>
+				A reduced-functionality browse of the NeuroScape PubMed 1999–2023
+				corpus — ~461,000 article titles + 175 topical clusters from
+				<a href={references.neuroscape_paper.url} target="_blank" rel="noopener noreferrer">Senden (2026)</a>'s
+				NeuroScape Stage-2 model. Each detail page fetches PubMed metadata
+				live (authors, journal, abstract body, DOI) from NCBI E-utilities; no
+				article bodies are stored locally. Use the
+				<a href="../" rel="external">Abstract Atlas</a> landing page to see
+				OHBM 2026 abstracts overlaid on this same UMAP.
+			</p>
+		{:else}
+			<p>
+				Reading 3,000+ abstracts to find the ones you care about isn't realistic for most
+				people. This atlas tries to make that browsable: a free-text + faceted search, a
+				2D + 3D map of the corpus coloured by topic cluster, AI-extracted highlights of each
+				abstract's claims and figures, and a lightweight saved-list export.
+			</p>
+		{/if}
 		<p>
 			The pipeline runs in five stages, listed below. Click each one to see how it works.
 			Surfaces that were authored or interpreted by an LLM (figure interpretations,
 			extracted claims, LLM-grouped topic-cluster titles) carry an
 			<span class="ai-pill-demo">✨ AI</span> pill in the detail panel so the
 			provenance is always visible.
+		</p>
+		<p>
+			Beyond the per-conference pipeline, the
+			<strong>Abstract Atlas</strong> cross-conference landing page projects this corpus into
+			a much larger neuroscience embedding (NeuroScape PubMed, ~461k articles
+			1999–2023, 175 clusters) so OHBM 2026 work can be browsed in the context of
+			the broader literature. The NeuroScape PubMed atlas itself is the second
+			sibling subsite, with the same UMAP and clusters but no OHBM overlay. All
+			three subsites — Abstract Atlas (root), OHBM 2026 (this site), and
+			NeuroScape PubMed — are independently rebuildable; the Abstract Atlas
+			landing is the only hub that knows about all of them.
 		</p>
 	</section>
 

@@ -37,7 +37,11 @@
 	// below is dead-code eliminated in the 'ohbm2026' / 'neuroscape'
 	// builds — FR-022 byte-identity is preserved.
 	import { SITE_MODE } from '$lib/site_mode';
-	import LandingPageHeader from '$lib/components/LandingPageHeader.svelte';
+	// SiteHeader is rendered by `+layout.svelte` for ALL modes —
+	// atlas-root + neuroscape no longer mount their own header here.
+	// AtlasSubsiteNav is the hub-and-spoke nav strip; only mounted on
+	// the atlas-root build (subsites surface a home icon instead).
+	import AtlasSubsiteNav from '$lib/components/AtlasSubsiteNav.svelte';
 	// AtlasOverlayToggle + BackdropDensitySlider + DimensionalityToggle
 	// were removed from the atlas-root/neuroscape top-row to match the
 	// OHBM 2026 UI shape. Overlay visibility is now driven by the
@@ -802,7 +806,9 @@
 		data-testid="atlas-root-home"
 		data-mode={SITE_MODE}
 	>
-		<LandingPageHeader />
+		{#if SITE_MODE === 'atlas-root'}
+			<AtlasSubsiteNav />
+		{/if}
 		{#if SITE_MODE === 'atlas-root' && atlasDrift.length > 0}
 			<!-- T043 / R-012 — surface BOTH drift signals loudly.
 

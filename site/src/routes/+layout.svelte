@@ -10,16 +10,14 @@
 	import { page } from '$app/stores';
 	import { buildInfoFromEnv, loadManifest, type BuildInfo, type Manifest } from '$lib/shards';
 	import BuildInfoFooter from '$lib/components/BuildInfo.svelte';
-	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import Tour from '$lib/components/Tour.svelte';
 	import { tourStore, tourFlags } from '$lib/stores/tour';
-	// Stage 15 (spec 015-neuroscape-context): the bare-root cross-
-	// conference atlas landing page uses its own minimal shell
-	// (`LandingPageHeader` is rendered by `+page.svelte`'s atlas-root
-	// branch). Skip the OHBM-2026-only chrome when SITE_MODE is
-	// 'atlas-root'. SITE_MODE is a build-time constant so the
-	// non-atlas branch tree-shakes in ohbm2026 / neuroscape builds
-	// — FR-022 byte-identity preserved.
+	// SITE_MODE is a build-time constant (Vite substitutes
+	// `import.meta.env.VITE_SITE_MODE` at compile time). The unified
+	// SiteHeader handles all three builds; mode-specific chrome
+	// (tour CTA, atlas-only `main` padding override) branches inside
+	// the layout below.
 	import { SITE_MODE } from '$lib/site_mode';
 
 	const FEEDBACK_REPO = 'sensein/ohbm2026';
@@ -155,81 +153,13 @@
 	{/if}
 </svelte:head>
 
-{#if SITE_MODE === 'atlas-root' || SITE_MODE === 'neuroscape'}
-	<!-- Stage 15 atlas-root + neuroscape builds: the landing page
-	     renders its own header chrome via `LandingPageHeader` in
-	     `+page.svelte`'s SITE_MODE branch. The slot is the entire
-	     page; we wrap it only in the BuildInfo footer so the deploy
-	     SHA / data state-key stays visible. -->
-	<div class="atlas-root-shell">
-		<main class="atlas-root-slot">
-			<slot />
-		</main>
-		<BuildInfoFooter deployBuildInfo={envBuildInfo} {dataBuildInfo} />
-	</div>
-{:else}
 <div class="shell">
-	<header>
-		<div class="header-row">
-			<div class="header-text">
-				<h1>OHBM 2026 Atlas <span class="beta-tag">beta</span></h1>
-				<p class="subtitle">
-					Browse, search, and explore the 2026 accepted abstracts
-				</p>
-			</div>
-			<div class="header-controls">
-				<button
-					type="button"
-					class="header-link header-tour"
-					on:click={() => tourStore.start()}
-					title="Take the guided tour"
-					data-testid="header-tour-button"
-				>
-					Tour
-				</button>
-				<a class="header-link" href={`${base}/about/`} data-testid="header-about-link">
-					About
-				</a>
-				<!--
-					Feedback icon — opens a pre-filled GitHub issue in a new tab.
-					The body templates the current page URL, the deploy SHA, and
-					the user-agent so a maintainer has the minimum context to
-					reproduce. Repo owner / project link from a const so it's
-					trivial to swap.
-				-->
-				<a
-					class="header-feedback"
-					target="_blank"
-					rel="noopener noreferrer"
-					title="Report a bug or request a feature"
-					aria-label="Report a bug or request a feature on GitHub"
-					data-testid="header-feedback"
-					href={feedbackUrl}
-				>
-					<!-- Lucide-style "message-square-warning" icon — keeps the meaning
-						 unambiguous: a comment bubble with an exclamation. -->
-					<svg
-						width="20"
-						height="20"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-						<line x1="12" y1="8" x2="12" y2="12" />
-						<line x1="12" y1="16" x2="12.01" y2="16" />
-					</svg>
-				</a>
-				<ThemeToggle />
-			</div>
-		</div>
-	</header>
+	<SiteHeader {feedbackUrl} />
 
-	{#if !$tourFlags.ctaDismissed && !$tourFlags.completedOrSkipped}
+	{#if SITE_MODE === 'ohbm2026' && !$tourFlags.ctaDismissed && !$tourFlags.completedOrSkipped}
+		<!-- Tour CTA banner only on /ohbm2026/ for now — atlas-root +
+		     neuroscape get their own tour content but skip the CTA
+		     banner to avoid pestering visitors on landing pages. -->
 		<div class="tour-cta" data-testid="tour-cta">
 			<span>
 				New here? Take a 60-second tour of the search, map, and saved-list features.
@@ -257,7 +187,7 @@
 		</div>
 	{/if}
 
-	<main>
+	<main class:atlas-main={SITE_MODE !== 'ohbm2026'}>
 		<slot />
 	</main>
 
@@ -265,111 +195,18 @@
 
 	<BuildInfoFooter deployBuildInfo={envBuildInfo} {dataBuildInfo} />
 </div>
-{/if}
 
 <style>
-	/* Stage 15 atlas-root layout shell. Dead-CSS-eliminated in
-	   non-atlas-root builds when Svelte sees the markup branch is
-	   gone. */
-	.atlas-root-shell {
-		min-height: 100vh;
-		display: flex;
-		flex-direction: column;
-	}
-	.atlas-root-slot {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-	}
-
+	/* The shell + tour-CTA + main padding live here; header chrome
+	   (title, beta tag, Tour/About/Chat/Theme) moved to
+	   `$lib/components/SiteHeader.svelte` and is shared by all
+	   three sibling builds. */
 	.shell {
 		min-height: 100vh;
 		display: flex;
 		flex-direction: column;
 		background: var(--bg);
 		color: var(--text);
-	}
-	header {
-		padding: 1.25rem clamp(1rem, 2vw, 2rem) 0.75rem;
-		width: 100%;
-		box-sizing: border-box;
-		border-bottom: 1px solid var(--border);
-	}
-	.header-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 1rem;
-		flex-wrap: wrap;
-	}
-	.header-text {
-		min-width: 0;
-	}
-	header h1 {
-		margin: 0 0 0.25rem;
-		font-size: 1.5rem;
-		font-weight: 600;
-		color: var(--text);
-		display: inline-flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	.beta-tag {
-		font-size: 0.6rem;
-		font-weight: 700;
-		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		color: var(--accent-text, white);
-		background: var(--accent);
-		padding: 0.1rem 0.4rem;
-		border-radius: 4px;
-		vertical-align: middle;
-	}
-	.subtitle {
-		margin: 0;
-		color: var(--text-muted);
-		font-size: 0.9rem;
-	}
-	.header-controls {
-		display: flex;
-		align-items: center;
-		gap: 0.6rem;
-	}
-	.header-link {
-		color: var(--accent);
-		text-decoration: none;
-		font-size: 0.9rem;
-		padding: 0.25rem 0.5rem;
-		border-radius: 4px;
-	}
-	.header-link:hover {
-		background: var(--accent-soft-bg);
-	}
-	button.header-link {
-		all: unset;
-		cursor: pointer;
-		color: var(--accent);
-		text-decoration: none;
-		font-size: 0.9rem;
-		padding: 0.25rem 0.5rem;
-		border-radius: 4px;
-	}
-	button.header-link:hover {
-		background: var(--accent-soft-bg);
-	}
-	.header-feedback {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 2rem;
-		height: 2rem;
-		color: var(--text-muted);
-		border-radius: 4px;
-		text-decoration: none;
-	}
-	.header-feedback:hover {
-		color: var(--accent);
-		background: var(--accent-soft-bg);
 	}
 	.tour-cta {
 		display: flex;
@@ -412,5 +249,11 @@
 		padding: 0.5rem clamp(1rem, 2vw, 2rem) 1rem;
 		width: 100%;
 		box-sizing: border-box;
+	}
+	/* atlas-root + neuroscape pages own the full viewport width
+	   (UMAP atlas + facet sidebar grid); skip the side padding the
+	   OHBM home + detail pages depend on. */
+	main.atlas-main {
+		padding: 0;
 	}
 </style>

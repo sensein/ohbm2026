@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { focusedAbstract } from '$lib/stores/selection';
 	import { tourStore, tourPhase } from '$lib/stores/tour';
+	import { SITE_MODE } from '$lib/site_mode';
 
 	/**
 	 * Shepherd.js wrapper for the US6 guided tour.
@@ -27,7 +28,13 @@
 	 * Lazy-loaded: shepherd.js + its CSS only load when a tour actually starts.
 	 */
 
-	type TourKind = 'home' | 'detail' | 'about' | 'unknown';
+	type TourKind =
+		| 'home'
+		| 'detail'
+		| 'about'
+		| 'atlas-root-home'
+		| 'neuroscape-home'
+		| 'unknown';
 
 	let shepherdInstance: {
 		start: () => void;
@@ -45,6 +52,10 @@
 		// conference subpath (Stage 9, spec 009-conference-subpath FR-101).
 		if (/\/abstract\/[^/]+\/?$/.test(pathname)) return 'detail';
 		if (/\/about\/?$/.test(pathname)) return 'about';
+		// Home routes per build — SITE_MODE branches the tour content
+		// so each subsite explains its OWN home UI, not the OHBM one.
+		if (SITE_MODE === 'atlas-root') return 'atlas-root-home';
+		if (SITE_MODE === 'neuroscape') return 'neuroscape-home';
 		return 'home';
 	}
 
@@ -276,6 +287,68 @@
 					title: 'External citations',
 					text: 'Every link goes to a real, accessible page. They\'re HEAD-checked at build time — a broken citation blocks the deploy — so the references stay current.',
 					attachTo: { element: '.stage-body a[target="_blank"]', on: place('right') }
+				}
+			);
+		} else if (kind === 'atlas-root-home') {
+			steps.push(
+				{
+					id: 'atlas-intro',
+					title: 'Abstract Atlas',
+					text: 'A cross-conference landing page. The backdrop is the NeuroScape PubMed neuroscience corpus (~461k articles, 1999–2023, coloured by cluster). The overlay is the 3,240 OHBM 2026 abstracts, projected into the same UMAP so you can see where the conference sits inside the broader literature.',
+					attachTo: { element: '[data-testid="site-header"]', on: place('bottom') }
+				},
+				{
+					id: 'atlas-subsite-nav',
+					title: 'Browse a single corpus',
+					text: 'Two outbound links jump you straight into either the OHBM 2026 site or the NeuroScape PubMed atlas. The cross-conference landing here is a hub — subsites talk back through this page, not to each other.',
+					attachTo: { element: '[data-testid="atlas-subsite-nav"]', on: place('bottom') }
+				},
+				{
+					id: 'atlas-facets',
+					title: 'Refine what you see',
+					text: 'The Sites facet flips the OHBM overlay on/off. The Clusters facet narrows both layers to specific NeuroScape clusters. Counts update live with the lasso so you can read what your selection contains.',
+					attachTo: { element: '[data-testid="atlas-root-facet-sidebar"]', on: place('right') }
+				}
+			);
+			if (!isMobile) {
+				steps.push({
+					id: 'atlas-lasso',
+					title: 'Lasso on the 2D map',
+					text: 'Drag the lasso tool (toolbar of the 2D pane) to circle a region. The 3D pane recentres on the selection centroid, the result list narrows to the lassoed ids, and facet counts update. The "Clear selection" button in the panel header undoes it.',
+					attachTo: { element: '[data-testid="umap-chart-2d"]', on: 'right' }
+				});
+			}
+			steps.push({
+				id: 'atlas-feedback',
+				title: 'Spot something broken?',
+				text: 'The speech-bubble icon next to the theme switch opens a pre-filled GitHub issue (page URL + deploy SHA + user-agent templated in). Use it for bug reports or feature requests.',
+				attachTo: { element: '[data-testid="header-feedback"]', on: place('bottom') }
+			});
+		} else if (kind === 'neuroscape-home') {
+			steps.push(
+				{
+					id: 'neuro-intro',
+					title: 'NeuroScape PubMed atlas',
+					text: 'A 461k-article snapshot of the neuroscience literature 1999–2023, embedded with the NeuroScape Stage-2 model and clustered into 175 topical groups. This site lets you search, facet, and inspect any record. Click a dot to load its detail page; PubMed metadata fetches on the fly.',
+					attachTo: { element: '[data-testid="site-header"]', on: place('bottom') }
+				},
+				{
+					id: 'neuro-search',
+					title: 'Title search',
+					text: 'Type a keyword or PubMed id. Search is title-only on this build (full-text semantic search is on the deferred list); it tolerates typos and accents.',
+					attachTo: { element: '[data-testid="search-input"]', on: place('bottom') }
+				},
+				{
+					id: 'neuro-facets',
+					title: 'Filter by cluster + year',
+					text: 'The Clusters facet is the same 175-cluster taxonomy as the cross-conference root. Year range narrows the visible publications. Both facets feed into the map AND the result list.',
+					attachTo: { element: '[data-testid="neuroscape-facet-sidebar"]', on: place('right') }
+				},
+				{
+					id: 'neuro-home',
+					title: 'Cross-conference root',
+					text: 'The home icon in the header is the only way back to the Abstract Atlas landing page — this site is a "spoke" so it doesn\'t link sideways to other corpora. Future subsites would just add another link from the root, no rewiring here.',
+					attachTo: { element: '[data-testid="header-home"]', on: place('bottom') }
 				}
 			);
 		} else {
