@@ -606,11 +606,16 @@
 		);
 		const customdata = points.map((p) => ({ kind: 'neuroscape', id: p.pubmed_id }));
 		const symbol = useShapes ? points.map((p) => atlasShape2D(p.cluster_id)) : undefined;
+		// In 2D lasso mode the unselected backdrop stays VISIBLE but
+		// dim — gives the visitor context for where the selection
+		// lives within the full corpus. Pre-fix unselected was 0.02
+		// (almost invisible against a dense backdrop); 0.10 keeps a
+		// soft carpet showing through.
 		const selectedConfig = selectedIdx.length
 			? {
 					selectedpoints: selectedIdx,
 					selected: { marker: { opacity: 1 } },
-					unselected: { marker: { opacity: Math.min(opacity, 0.02) } }
+					unselected: { marker: { opacity: Math.max(opacity * 2, 0.1) } }
 			  }
 			: {};
 		if (is3d) {
@@ -667,11 +672,14 @@
 				if (lassoSet.has(points[i].poster_id)) selectedIdx.push(i);
 			}
 		}
+		// 2D overlay: unselected stays visible (0.25) so the user
+		// sees where the non-lassoed OHBM overlay points are; selected
+		// at full opacity pops against them.
 		const selectedConfig = selectedIdx.length
 			? {
 					selectedpoints: selectedIdx,
 					selected: { marker: { opacity: 1 } },
-					unselected: { marker: { opacity: 0.1 } }
+					unselected: { marker: { opacity: 0.25 } }
 			  }
 			: {};
 		const colours = points.map(
@@ -834,40 +842,87 @@
 		if (!api || !el) return;
 		const c = themedColors(t);
 		// scatter3d ignores `selectedpoints` + selected/unselected
-		// marker styles (unlike scattergl). So in 3D we ACTUALLY FILTER
-		// the data to lassoed points when the lasso is active —
-		// rendering ONLY the selection. The 2D pane keeps the dim-
-		// unselected approach via selectedpoints. When the lasso is
-		// cleared, both panes go back to rendering everything.
+		// marker styles (unlike scattergl). To get dim-unselected +
+		// pop-selected in 3D, we SPLIT each source into two traces
+		// with different scalar opacities — Plotly merges them on
+		// render. Unselected stays VISIBLE (slightly higher than
+		// the default backdrop opacity so the context shows through
+		// even with the new selection bbox zoom) and selected pops
+		// at medium opacity — NOT fully opaque, which was previously
+		// too contrastive against the empty zoomed scene.
 		const lassoActive = ohbmLassoSet.size + neuroLassoSet.size > 0;
+		const traces: unknown[] = [];
+		if (lassoActive) {
+			const bdrSel: BackdropPoint[] = [];
+			const bdrUnsel: BackdropPoint[] = [];
+			for (const p of backdrop) {
+				(neuroLassoSet.has(p.pubmed_id) ? bdrSel : bdrUnsel).push(p);
+			}
+			// Backdrop unselected: bump to ~3× the default 0.05 (so 0.15)
+			// so the surrounding cluster carpet remains a faint context
+			// glow during zoom-to-bbox. Backdrop selected: 0.6 — a clear
+			// pop above the carpet, not the previous 0.9 retina-blast.
+			traces.push(
+				buildAtlasBackdropTrace(bdrUnsel, clusters, Math.max(opacity * 3, 0.15), useShapes, true, new Set())
+			);
+			traces.push(
+				buildAtlasBackdropTrace(bdrSel, clusters, 0.6, useShapes, true, new Set())
+			);
+			if (showOverlayTrace) {
+				const ovrSel: OverlayPoint[] = [];
+				const ovrUnsel: OverlayPoint[] = [];
+				for (const p of overlay) {
+					(ohbmLassoSet.has(p.poster_id) ? ovrSel : ovrUnsel).push(p);
+				}
+				// Overlay unselected: outlined OHBM markers stay at 0.35
+				// (dim but still readable above the backdrop). Selected:
+				// 1.0 (full opacity — the OHBM overlay is the main focus
+				// when it's been lassoed).
+				const ovrUnselTrace = buildAtlasOverlayTrace(
+					ovrUnsel,
+					clusters,
+					true,
+					useShapes,
+					true,
+					new Set()
+				);
+				if (ovrUnselTrace) {
+					(ovrUnselTrace as { marker: { opacity: number } }).marker.opacity = 0.35;
+					traces.push(ovrUnselTrace);
+				}
+				const ovrSelTrace = buildAtlasOverlayTrace(
+					ovrSel,
+					clusters,
+					true,
+					useShapes,
+					true,
+					new Set()
+				);
+				if (ovrSelTrace) traces.push(ovrSelTrace);
+			}
+		} else {
+			traces.push(
+				buildAtlasBackdropTrace(backdrop, clusters, opacity, useShapes, true, new Set())
+			);
+			const overlayTrace = buildAtlasOverlayTrace(
+				overlay,
+				clusters,
+				showOverlayTrace,
+				useShapes,
+				true,
+				new Set()
+			);
+			if (overlayTrace) traces.push(overlayTrace);
+		}
+		// `renderBackdrop` / `renderOverlay` referenced by the bbox
+		// computation below — alias to the SELECTED subsets when
+		// lassoed (the camera zooms to selection, not to unselected).
 		const renderBackdrop = lassoActive
 			? backdrop.filter((p) => neuroLassoSet.has(p.pubmed_id))
 			: backdrop;
 		const renderOverlay = lassoActive
 			? overlay.filter((p) => ohbmLassoSet.has(p.poster_id))
 			: overlay;
-		const traces: unknown[] = [
-			buildAtlasBackdropTrace(
-				renderBackdrop,
-				clusters,
-				// When lasso-filtered, bump opacity — at the default
-				// `backdropOpacity=0.05` the few hundred selected points
-				// would be invisible against the empty 3D scene.
-				lassoActive ? 0.9 : opacity,
-				useShapes,
-				true,
-				new Set()
-			)
-		];
-		const overlayTrace = buildAtlasOverlayTrace(
-			renderOverlay,
-			clusters,
-			showOverlayTrace,
-			useShapes,
-			true,
-			new Set()
-		);
-		if (overlayTrace) traces.push(overlayTrace);
 		const axisCfg = { visible: false, showbackground: false };
 		// When the lasso is active, zoom the 3D scene to the bounding
 		// box of the lassoed points so the user's selection "fills"
