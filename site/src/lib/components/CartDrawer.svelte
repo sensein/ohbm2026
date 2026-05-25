@@ -1,54 +1,93 @@
 <script lang="ts">
-	import { cartStore } from '$lib/stores/cart';
+	import { cartStore, cartItems } from '$lib/stores/cart';
+	import type { CartItem } from '$lib/stores/cart';
 	import { focusedAbstract } from '$lib/stores/selection';
-	import { buildMailtoLink, buildPlainTextList } from '$lib/cart_email';
+	import { ohbmTitleLookup, neuroscapeTitleLookup } from '$lib/stores/cart_ui';
+	import { buildUnifiedMailtoLink, buildUnifiedPlainTextList } from '$lib/cart_email';
+	import type { UnifiedCartRow } from '$lib/cart_email';
 	import { base } from '$app/paths';
-	import type { AbstractRecord, AuthorRecord } from '$lib/shards';
+	import { SITE_MODE } from '$lib/site_mode';
 
 	export let open = false;
-	export let abstracts: AbstractRecord[] = [];
-	export let authorsById: Map<number, AuthorRecord> = new Map();
 
 	let clipboardStatus: 'idle' | 'copied' | 'error' = 'idle';
 
-	$: byPosterId = (() => {
-		const m = new Map<number, AbstractRecord>();
-		for (const a of abstracts) if (a.poster_id) m.set(a.poster_id, a);
-		return m;
-	})();
-	$: items = [...$cartStore]
-		.map((pid) => byPosterId.get(pid))
-		.filter((r): r is AbstractRecord => r !== undefined);
-	$: leadAuthorByPosterId = (() => {
-		const m = new Map<number, string>();
-		for (const rec of items) {
-			const id = rec.author_ids[0];
-			if (id === undefined) continue;
-			const name = authorsById.get(id)?.name;
-			if (name) m.set(rec.poster_id, name);
+	$: ohbmByPosterId = $ohbmTitleLookup;
+	$: neuroscapeByPubmedId = $neuroscapeTitleLookup;
+
+	// Cross-conference deploy root — used to construct sibling
+	// permalinks for the email + clipboard exports. The drawer is
+	// rendered on every subsite, so `base` carries different per-mode
+	// suffixes; strip them to get the deploy root.
+	$: siteRoot = (() => {
+		if (typeof window === 'undefined') return '';
+		const origin = window.location.origin;
+		let root: string = base;
+		if (SITE_MODE === 'ohbm2026' && root.endsWith('/ohbm2026')) {
+			root = root.slice(0, -'/ohbm2026'.length);
+		} else if (SITE_MODE === 'neuroscape' && root.endsWith('/neuroscape')) {
+			root = root.slice(0, -'/neuroscape'.length);
 		}
-		return m;
+		return origin + root;
 	})();
-	// `base` is the SvelteKit-resolved subpath ('/ohbm2026' in production,
-	// '/pr-<N>/ohbm2026' in PR previews, '' in pre-rework deploys). Composing
-	// from `origin + base` keeps the cart-email permalinks valid regardless
-	// of which route the cart was opened from — the previous approach
-	// (regex-stripping `/abstract/.+$`) was broken on the About page and
-	// would have been broken under the conference subpath as well.
-	$: siteUrl = typeof window !== 'undefined' ? window.location.origin + base : '';
+
+	$: rows = (() => {
+		const out: Array<{
+			item: CartItem;
+			title: string;
+			subline: string;
+			href: string;
+			knownTitle: boolean;
+		}> = [];
+		for (const it of $cartItems) {
+			if (it.kind === 'ohbm2026') {
+				const info = ohbmByPosterId.get(it.id);
+				const id4 = String(it.id).padStart(4, '0');
+				out.push({
+					item: it,
+					title: info?.title ?? `OHBM 2026 poster ${id4}`,
+					subline: info?.lead_author ?? '',
+					href: `${siteRoot}/ohbm2026/abstract/${id4}/`,
+					knownTitle: !!info?.title
+				});
+			} else {
+				const info = neuroscapeByPubmedId.get(it.id);
+				const subline = info
+					? [info.year ? String(info.year) : '', info.cluster_title ?? '']
+							.filter(Boolean)
+							.join(' · ')
+					: '';
+				out.push({
+					item: it,
+					title: info?.title ?? `PubMed ${it.id}`,
+					subline,
+					href: `${siteRoot}/neuroscape/abstract/${it.id}/`,
+					knownTitle: !!info?.title
+				});
+			}
+		}
+		return out;
+	})();
+
+	$: unifiedRows = rows.map(
+		(r): UnifiedCartRow => ({
+			kind: r.item.kind,
+			id: r.item.id,
+			title: r.title,
+			subline: r.subline
+		})
+	);
+
+	$: mailtoHref =
+		unifiedRows.length > 0 ? buildUnifiedMailtoLink(unifiedRows, siteRoot) : '#';
 
 	function close() {
 		open = false;
 	}
-	// Reactive mailto: href for the cart-email anchor. Empty `#` when the
-	// cart is empty so the anchor remains valid HTML but a click is a
-	// no-op (anchor also carries aria-disabled).
-	$: mailtoHref =
-		items.length > 0 ? buildMailtoLink(items, leadAuthorByPosterId, { siteUrl }) : '#';
 	async function copyList() {
-		if (items.length === 0) return;
+		if (unifiedRows.length === 0) return;
 		try {
-			const text = buildPlainTextList(items, leadAuthorByPosterId, siteUrl);
+			const text = buildUnifiedPlainTextList(unifiedRows, siteRoot);
 			await navigator.clipboard.writeText(text);
 			clipboardStatus = 'copied';
 			setTimeout(() => (clipboardStatus = 'idle'), 2000);
@@ -57,7 +96,10 @@
 			setTimeout(() => (clipboardStatus = 'idle'), 2000);
 		}
 	}
-	function openDetail(posterId: number) {
+	function openOhbmDetail(posterId: number) {
+		// Only meaningful on the OHBM home; for other sites the cart
+		// row carries the cross-deploy permalink already.
+		if (SITE_MODE !== 'ohbm2026') return;
 		$focusedAbstract = posterId;
 		open = false;
 	}
@@ -67,31 +109,57 @@
 	<div class="cart-backdrop" on:click={close} role="presentation"></div>
 	<aside class="cart-drawer" role="dialog" aria-label="Saved list" data-testid="cart-drawer">
 		<header class="cart-header">
-			<h2>Your list <span class="muted">({items.length})</span></h2>
+			<h2>Your list <span class="muted">({rows.length})</span></h2>
 			<button type="button" class="close" on:click={close} aria-label="Close list">×</button>
 		</header>
 
-		{#if items.length === 0}
+		{#if rows.length === 0}
 			<p class="empty">
-				No saved abstracts yet. Click the cart icon on any result to save it for later.
+				No saved items yet. Click the 🛒 icon on any result to save it for later.
 			</p>
 		{:else}
-			<ul class="items" tabindex="0" aria-label="Your saved abstracts">
-				{#each items as record (record.poster_id)}
+			<ul class="items" tabindex="0" aria-label="Your saved items">
+				{#each rows as r (r.item.kind + ':' + r.item.id)}
 					<li class="item">
-						<button
-							type="button"
-							class="item-body"
-							on:click={() => openDetail(record.poster_id)}
-							data-testid="cart-item"
-						>
-							<span class="poster">{String(record.poster_id).padStart(4, '0')}</span>
-							<span class="title">{record.title}</span>
-						</button>
+						{#if r.item.kind === 'ohbm2026' && SITE_MODE === 'ohbm2026'}
+							<!-- On the OHBM home, clicking opens the inline
+							     detail pane just like the previous behaviour. -->
+							<button
+								type="button"
+								class="item-body"
+								on:click={() => openOhbmDetail(r.item.id)}
+								data-testid="cart-item"
+							>
+								<span class="kind-pill kind-ohbm">OHBM</span>
+								<span class="id-pill">{String(r.item.id).padStart(4, '0')}</span>
+								<span class="title">{r.title}</span>
+							</button>
+						{:else}
+							<a
+								class="item-body"
+								href={r.href}
+								rel="external"
+								data-testid="cart-item"
+							>
+								<span
+									class="kind-pill"
+									class:kind-ohbm={r.item.kind === 'ohbm2026'}
+									class:kind-neuro={r.item.kind === 'neuroscape'}
+								>
+									{r.item.kind === 'ohbm2026' ? 'OHBM' : 'NeuroScape'}
+								</span>
+								<span class="id-pill">
+									{r.item.kind === 'ohbm2026'
+										? String(r.item.id).padStart(4, '0')
+										: `PMID ${r.item.id}`}
+								</span>
+								<span class="title">{r.title}</span>
+							</a>
+						{/if}
 						<button
 							type="button"
 							class="remove"
-							on:click={() => cartStore.remove(record.poster_id)}
+							on:click={() => cartStore.removeItem(r.item.kind, r.item.id)}
 							aria-label="Remove from list"
 							title="Remove from list"
 							data-testid="cart-remove"
@@ -103,15 +171,10 @@
 			</ul>
 
 			<footer class="cart-footer">
-				<!-- Anchor instead of button: the href is part of the visible
-					 contract (e2e tests + accessibility tools read the mailto:
-					 URL without simulating a click). The browser opens the
-					 user's mail client on activation, same UX as the prior
-					 button + `window.location.href = ...` handler. -->
 				<a
 					class="cart-action primary"
 					href={mailtoHref}
-					aria-disabled={items.length === 0}
+					aria-disabled={rows.length === 0}
 					data-testid="cart-email"
 				>
 					✉ Email my list
@@ -122,12 +185,16 @@
 					on:click={copyList}
 					data-testid="cart-copy"
 				>
-					{clipboardStatus === 'copied' ? '✓ Copied' : clipboardStatus === 'error' ? 'Copy failed' : '📋 Copy'}
+					{clipboardStatus === 'copied'
+						? '✓ Copied'
+						: clipboardStatus === 'error'
+							? 'Copy failed'
+							: '📋 Copy'}
 				</button>
 				<button
 					type="button"
 					class="cart-action danger"
-					on:click={() => cartStore.clear()}
+					on:click={() => cartStore.clearAll()}
 					data-testid="cart-clear"
 				>
 					Clear
@@ -149,7 +216,7 @@
 		top: 0;
 		right: 0;
 		bottom: 0;
-		width: min(26rem, 100vw);
+		width: min(28rem, 100vw);
 		background: var(--bg-elevated);
 		border-left: 1px solid var(--border);
 		z-index: 101;
@@ -161,119 +228,147 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 0.75rem 1rem;
+		padding: 0.85rem 1rem;
 		border-bottom: 1px solid var(--border);
 	}
 	.cart-header h2 {
 		margin: 0;
 		font-size: 1rem;
-		color: var(--text);
+		font-weight: 600;
 	}
-	.cart-header .muted {
-		color: var(--text-faint);
+	.muted {
+		color: var(--text-muted);
 		font-weight: 400;
 	}
 	.close {
 		all: unset;
 		cursor: pointer;
-		font-size: 1.4rem;
+		font-size: 1.3rem;
+		padding: 0.2rem 0.45rem;
+		border-radius: 4px;
 		color: var(--text-muted);
-		padding: 0 0.5rem;
 	}
 	.close:hover {
 		color: var(--text);
+		background: var(--bg-subtle);
 	}
 	.empty {
 		padding: 1rem;
 		color: var(--text-muted);
-		font-style: italic;
+		font-size: 0.9rem;
+		text-align: center;
 	}
 	.items {
-		list-style: none;
-		padding: 0.5rem 0.75rem;
-		margin: 0;
 		flex: 1;
 		overflow-y: auto;
+		list-style: none;
+		padding: 0.5rem;
+		margin: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
 	}
 	.item {
 		display: flex;
+		gap: 0.25rem;
 		align-items: stretch;
+		padding: 0.4rem;
 		border: 1px solid var(--border);
 		border-radius: 4px;
-		background: var(--bg);
+	}
+	.item:hover {
+		background: var(--bg-subtle);
 	}
 	.item-body {
 		all: unset;
 		cursor: pointer;
 		flex: 1;
-		padding: 0.5rem 0.75rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.15rem;
+		display: grid;
+		grid-template-columns: auto auto 1fr;
+		gap: 0.4rem 0.5rem;
+		align-items: start;
 		min-width: 0;
+		text-decoration: none;
+		color: var(--text);
 	}
-	.item-body:hover {
+	.kind-pill {
+		font-size: 0.62rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		padding: 0.1rem 0.35rem;
+		border-radius: 3px;
+		white-space: nowrap;
+		align-self: center;
+	}
+	.kind-ohbm {
+		background: var(--accent-soft-bg);
+		color: var(--accent-soft-text);
+	}
+	.kind-neuro {
 		background: var(--bg-sunken);
+		color: var(--text-muted);
 	}
-	.poster {
+	.id-pill {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: 0.78rem;
-		color: var(--accent);
-		font-weight: 600;
+		font-size: 0.72rem;
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
+		align-self: center;
+		white-space: nowrap;
 	}
 	.title {
-		font-size: 0.88rem;
-		color: var(--text);
-		line-height: 1.3;
+		grid-column: 1 / -1;
+		font-size: 0.85rem;
+		line-height: 1.35;
+		word-break: break-word;
 	}
 	.remove {
 		all: unset;
 		cursor: pointer;
-		padding: 0 0.6rem;
-		color: var(--text-faint);
-		font-size: 1.2rem;
-		border-left: 1px solid var(--border);
-		display: flex;
-		align-items: center;
+		font-size: 1rem;
+		padding: 0 0.5rem;
+		color: var(--text-muted);
+		border-radius: 3px;
 	}
 	.remove:hover {
-		color: var(--text);
 		background: var(--bg-sunken);
+		color: var(--accent);
 	}
 	.cart-footer {
 		display: flex;
 		gap: 0.4rem;
-		padding: 0.75rem 1rem;
+		padding: 0.7rem 0.85rem;
 		border-top: 1px solid var(--border);
-		background: var(--bg-sunken);
+		flex-wrap: wrap;
 	}
 	.cart-action {
 		all: unset;
 		cursor: pointer;
-		flex: 1;
-		text-align: center;
-		padding: 0.5rem 0.6rem;
+		padding: 0.4rem 0.75rem;
 		border-radius: 4px;
 		font-size: 0.85rem;
+		text-decoration: none;
 	}
 	.cart-action.primary {
 		background: var(--accent);
 		color: var(--accent-text);
 	}
+	.cart-action.primary:hover {
+		filter: brightness(1.05);
+	}
 	.cart-action.secondary {
-		background: var(--bg-elevated);
-		color: var(--text);
 		border: 1px solid var(--border);
+		color: var(--text);
+	}
+	.cart-action.secondary:hover {
+		background: var(--bg-subtle);
 	}
 	.cart-action.danger {
-		background: var(--bg-elevated);
 		color: var(--text-muted);
-		border: 1px solid var(--border);
+		margin-left: auto;
 	}
-	.cart-action:hover {
-		filter: brightness(1.05);
+	.cart-action.danger:hover {
+		color: #c0392b;
 	}
 </style>

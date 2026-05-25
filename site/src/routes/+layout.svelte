@@ -12,6 +12,8 @@
 	import BuildInfoFooter from '$lib/components/BuildInfo.svelte';
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import Tour from '$lib/components/Tour.svelte';
+	import CartDrawer from '$lib/components/CartDrawer.svelte';
+	import { cartDrawerOpen } from '$lib/stores/cart_ui';
 	import { tourStore, tourFlags } from '$lib/stores/tour';
 	// SITE_MODE is a build-time constant (Vite substitutes
 	// `import.meta.env.VITE_SITE_MODE` at compile time). The unified
@@ -154,7 +156,7 @@
 </svelte:head>
 
 <div class="shell">
-	<SiteHeader {feedbackUrl} />
+	<SiteHeader {feedbackUrl} on:open-cart={() => ($cartDrawerOpen = true)} />
 
 	{#if SITE_MODE === 'ohbm2026' && !$tourFlags.ctaDismissed && !$tourFlags.completedOrSkipped}
 		<!-- Tour CTA banner only on /ohbm2026/ for now — atlas-root +
@@ -200,6 +202,17 @@
 	</main>
 
 	<Tour />
+
+	<!-- Unifying cart drawer — mounted once for every subsite. The
+	     per-mode data lookups (OHBM abstracts + authors / NeuroScape
+	     articles) are injected by the corresponding +page.svelte
+	     via the slot pattern below… actually for simplicity we just
+	     pass empty maps here; the per-site pages mount their own
+	     CartDrawer with the right lookups when they have data. The
+	     fallback rendering here is id-only ("OHBM 2026 poster 1234"
+	     without title) — visible only if the user opens the drawer
+	     from a page that hasn't loaded any corpus data yet. -->
+	<CartDrawer bind:open={$cartDrawerOpen} />
 
 	<BuildInfoFooter deployBuildInfo={envBuildInfo} {dataBuildInfo} />
 </div>

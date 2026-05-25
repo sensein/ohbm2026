@@ -27,7 +27,13 @@
 	import { semanticEnabled } from '$lib/stores/searchMode';
 	import { semanticStatus } from '$lib/search/semantic';
 	import { cartStore } from '$lib/stores/cart';
-	import CartDrawer from '$lib/components/CartDrawer.svelte';
+	import {
+		cartDrawerOpen,
+		ohbmTitleLookup,
+		neuroscapeTitleLookup
+	} from '$lib/stores/cart_ui';
+	// CartDrawer is mounted by `+layout.svelte` for all modes — no
+	// import needed here.
 	// Stage 15 (spec 015-neuroscape-context, FR-008/FR-009/FR-013/FR-014):
 	// the bare-root cross-conference atlas landing page mounts a small
 	// chrome (header + binary toggle + density slider) in place of the
@@ -109,7 +115,9 @@
 	// `showMap` is now backed by a localStorage-persistent store
 	// (`$lib/stores/selection.showMap`) so a browser reload keeps the
 	// user's chosen view. Read/write via the `$showMap` Svelte sugar.
-	let cartOpen = false;
+	// `cartOpen` was the OHBM-only local; the unifying cart drawer is
+	// now controlled by the shared `cartDrawerOpen` store so the 🛒
+	// in the SiteHeader can open it from any subsite.
 	let semanticScores: Map<number, number> | null = null;
 	let semanticQuerySerial = 0;
 	let showFacets = false; // mobile drawer state; desktop always-shown
@@ -179,6 +187,19 @@
 				a.abstracts.filter((x) => x.poster_id).map((x) => [x.poster_id, x])
 			);
 			abstractsById = new Map(a.abstracts.map((x) => [x.poster_id, x]));
+			// Publish the OHBM title lookup so the unifying cart drawer
+			// can render rich rows for OHBM items saved from any subsite.
+			ohbmTitleLookup.set(
+				new Map(
+					a.abstracts
+						.filter((x) => x.poster_id)
+						.map((x) => {
+							const leadId = x.author_ids[0];
+							const lead = leadId !== undefined ? au.authors.find((y) => y.author_id === leadId)?.name : undefined;
+							return [x.poster_id, { title: x.title, lead_author: lead }];
+						})
+				)
+			);
 			// Test-only debug global used by Playwright accepted-only invariant guard.
 			if (typeof window !== 'undefined') {
 				(window as unknown as { __abstracts: AbstractRecord[] }).__abstracts = abstracts;
@@ -764,6 +785,29 @@
 				atlasBackdrop = backdropShard.points;
 				atlasOverlayPoints = overlayShard.points;
 				atlasClusters = clustersShard.clusters;
+				// Publish title lookups so the unifying cart drawer can
+				// render rich rows for items from EITHER subsite when
+				// the user is on atlas-root (the only build that loads
+				// both kinds locally).
+				const ohbmMap = new Map<number, { title: string; lead_author?: string }>();
+				for (const p of atlasOverlayPoints) {
+					ohbmMap.set(p.poster_id, { title: p.title });
+				}
+				ohbmTitleLookup.set(ohbmMap);
+				const clusterTitleById = new Map<number, string>();
+				for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
+				const neuroMap = new Map<
+					number,
+					{ title: string; year?: number; cluster_title?: string }
+				>();
+				for (const p of atlasBackdrop) {
+					neuroMap.set(p.pubmed_id, {
+						title: p.title,
+						year: p.year,
+						cluster_title: clusterTitleById.get(p.cluster_id)
+					});
+				}
+				neuroscapeTitleLookup.set(neuroMap);
 				// T043 — Sibling-state-key drift check. Fires after the
 				// atlas scatter renders, so a slow / unreachable sibling
 				// doesn't block first paint. The check itself retries
@@ -799,6 +843,24 @@
 				atlasBackdrop = articlesShard.articles;
 				atlasOverlayPoints = [];
 				atlasClusters = clustersShard.clusters;
+				// /neuroscape/ publishes only the neuroscape title
+				// lookup; cross-site OHBM rows in the cart render with
+				// a placeholder until the user visits an OHBM page or
+				// atlas-root warms the OHBM lookup.
+				const clusterTitleById = new Map<number, string>();
+				for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
+				const neuroMap = new Map<
+					number,
+					{ title: string; year?: number; cluster_title?: string }
+				>();
+				for (const p of atlasBackdrop) {
+					neuroMap.set(p.pubmed_id, {
+						title: p.title,
+						year: p.year,
+						cluster_title: clusterTitleById.get(p.cluster_id)
+					});
+				}
+				neuroscapeTitleLookup.set(neuroMap);
 			}
 		} catch (err) {
 			atlasError = `failed to load atlas data: ${(err as Error)?.message ?? String(err)}`;
@@ -1298,7 +1360,7 @@
 					type="button"
 					class="control-toggle cart-toggle"
 					class:active={$cartStore.size > 0}
-					on:click={() => (cartOpen = true)}
+					on:click={() => ($cartDrawerOpen = true)}
 					aria-label={`Open your list (${$cartStore.size} saved)`}
 					title={$cartStore.size > 0
 						? `${$cartStore.size} abstract${$cartStore.size === 1 ? '' : 's'} saved — click to open`
@@ -1311,7 +1373,10 @@
 		{/if}
 	</div>
 
-	<CartDrawer bind:open={cartOpen} {abstracts} {authorsById} />
+	<!-- Cart drawer is mounted by `+layout.svelte` for ALL subsites so
+	     the 🛒 toggle in the unified SiteHeader works from anywhere.
+	     The OHBM home publishes its abstracts + authors into the shared
+	     `ohbmTitleLookup` store, so cart rows render with rich titles. -->
 
 	{#if $showMap && loaded && !dataMissing}
 		<UmapPanel {abstracts} selection={filteredIds} />

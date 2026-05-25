@@ -18,12 +18,16 @@
   itself; no per-site duplication.
 -->
 <script lang="ts">
+	import { createEventDispatcher } from 'svelte';
 	import { base } from '$app/paths';
 	import { SITE_MODE } from '$lib/site_mode';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import { tourStore } from '$lib/stores/tour';
+	import { cartItems } from '$lib/stores/cart';
 
 	export let feedbackUrl: string = '#';
+
+	const dispatch = createEventDispatcher<{ 'open-cart': void }>();
 
 	// Strip the per-mode suffix off `base` so a "home" link from
 	// /ohbm2026/ resolves to /, not /ohbm2026/. See
@@ -108,6 +112,22 @@
 			<a class="header-link" href={ABOUT_HREF} data-testid="header-about-link">
 				About
 			</a>
+			<!-- Unified cart toggle — visible across all three sibling
+			     subsites. The actual drawer mount is in `+layout.svelte`
+			     so it has access to the per-mode data lookups. -->
+			<button
+				type="button"
+				class="header-cart"
+				class:active={$cartItems.length > 0}
+				on:click={() => dispatch('open-cart')}
+				aria-label={`Open saved list (${$cartItems.length} item${$cartItems.length === 1 ? '' : 's'})`}
+				title={$cartItems.length > 0
+					? `${$cartItems.length} item${$cartItems.length === 1 ? '' : 's'} saved — click to open`
+					: 'Your saved list is empty — click any 🛒 to save an item'}
+				data-testid="header-cart"
+			>
+				🛒 {$cartItems.length}
+			</button>
 			<a
 				class="header-feedback"
 				target="_blank"
@@ -238,6 +258,26 @@
 		text-decoration: none;
 	}
 	.header-feedback:hover {
+		color: var(--accent);
+		background: var(--accent-soft-bg);
+	}
+	.header-cart {
+		all: unset;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		font-size: 0.88rem;
+		color: var(--text-muted);
+		padding: 0.25rem 0.55rem;
+		border-radius: 4px;
+		font-variant-numeric: tabular-nums;
+	}
+	.header-cart:hover {
+		color: var(--accent);
+		background: var(--accent-soft-bg);
+	}
+	.header-cart.active {
 		color: var(--accent);
 		background: var(--accent-soft-bg);
 	}

@@ -18,6 +18,100 @@
 
 import type { AbstractRecord } from '$lib/shards';
 
+/**
+ * Stage 15 unifying cart row — kind-tagged so the email + clipboard
+ * formatter can produce the right permalink per source. `siteRoot`
+ * is the cross-conference deploy root (e.g.
+ * `https://abstractatlas.brainkb.org`); `kind` selects the subsite
+ * subpath. OHBM rows keep their `lead_author`; PubMed rows surface
+ * a year + cluster label instead (authors live behind the runtime
+ * NCBI EFetch and aren't cached locally).
+ */
+export interface UnifiedCartRow {
+	kind: 'ohbm2026' | 'neuroscape';
+	id: number;
+	title: string;
+	subline: string; // e.g. "Jane Doe" (OHBM) or "2021 · Memory & aging" (neuroscape)
+}
+
+function siblingPermalink(siteRoot: string, kind: 'ohbm2026' | 'neuroscape', id: number): string {
+	const root = trimSlash(siteRoot);
+	if (kind === 'ohbm2026') {
+		return `${root}/ohbm2026/abstract/${String(id).padStart(4, '0')}/`;
+	}
+	return `${root}/neuroscape/abstract/${id}/`;
+}
+
+/**
+ * Plain-text rendering for a mixed-kind cart. Each row gets the
+ * same four-line block as the OHBM-only formatter, with a
+ * `[OHBM 2026]` / `[NeuroScape]` kind tag in the headline so the
+ * recipient can spot which corpus each item came from.
+ */
+export function buildUnifiedPlainTextList(items: UnifiedCartRow[], siteRoot: string): string {
+	const root = trimSlash(siteRoot);
+	const header =
+		`Saved abstracts from Abstract Atlas (${items.length} item${items.length === 1 ? '' : 's'}).\n\n` +
+		`Each entry below has an "Open:" link that lands directly on its full-detail page.\n\n`;
+	const blocks = items.map((r, i) => {
+		const tag = r.kind === 'ohbm2026' ? 'OHBM 2026' : 'NeuroScape';
+		const id =
+			r.kind === 'ohbm2026'
+				? String(r.id).padStart(4, '0')
+				: `PMID ${r.id}`;
+		const url = siblingPermalink(root, r.kind, r.id);
+		const lines: string[] = [`${i + 1}. [${tag} · ${id}] ${r.title}`];
+		if (r.subline) lines.push(`   — ${r.subline}`);
+		lines.push(`   → Open: ${url}`);
+		return lines.join('\n');
+	});
+	return header + blocks.join('\n\n') + `\n\n— Browse the atlas at ${root}/`;
+}
+
+/**
+ * Mailto: URL for a mixed-kind cart. Same length-budget logic as the
+ * OHBM-only `buildMailtoLink`: full body up to `MAX_EMAIL_ITEMS` rows;
+ * compact body (no per-item list, just a copy hint) when the full body
+ * would push the URL past `MAX_MAILTO_LENGTH`.
+ */
+export function buildUnifiedMailtoLink(items: UnifiedCartRow[], siteRoot: string): string {
+	const subject = 'My Abstract Atlas saved list';
+	const subjectPart = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=';
+	const root = trimSlash(siteRoot);
+	const header =
+		`Saved abstracts from Abstract Atlas (${items.length} item${items.length === 1 ? '' : 's'}).\n\n`;
+	const footer = `\n\n— Browse the atlas at ${root}/`;
+	const visibleCount = Math.min(items.length, MAX_EMAIL_ITEMS);
+	const allItemsFit = items.length <= MAX_EMAIL_ITEMS;
+	const blocks = items.slice(0, visibleCount).map((r, i) => {
+		const tag = r.kind === 'ohbm2026' ? 'OHBM 2026' : 'NeuroScape';
+		const id =
+			r.kind === 'ohbm2026' ? String(r.id).padStart(4, '0') : `PMID ${r.id}`;
+		const url = siblingPermalink(root, r.kind, r.id);
+		const lines: string[] = [`${i + 1}. [${tag} · ${id}] ${r.title}`];
+		if (r.subline) lines.push(`   — ${r.subline}`);
+		lines.push(`   → Open: ${url}`);
+		return lines.join('\n');
+	});
+	const truncation = !allItemsFit
+		? `\n\n…(${items.length - visibleCount} more items not shown — use the "Copy" button to export the full list)`
+		: '';
+	const fullBody =
+		header +
+		`Each entry below has an "Open:" link that lands directly on its full-detail page.\n\n` +
+		blocks.join('\n\n') +
+		truncation +
+		footer;
+	const fullUrl = subjectPart + encodeURIComponent(fullBody);
+	if (fullUrl.length <= MAX_MAILTO_LENGTH) return fullUrl;
+	// Compact body — no per-item list.
+	const compactBody =
+		header +
+		`(This cart is too large to fit the full list in an email. Use the "Copy" button on the cart drawer to copy every item as plain text — the clipboard has no length limit.)` +
+		footer;
+	return subjectPart + encodeURIComponent(compactBody);
+}
+
 /** Item-based cap for the email body. Beyond this many items the
  * body switches to "first N items + truncation marker"; the
  * restore-URL at the top still lets the recipient open all of them
