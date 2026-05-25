@@ -483,6 +483,19 @@
 			return true;
 		});
 	})();
+	// Scatter-only decimation. Rendering 461k WebGL points across BOTH
+	// 2D scattergl + 3D scatter3d panes simultaneously freezes the
+	// browser. The full list stays available for search + the result
+	// list; the scatter only needs enough points to convey density.
+	// 50k per pane is the empirical ceiling where the side-by-side
+	// view still feels responsive. Modulo sampling preserves cluster
+	// distribution since the rows aren't pre-sorted by cluster.
+	$: scatterBackdrop = (() => {
+		const TARGET = 50_000;
+		if (filteredBackdrop.length <= TARGET) return filteredBackdrop;
+		const stride = Math.ceil(filteredBackdrop.length / TARGET);
+		return filteredBackdrop.filter((_, i) => i % stride === 0);
+	})();
 	$: filteredOverlay = (() => {
 		if (SITE_MODE !== 'atlas-root' || !filterShowOhbm) return [] as AtlasOverlayPoint[];
 		if (filterClusterIds.size === 0) return atlasOverlayPoints;
@@ -651,7 +664,14 @@
 				return;
 			}
 			if (SITE_MODE === 'atlas-root') {
-				const backdropShard = pkg.get('data/atlas/backdrop_full.json') as
+				// Default to the DECIMATED backdrop (50k points) — the
+				// full 461k-point variant freezes browsers when rendered
+				// across both 2D scattergl + 3D scatter3d panes. The
+				// decimated variant is per-cluster stratified so visual
+				// density still reflects the full corpus. A future
+				// "Show full atlas" toggle can swap to backdrop_full.json
+				// on demand (per R-011 mobile detection in the plan).
+				const backdropShard = pkg.get('data/atlas/backdrop_decimated.json') as
 					| { points: AtlasBackdropPoint[] }
 					| undefined;
 				const overlayShard = pkg.get('data/atlas/ohbm_overlay.json') as
@@ -696,6 +716,9 @@
 						'NeuroScape data package is missing the articles or clusters row group.';
 					return;
 				}
+				// neuroscape.parquet doesn't ship a pre-decimated row group;
+				// keep the full 461k articles for search + result-list,
+				// decimate at scatter-render time below.
 				atlasBackdrop = articlesShard.articles;
 				atlasOverlayPoints = [];
 				atlasClusters = clustersShard.clusters;
@@ -957,10 +980,17 @@
 				     by mode. Single instance renders 2D + 3D side-by-side
 				     internally (matching OHBM's pattern); pause/rotate
 				     preserves the 3D camera across toggles via the shared
-				     `currentEye3D` tracker. -->
+				     `currentEye3D` tracker.
+
+				     Backdrop is decimated to ≤50k points per pane via
+				     `scatterBackdrop` — rendering the full 461k on BOTH
+				     2D scattergl AND 3D scatter3d simultaneously freezes
+				     the browser. The result list + search work off the
+				     un-decimated `filteredBackdrop` so no titles are
+				     hidden from the UX outside the scatter. -->
 				<UmapPanel
 					mode={SITE_MODE === 'atlas-root' ? 'atlas' : 'neuroscape'}
-					backdropPoints={filteredBackdrop}
+					backdropPoints={scatterBackdrop}
 					overlayPoints={filteredOverlay}
 					atlasClusters={atlasClusters}
 					showOverlay={SITE_MODE === 'atlas-root' ? filterShowOhbm : false}
