@@ -1,10 +1,40 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
 	import { selectedCell, lassoSelection, focusedAbstract } from '$lib/stores/selection';
 	import { effectiveTheme } from '$lib/stores/theme';
 	import { loadCell, loadTopics, type CellShard, type TopicShard } from '$lib/shards';
 	import type { AbstractRecord } from '$lib/shards';
 
+	/**
+	 * Stage 15 — unified UMAP panel. Drives all three subsites:
+	 *
+	 *   - `mode='ohbm'` (default; existing behaviour) — renders the
+	 *     OHBM 2026 home page's per-community scatter from
+	 *     `cell_shard` + `abstracts`. Lasso writes to
+	 *     `$lassoSelection`; click writes to `$focusedAbstract`.
+	 *     Per-community marker symbols cycle through 5 shapes ×
+	 *     Tol-bright colour palette.
+	 *   - `mode='atlas' | 'neuroscape'` (Stage 15 new) — renders a
+	 *     simpler two-trace scatter from `backdropPoints` +
+	 *     `overlayPoints` + `clusters`. Cluster count is usually too
+	 *     large (~175) for shape variation to read, so per-point
+	 *     symbol cycling is gated by `shapeVariation`:
+	 *       - 'auto'        → shape if `clusters.length ≤ 7`
+	 *       - 'color-only'  → no symbol cycling (default for atlas)
+	 *       - 'color+shape' → force shape cycling
+	 *     Atlas mode dispatches `pointclick`, `lassoselect`,
+	 *     `lassoclear` events instead of writing to the OHBM stores;
+	 *     the parent decides whether to open a detail panel or
+	 *     navigate.
+	 *
+	 *  Common across all modes: 2D + 3D side-by-side; pause/rotate
+	 *  with camera-preserved-across-toggle (`currentEye3D` tracked
+	 *  via `plotly_relayout` listener); mobile-responsive stacked
+	 *  layout; theme-aware colours.
+	 */
+	export let mode: 'ohbm' | 'atlas' | 'neuroscape' = 'ohbm';
+
+	// === OHBM mode props (existing) ========================================
 	export let abstracts: AbstractRecord[] = [];
 	/**
 	 * Set of poster_ids the rest of the app considers "currently selected"
@@ -20,6 +50,51 @@
 	 * use tap-to-filter-by-community for the 2D pane (FR-005 Edge Case).
 	 */
 	export let mobileBreakpoint = 1024;
+
+	// === Atlas/neuroscape mode props (Stage 15 new) =========================
+	type BackdropPoint = {
+		pubmed_id: number;
+		title: string;
+		year: number;
+		cluster_id: number;
+		umap_2d?: [number, number];
+		umap_3d: [number, number, number];
+	};
+	type OverlayPoint = {
+		submission_id: number;
+		poster_id: number;
+		title: string;
+		nearest_cluster_id: number;
+		umap_2d?: [number, number];
+		umap_3d: [number, number, number];
+	};
+	type AtlasCluster = {
+		cluster_id: number;
+		title: string;
+		colour_hex: string;
+	};
+
+	export let backdropPoints: BackdropPoint[] = [];
+	export let overlayPoints: OverlayPoint[] = [];
+	export let atlasClusters: AtlasCluster[] = [];
+	export let showOverlay = true;
+	export let backdropOpacity = 0.05;
+	/** Symbol cycling policy for the new atlas/neuroscape modes. */
+	export let shapeVariation: 'auto' | 'color-only' | 'color+shape' = 'auto';
+
+	const dispatch = createEventDispatcher<{
+		pointclick: { kind: 'ohbm2026' | 'neuroscape'; id: number };
+		lassoselect: { ohbm2026_ids: number[]; neuroscape_ids: number[] };
+		lassoclear: void;
+	}>();
+
+	$: clustersById = new Map(atlasClusters.map((c) => [c.cluster_id, c]));
+	$: useAtlasShapes = (() => {
+		if (shapeVariation === 'color-only') return false;
+		if (shapeVariation === 'color+shape') return true;
+		// 'auto': shape only if we have few enough clusters.
+		return atlasClusters.length > 0 && atlasClusters.length <= 7;
+	})();
 
 	type PlotlyApi = typeof import('plotly.js-gl3d-dist-min');
 
@@ -95,6 +170,9 @@
 	}
 
 	$: void (async () => {
+		// Cell-shard load only runs in OHBM mode — atlas/neuroscape get
+		// their cluster geometry from the `atlasClusters` prop.
+		if (mode !== 'ohbm') return;
 		const key = cellKey;
 		cellLoading = true;
 		cellError = null;
@@ -128,8 +206,54 @@
 		const rec = abstracts.find((a) => a.poster_id === $focusedAbstract);
 		return rec ? rec.poster_id : null;
 	})();
-	$: void renderChart2D(plotly, chart2dEl, cellShard, abstracts, selection, mobile, theme, topicByCluster, focusedAbstractId);
-	$: void renderChart3D(plotly, chart3dEl, cellShard, abstracts, selection, theme, topicByCluster, focusedAbstractId);
+	$: if (mode === 'ohbm') {
+		void renderChart2D(
+			plotly,
+			chart2dEl,
+			cellShard,
+			abstracts,
+			selection,
+			mobile,
+			theme,
+			topicByCluster,
+			focusedAbstractId
+		);
+		void renderChart3D(
+			plotly,
+			chart3dEl,
+			cellShard,
+			abstracts,
+			selection,
+			theme,
+			topicByCluster,
+			focusedAbstractId
+		);
+	} else {
+		// Atlas / neuroscape mode — different data shape, different
+		// trace structure (backdrop + overlay rather than per-community).
+		void renderAtlasChart2D(
+			plotly,
+			chart2dEl,
+			backdropPoints,
+			overlayPoints,
+			clustersById,
+			showOverlay,
+			backdropOpacity,
+			useAtlasShapes,
+			theme
+		);
+		void renderAtlasChart3D(
+			plotly,
+			chart3dEl,
+			backdropPoints,
+			overlayPoints,
+			clustersById,
+			showOverlay,
+			backdropOpacity,
+			useAtlasShapes,
+			theme
+		);
+	}
 
 	// Paul Tol's "bright" qualitative palette — high-contrast, deuteranopia /
 	// protanopia / tritanopia safe. Communities are CATEGORICAL (the integer
@@ -386,6 +510,313 @@
 			});
 	}
 
+	// ========================================================================
+	// Atlas / NeuroScape mode renderers (Stage 15).
+	//
+	// Two traces per pane: backdrop (cluster-coloured, low opacity for the
+	// dense 461k-point case) + overlay (cluster-coloured, larger outlined
+	// marker, full opacity). 2D pane uses scattergl + dragmode='lasso';
+	// 3D pane uses scatter3d. Customdata = {kind, id}.
+	// ========================================================================
+
+	const ATLAS_SHAPES_2D = ['circle', 'diamond', 'square', 'triangle-up', 'cross'];
+	const ATLAS_SHAPES_3D = ['circle', 'diamond', 'square', 'cross', 'x'];
+	function atlasShape2D(communityId: number): string {
+		const i = ((communityId % ATLAS_SHAPES_2D.length) + ATLAS_SHAPES_2D.length) % ATLAS_SHAPES_2D.length;
+		return ATLAS_SHAPES_2D[i];
+	}
+	function atlasShape3D(communityId: number): string {
+		const i = ((communityId % ATLAS_SHAPES_3D.length) + ATLAS_SHAPES_3D.length) % ATLAS_SHAPES_3D.length;
+		return ATLAS_SHAPES_3D[i];
+	}
+
+	function atlasEscape(s: string): string {
+		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	}
+
+	function buildAtlasBackdropTrace(
+		points: BackdropPoint[],
+		clusters: Map<number, AtlasCluster>,
+		opacity: number,
+		useShapes: boolean,
+		is3d: boolean
+	) {
+		const x = points.map((p) => (is3d ? p.umap_3d[0] : (p.umap_2d ?? [0, 0])[0]));
+		const y = points.map((p) => (is3d ? p.umap_3d[1] : (p.umap_2d ?? [0, 0])[1]));
+		const colours = points.map((p) => clusters.get(p.cluster_id)?.colour_hex ?? '#9c9c9c');
+		const hoverText = points.map(
+			(p) =>
+				`<b>${atlasEscape(p.title)}</b><br>${p.year} · ${atlasEscape(
+					clusters.get(p.cluster_id)?.title ?? `Cluster ${p.cluster_id}`
+				)}`
+		);
+		const customdata = points.map((p) => ({ kind: 'neuroscape', id: p.pubmed_id }));
+		const symbol = useShapes ? points.map((p) => atlasShape2D(p.cluster_id)) : undefined;
+		if (is3d) {
+			return {
+				type: 'scatter3d' as const,
+				mode: 'markers' as const,
+				x,
+				y,
+				z: points.map((p) => p.umap_3d[2]),
+				name: 'NeuroScape backdrop',
+				marker: {
+					size: 2,
+					color: colours,
+					opacity,
+					line: { width: 0 },
+					...(useShapes ? { symbol: points.map((p) => atlasShape3D(p.cluster_id)) } : {})
+				},
+				hovertemplate: '%{text}<extra></extra>',
+				text: hoverText,
+				showlegend: false,
+				customdata
+			};
+		}
+		return {
+			type: 'scattergl' as const,
+			mode: 'markers' as const,
+			x,
+			y,
+			name: 'NeuroScape backdrop',
+			marker: { size: 3, color: colours, opacity, line: { width: 0 }, ...(symbol ? { symbol } : {}) },
+			hovertemplate: '%{text}<extra></extra>',
+			text: hoverText,
+			showlegend: false,
+			customdata
+		};
+	}
+
+	function buildAtlasOverlayTrace(
+		points: OverlayPoint[],
+		clusters: Map<number, AtlasCluster>,
+		visible: boolean,
+		useShapes: boolean,
+		is3d: boolean
+	) {
+		if (points.length === 0) return null;
+		const x = points.map((p) => (is3d ? p.umap_3d[0] : (p.umap_2d ?? [0, 0])[0]));
+		const y = points.map((p) => (is3d ? p.umap_3d[1] : (p.umap_2d ?? [0, 0])[1]));
+		const colours = points.map(
+			(p) => clusters.get(p.nearest_cluster_id)?.colour_hex ?? '#1f77b4'
+		);
+		const hoverText = points.map(
+			(p) =>
+				`<b>${atlasEscape(p.title)}</b><br>OHBM 2026 poster #${p.poster_id} · near ${atlasEscape(
+					clusters.get(p.nearest_cluster_id)?.title ?? `Cluster ${p.nearest_cluster_id}`
+				)}`
+		);
+		const customdata = points.map((p) => ({ kind: 'ohbm2026', id: p.poster_id }));
+		if (is3d) {
+			return {
+				type: 'scatter3d' as const,
+				mode: 'markers' as const,
+				x,
+				y,
+				z: points.map((p) => p.umap_3d[2]),
+				name: 'OHBM 2026 overlay',
+				visible,
+				marker: {
+					size: 5,
+					color: colours,
+					opacity: 1.0,
+					line: { color: '#111111', width: 1.5 },
+					...(useShapes ? { symbol: points.map((p) => atlasShape3D(p.nearest_cluster_id)) } : {})
+				},
+				hovertemplate: '%{text}<extra></extra>',
+				text: hoverText,
+				showlegend: false,
+				customdata
+			};
+		}
+		return {
+			type: 'scattergl' as const,
+			mode: 'markers' as const,
+			x,
+			y,
+			name: 'OHBM 2026 overlay',
+			visible,
+			marker: {
+				size: 6,
+				color: colours,
+				opacity: 1.0,
+				line: { color: '#111111', width: 1.5 },
+				...(useShapes ? { symbol: points.map((p) => atlasShape2D(p.nearest_cluster_id)) } : {})
+			},
+			hovertemplate: '%{text}<extra></extra>',
+			text: hoverText,
+			showlegend: false,
+			customdata
+		};
+	}
+
+	let atlas2dHandlersAttached = false;
+	let atlas3dHandlersAttached = false;
+
+	function renderAtlasChart2D(
+		api: PlotlyApi | null,
+		el: HTMLDivElement | null,
+		backdrop: BackdropPoint[],
+		overlay: OverlayPoint[],
+		clusters: Map<number, AtlasCluster>,
+		showOverlayTrace: boolean,
+		opacity: number,
+		useShapes: boolean,
+		t: 'light' | 'dark'
+	) {
+		if (!api || !el) return;
+		const c = themedColors(t);
+		const traces: unknown[] = [buildAtlasBackdropTrace(backdrop, clusters, opacity, useShapes, false)];
+		const overlayTrace = buildAtlasOverlayTrace(overlay, clusters, showOverlayTrace, useShapes, false);
+		if (overlayTrace) traces.push(overlayTrace);
+		const layout = {
+			autosize: true,
+			margin: { l: 0, r: 0, t: 0, b: 0 },
+			hovermode: 'closest' as const,
+			dragmode: 'lasso' as const,
+			paper_bgcolor: c.paper,
+			plot_bgcolor: c.plot,
+			font: { color: c.font },
+			showlegend: false,
+			xaxis: { visible: false, scaleanchor: 'y' },
+			yaxis: { visible: false },
+			uirevision: 'atlas-2d',
+			selectionrevision: 'atlas-2d-sel'
+		};
+		const config = {
+			responsive: true,
+			displaylogo: false,
+			scrollZoom: true
+		};
+		(api as unknown as { react: (...args: unknown[]) => Promise<unknown> })
+			.react(el, traces, layout, config)
+			.then(() => {
+				if (atlas2dHandlersAttached) return;
+				atlas2dHandlersAttached = true;
+				const node = el as unknown as {
+					on: (e: string, h: (e: unknown) => void) => void;
+				};
+				node.on('plotly_click', (e: unknown) => {
+					const ev = e as { points?: Array<{ customdata?: unknown }> } | null;
+					const cd = ev?.points?.[0]?.customdata as
+						| { kind?: string; id?: number }
+						| undefined;
+					if (cd && typeof cd.kind === 'string' && typeof cd.id === 'number') {
+						dispatch('pointclick', {
+							kind: cd.kind as 'ohbm2026' | 'neuroscape',
+							id: cd.id
+						});
+					}
+				});
+				node.on('plotly_selected', (e: unknown) => {
+					const ev = e as { points?: Array<{ customdata?: unknown }> } | null;
+					if (!ev || !ev.points || ev.points.length === 0) return;
+					const ohbm: number[] = [];
+					const neuro: number[] = [];
+					for (const pt of ev.points) {
+						const cd = pt.customdata as { kind?: string; id?: number } | undefined;
+						if (!cd || typeof cd.id !== 'number') continue;
+						if (cd.kind === 'ohbm2026') ohbm.push(cd.id);
+						else if (cd.kind === 'neuroscape') neuro.push(cd.id);
+					}
+					dispatch('lassoselect', { ohbm2026_ids: ohbm, neuroscape_ids: neuro });
+				});
+				node.on('plotly_deselect', () => dispatch('lassoclear'));
+			})
+			.catch((err: Error) => {
+				plotlyError = err.message;
+			});
+	}
+
+	function renderAtlasChart3D(
+		api: PlotlyApi | null,
+		el: HTMLDivElement | null,
+		backdrop: BackdropPoint[],
+		overlay: OverlayPoint[],
+		clusters: Map<number, AtlasCluster>,
+		showOverlayTrace: boolean,
+		opacity: number,
+		useShapes: boolean,
+		t: 'light' | 'dark'
+	) {
+		if (!api || !el) return;
+		const c = themedColors(t);
+		const traces: unknown[] = [buildAtlasBackdropTrace(backdrop, clusters, opacity, useShapes, true)];
+		const overlayTrace = buildAtlasOverlayTrace(overlay, clusters, showOverlayTrace, useShapes, true);
+		if (overlayTrace) traces.push(overlayTrace);
+		const axisCfg = { visible: false, showbackground: false };
+		let cameraEye: { x: number; y: number; z: number } = { x: 1.6, y: 1.6, z: 0.9 };
+		if (chart3dInitialized && currentEye3D) cameraEye = currentEye3D;
+		const scene: Record<string, unknown> = {
+			xaxis: axisCfg,
+			yaxis: axisCfg,
+			zaxis: axisCfg,
+			bgcolor: c.plot,
+			camera: { eye: cameraEye }
+		};
+		const layout = {
+			autosize: true,
+			margin: { l: 0, r: 0, t: 0, b: 0 },
+			showlegend: false,
+			paper_bgcolor: c.paper,
+			plot_bgcolor: c.plot,
+			font: { color: c.font },
+			scene,
+			uirevision: 'atlas-3d'
+		};
+		const config = { responsive: true, displaylogo: false };
+		(api as unknown as { react: (...args: unknown[]) => Promise<unknown> })
+			.react(el, traces, layout, config)
+			.then(() => {
+				chart3dInitialized = true;
+				if (atlas3dHandlersAttached) {
+					ensureRotate();
+					return;
+				}
+				atlas3dHandlersAttached = true;
+				const node = el as unknown as {
+					on: (e: string, h: (e: unknown) => void) => void;
+				};
+				node.on('plotly_click', (e: unknown) => {
+					const ev = e as { points?: Array<{ customdata?: unknown }> } | null;
+					const cd = ev?.points?.[0]?.customdata as
+						| { kind?: string; id?: number }
+						| undefined;
+					if (cd && typeof cd.kind === 'string' && typeof cd.id === 'number') {
+						dispatch('pointclick', {
+							kind: cd.kind as 'ohbm2026' | 'neuroscape',
+							id: cd.id
+						});
+					}
+				});
+				// Share the camera-tracking + pause-without-reset logic with
+				// OHBM mode — same `currentEye3D` is updated on user orbits.
+				node.on('plotly_relayout', (e: unknown) => {
+					const ev = e as Record<string, unknown> | null;
+					if (!ev) return;
+					const flat = ev['scene.camera.eye'] as
+						| { x?: number; y?: number; z?: number }
+						| undefined;
+					const nested = (ev['scene.camera'] as
+						| { eye?: { x?: number; y?: number; z?: number } }
+						| undefined)?.eye;
+					const eye = flat ?? nested;
+					if (
+						eye &&
+						typeof eye.x === 'number' &&
+						typeof eye.y === 'number' &&
+						typeof eye.z === 'number'
+					) {
+						currentEye3D = { x: eye.x, y: eye.y, z: eye.z };
+					}
+				});
+				ensureRotate();
+			})
+			.catch((err: Error) => {
+				plotlyError = err.message;
+			});
+	}
+
 	function renderChart3D(
 		api: PlotlyApi | null,
 		el: HTMLDivElement | null,
@@ -617,18 +1048,33 @@
 	}
 </script>
 
-<section class="umap-panel" data-testid="umap-panel">
+<section class="umap-panel" data-testid="umap-panel" data-mode={mode}>
 	<header class="umap-header">
 		<div class="title-block">
-			<h3>UMAP — cell <code>{cellKey}</code></h3>
-			<p class="hint">
-				Points are coloured + shaped by <em>cluster</em> (community detected for this
-				cell, Tol-bright palette × 5 symbols, colour-vision-friendly). Lasso on 2D
-				filters the result list; click any point to open its detail panel.
-			</p>
+			{#if mode === 'ohbm'}
+				<h3>UMAP — cell <code>{cellKey}</code></h3>
+				<p class="hint">
+					Points are coloured + shaped by <em>cluster</em> (community detected for this
+					cell, Tol-bright palette × 5 symbols, colour-vision-friendly). Lasso on 2D
+					filters the result list; click any point to open its detail panel.
+				</p>
+			{:else}
+				<h3>
+					UMAP — {mode === 'atlas'
+						? 'cross-conference atlas'
+						: 'NeuroScape PubMed atlas'}
+				</h3>
+				<p class="hint">
+					Points are coloured by NeuroScape cluster
+					{#if useAtlasShapes}+ shaped by cluster (≤7 clusters){:else}(colour only — {atlasClusters.length}
+						clusters){/if}.
+					Lasso on the 2D pane filters the result list; click any point to open
+					its detail panel.
+				</p>
+			{/if}
 		</div>
 		<div class="header-actions">
-			{#if $lassoSelection}
+			{#if mode === 'ohbm' && $lassoSelection}
 				<button
 					type="button"
 					class="clear-lasso"

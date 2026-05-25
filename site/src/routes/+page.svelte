@@ -44,7 +44,10 @@
 	// Sites facet (filterShowOhbm); opacity defaults to 0.05; both
 	// 2D and 3D scatters are rendered side-by-side so no
 	// dimensionality toggle is needed.
-	import AtlasUmapPanel from '$lib/components/AtlasUmapPanel.svelte';
+	// AtlasUmapPanel is now an alias for the unified UmapPanel — the
+	// underlying file was deleted (Stage 15 UX-unification, slice D);
+	// all three subsites use `UmapPanel` with mode='ohbm' | 'atlas' |
+	// 'neuroscape'.
 	import AtlasRootDetailPanel from '$lib/components/AtlasRootDetailPanel.svelte';
 	import AtlasRootLassoResults from '$lib/components/AtlasRootLassoResults.svelte';
 	import AtlasRootBrowsePanel from '$lib/components/AtlasRootBrowsePanel.svelte';
@@ -950,34 +953,22 @@
 					{/if}
 				</div>
 			{:else}
-				<!-- Side-by-side 2D + 3D, matching OHBM 2026's UmapPanel
-				     pattern. Lasso fires on the 2D pane (Plotly limitation —
-				     plotly_selected only fires on scattergl traces, not
-				     scatter3d). Both panes share the same filter state +
-				     dispatch the same pointclick events. Stacks vertically
-				     on mobile (≤1024px). -->
-				<div class="atlas-umap-row" data-testid="atlas-umap-row">
-					<AtlasUmapPanel
-						backdropPoints={filteredBackdrop}
-						overlayPoints={filteredOverlay}
-						clusters={atlasClusters}
-						showOverlay={SITE_MODE === 'atlas-root' ? filterShowOhbm : false}
-						backdropOpacity={0.05}
-						dimensionality={'2d'}
-						on:pointclick={onAtlasPointClick}
-						on:lassoselect={onAtlasLasso}
-						on:lassoclear={clearAtlasLasso}
-					/>
-					<AtlasUmapPanel
-						backdropPoints={filteredBackdrop}
-						overlayPoints={filteredOverlay}
-						clusters={atlasClusters}
-						showOverlay={SITE_MODE === 'atlas-root' ? filterShowOhbm : false}
-						backdropOpacity={0.05}
-						dimensionality={'3d'}
-						on:pointclick={onAtlasPointClick}
-					/>
-				</div>
+				<!-- Unified UmapPanel — same component as `/ohbm2026/`, branched
+				     by mode. Single instance renders 2D + 3D side-by-side
+				     internally (matching OHBM's pattern); pause/rotate
+				     preserves the 3D camera across toggles via the shared
+				     `currentEye3D` tracker. -->
+				<UmapPanel
+					mode={SITE_MODE === 'atlas-root' ? 'atlas' : 'neuroscape'}
+					backdropPoints={filteredBackdrop}
+					overlayPoints={filteredOverlay}
+					atlasClusters={atlasClusters}
+					showOverlay={SITE_MODE === 'atlas-root' ? filterShowOhbm : false}
+					backdropOpacity={0.05}
+					on:pointclick={onAtlasPointClick}
+					on:lassoselect={onAtlasLasso}
+					on:lassoclear={clearAtlasLasso}
+				/>
 			{/if}
 		{/if}
 
