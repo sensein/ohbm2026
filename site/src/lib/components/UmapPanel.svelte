@@ -185,6 +185,15 @@
 		atlas2dHandlersAttached = false;
 		atlas3dHandlersAttached = false;
 		chart3dInitialized = false;
+		// Drop the 2D array cache so post-bfcache restore renders
+		// build fresh references that match the (purged-then-reborn)
+		// chart's internal data buffers. Stale cached arrays could
+		// otherwise cause Plotly's identity comparison to short-
+		// circuit the rebuild it actually needs.
+		cached2dBackdropArrays = null;
+		cached2dBackdropKey = '';
+		cached2dOverlayArrays = null;
+		cached2dOverlayKey = '';
 	}
 	function onVisibilityChange() {
 		if (typeof document === 'undefined') return;
@@ -808,6 +817,102 @@
 	let atlas3dHandlersAttached = false;
 
 	/**
+	 * Per-render 2D trace-array cache. Without it, every lasso state
+	 * change in `renderAtlasChart2D` rebuilds the same 461k-point
+	 * arrays (x, y, colours, hoverText, customdata, optional symbol)
+	 * from scratch — the lasso-cycle heap probe measured this as the
+	 * residual ~300 MB / cycle growth after the 3D mirror was
+	 * removed. The cache key is the (pointsRef, useShapes, theme,
+	 * is3d) tuple; cluster-colour changes invalidate via the theme
+	 * key (light/dark) — they shouldn't change at runtime otherwise.
+	 *
+	 * Plotly.react reads the array references; passing the SAME
+	 * reference across renders lets it skip the internal data-buffer
+	 * rebuild. Lasso state changes only flip `selectedpoints` +
+	 * `selected/unselected.marker.opacity` — orders of magnitude
+	 * less per-render allocation.
+	 */
+	type Atlas2dArrayCache = {
+		x: number[];
+		y: number[];
+		colours: string[];
+		hoverText: string[];
+		customdata: Array<{ kind: string; id: number }>;
+		symbol?: string[];
+	};
+	let cached2dBackdropArrays: Atlas2dArrayCache | null = null;
+	let cached2dBackdropKey = '';
+	let cached2dOverlayArrays: Atlas2dArrayCache | null = null;
+	let cached2dOverlayKey = '';
+	function atlas2dArrayKey(
+		pointsLength: number,
+		useShapes: boolean,
+		theme: string
+	): string {
+		// `pointsLength` is a stand-in for "data-ref identity" — the
+		// parent rebuilds the array when the parquet finishes loading
+		// (one-time) or on a state-key change. If the user toggles
+		// theme or useShapes we rebuild; otherwise the cache wins.
+		return `${pointsLength}|${useShapes}|${theme}`;
+	}
+	function getAtlasBackdropArrays(
+		points: BackdropPoint[],
+		clusters: Map<number, AtlasCluster>,
+		useShapes: boolean,
+		theme: string
+	): Atlas2dArrayCache {
+		const key = atlas2dArrayKey(points.length, useShapes, theme);
+		if (cached2dBackdropArrays && cached2dBackdropKey === key) {
+			return cached2dBackdropArrays;
+		}
+		cached2dBackdropArrays = {
+			x: points.map((p) => (p.umap_2d ?? [0, 0])[0]),
+			y: points.map((p) => (p.umap_2d ?? [0, 0])[1]),
+			colours: points.map((p) => clusters.get(p.cluster_id)?.colour_hex ?? '#9c9c9c'),
+			hoverText: points.map(
+				(p) =>
+					`<b>${atlasEscape(p.title)}</b><br>${p.year} · ${atlasEscape(
+						clusters.get(p.cluster_id)?.title ?? `Cluster ${p.cluster_id}`
+					)}`
+			),
+			customdata: points.map((p) => ({ kind: 'neuroscape', id: p.pubmed_id })),
+			symbol: useShapes ? points.map((p) => atlasShape2D(p.cluster_id)) : undefined
+		};
+		cached2dBackdropKey = key;
+		return cached2dBackdropArrays;
+	}
+	function getAtlasOverlayArrays(
+		points: OverlayPoint[],
+		clusters: Map<number, AtlasCluster>,
+		useShapes: boolean,
+		theme: string
+	): Atlas2dArrayCache {
+		const key = atlas2dArrayKey(points.length, useShapes, theme);
+		if (cached2dOverlayArrays && cached2dOverlayKey === key) {
+			return cached2dOverlayArrays;
+		}
+		cached2dOverlayArrays = {
+			x: points.map((p) => (p.umap_2d ?? [0, 0])[0]),
+			y: points.map((p) => (p.umap_2d ?? [0, 0])[1]),
+			colours: points.map(
+				(p) => clusters.get(p.nearest_cluster_id)?.colour_hex ?? '#1f77b4'
+			),
+			hoverText: points.map(
+				(p) =>
+					`<b>${atlasEscape(p.title)}</b><br>OHBM 2026 poster #${p.poster_id} · near ${atlasEscape(
+						clusters.get(p.nearest_cluster_id)?.title ?? `Cluster ${p.nearest_cluster_id}`
+					)}`
+			),
+			customdata: points.map((p) => ({ kind: 'ohbm2026', id: p.poster_id })),
+			symbol: useShapes
+				? points.map((p) => atlasShape2D(p.nearest_cluster_id))
+				: undefined
+		};
+		cached2dOverlayKey = key;
+		return cached2dOverlayArrays;
+	}
+
+	/**
 	 * Find a focused point's coordinates so the chart can render a
 	 * halo trace at its position. Searches the overlay first (OHBM
 	 * markers are larger + the more likely focus target on
@@ -857,18 +962,85 @@
 	) {
 		if (!api || !el) return;
 		const c = themedColors(t);
-		const traces: unknown[] = [
-			buildAtlasBackdropTrace(backdrop, clusters, opacity, useShapes, false, neuroLassoSet)
-		];
-		const overlayTrace = buildAtlasOverlayTrace(
-			overlay,
-			clusters,
-			showOverlayTrace,
-			useShapes,
-			false,
-			ohbmLassoSet
-		);
-		if (overlayTrace) traces.push(overlayTrace);
+
+		// Pull the 461k-point arrays from the cache instead of
+		// rebuilding them every lasso adjustment. Cache invalidates on
+		// data-ref / shapes / theme change; lasso changes don't touch
+		// it. The `selectedpoints` + selected/unselected opacity
+		// configs are still computed fresh per render — they're tiny
+		// (just an indices array up to lasso size).
+		const bdr = getAtlasBackdropArrays(backdrop, clusters, useShapes, t);
+		const ovr = getAtlasOverlayArrays(overlay, clusters, useShapes, t);
+
+		const backdropSelectedIdx: number[] = [];
+		if (neuroLassoSet.size > 0) {
+			for (let i = 0; i < backdrop.length; i++) {
+				if (neuroLassoSet.has(backdrop[i].pubmed_id)) backdropSelectedIdx.push(i);
+			}
+		}
+		const backdropSelectedConfig = backdropSelectedIdx.length
+			? {
+					selectedpoints: backdropSelectedIdx,
+					selected: { marker: { opacity: 1 } },
+					unselected: { marker: { opacity: Math.max(opacity * 4, 0.2) } }
+			  }
+			: {};
+		const backdropTrace: Record<string, unknown> = {
+			type: 'scattergl' as const,
+			mode: 'markers' as const,
+			x: bdr.x,
+			y: bdr.y,
+			name: 'NeuroScape backdrop',
+			marker: {
+				size: 3,
+				color: bdr.colours,
+				opacity,
+				line: { width: 0 },
+				...(bdr.symbol ? { symbol: bdr.symbol } : {})
+			},
+			hovertemplate: '%{text}<extra></extra>',
+			text: bdr.hoverText,
+			showlegend: false,
+			customdata: bdr.customdata,
+			...backdropSelectedConfig
+		};
+		const traces: unknown[] = [backdropTrace];
+
+		if (overlay.length > 0) {
+			const overlaySelectedIdx: number[] = [];
+			if (ohbmLassoSet.size > 0) {
+				for (let i = 0; i < overlay.length; i++) {
+					if (ohbmLassoSet.has(overlay[i].poster_id)) overlaySelectedIdx.push(i);
+				}
+			}
+			const overlaySelectedConfig = overlaySelectedIdx.length
+				? {
+						selectedpoints: overlaySelectedIdx,
+						selected: { marker: { opacity: 1 } },
+						unselected: { marker: { opacity: 0.25 } }
+				  }
+				: {};
+			traces.push({
+				type: 'scattergl' as const,
+				mode: 'markers' as const,
+				x: ovr.x,
+				y: ovr.y,
+				name: 'OHBM 2026 overlay',
+				visible: showOverlayTrace,
+				marker: {
+					size: 5,
+					color: ovr.colours,
+					opacity: 1.0,
+					line: { color: '#111111', width: 1.5 },
+					...(ovr.symbol ? { symbol: ovr.symbol } : {})
+				},
+				hovertemplate: '%{text}<extra></extra>',
+				text: ovr.hoverText,
+				showlegend: false,
+				customdata: ovr.customdata,
+				...overlaySelectedConfig
+			});
+		}
 		// Focus halo — a single magenta-ring marker at the focused
 		// point's coordinates. Sits ON TOP of everything else so it's
 		// the obvious visual signal of "you asked to focus this dot".
