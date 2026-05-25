@@ -44,8 +44,10 @@
 	import AtlasRootDetailPanel from '$lib/components/AtlasRootDetailPanel.svelte';
 	import AtlasRootLassoResults from '$lib/components/AtlasRootLassoResults.svelte';
 	import AtlasRootBrowsePanel from '$lib/components/AtlasRootBrowsePanel.svelte';
+	import AtlasRootFacets from '$lib/components/AtlasRootFacets.svelte';
 	import DimensionalityToggle from '$lib/components/DimensionalityToggle.svelte';
 	import NeuroscapeBrowsePanel from '$lib/components/NeuroscapeBrowsePanel.svelte';
+	import NeuroscapeFacets from '$lib/components/NeuroscapeFacets.svelte';
 	import { base } from '$app/paths';
 	import { atlasOverlay } from '$lib/stores/atlas_overlay';
 	import { dimensionality } from '$lib/stores/dimensionality';
@@ -463,8 +465,16 @@
 	// always true (we never want to hide ALL backdrop points there).
 	$: filteredBackdrop = (() => {
 		if (SITE_MODE === 'atlas-root' && !filterShowNeuro) return [];
-		if (filterClusterIds.size === 0) return atlasBackdrop;
-		return atlasBackdrop.filter((p) => filterClusterIds.has(p.cluster_id));
+		const yLo = filterMinYear ?? yearBounds.lo;
+		const yHi = filterMaxYear ?? yearBounds.hi;
+		const needsYear = SITE_MODE === 'neuroscape';
+		const needsCluster = filterClusterIds.size > 0;
+		if (!needsYear && !needsCluster) return atlasBackdrop;
+		return atlasBackdrop.filter((p) => {
+			if (needsYear && (p.year < yLo || p.year > yHi)) return false;
+			if (needsCluster && !filterClusterIds.has(p.cluster_id)) return false;
+			return true;
+		});
 	})();
 	$: filteredOverlay = (() => {
 		if (SITE_MODE !== 'atlas-root' || !filterShowOhbm) return [] as AtlasOverlayPoint[];
@@ -552,13 +562,48 @@
 	// T043 — drift banner state. Populated by the sibling-state-key
 	// check that fires in the background after atlas.parquet loads.
 	let atlasDrift: AtlasDriftEntry[] = [];
-	// UX unification — browse-panel facet state (clusters + sites for
-	// atlas-root, clusters for neuroscape). Drives both the result-list
-	// filter inside the panel AND the scatter via filteredBackdrop /
-	// filteredOverlay below.
+	// UX unification — facet state lives at the page level so the
+	// AtlasRootFacets / NeuroscapeFacets sidebars can be the single
+	// source of truth. Browse panels + scatter both read the
+	// filtered arrays computed from this state.
 	let filterClusterIds: Set<number> = new Set();
 	let filterShowOhbm = true;
 	let filterShowNeuro = true;
+	let filterMinYear: number | null = null;
+	let filterMaxYear: number | null = null;
+
+	// Year bounds for the NeuroScape year facet — derived from the
+	// loaded backdrop. Default 0/0 until articles arrive.
+	$: yearBounds = (() => {
+		if (SITE_MODE !== 'neuroscape' || atlasBackdrop.length === 0) {
+			return { lo: 0, hi: 0 };
+		}
+		let lo = Infinity;
+		let hi = -Infinity;
+		for (const p of atlasBackdrop) {
+			if (p.year < lo) lo = p.year;
+			if (p.year > hi) hi = p.year;
+		}
+		return { lo: Number.isFinite(lo) ? lo : 0, hi: Number.isFinite(hi) ? hi : 0 };
+	})();
+
+	// Cluster counts — shared by both facet sidebars. For atlas-root,
+	// counts include BOTH backdrop and overlay; for neuroscape, only
+	// backdrop. SITE_MODE-conditional so we don't pay the iteration
+	// cost on the wrong mode.
+	$: clusterCounts = (() => {
+		const counts = new Map<number, number>();
+		if (SITE_MODE === 'atlas-root') {
+			for (const a of atlasBackdrop)
+				counts.set(a.cluster_id, (counts.get(a.cluster_id) ?? 0) + 1);
+			for (const o of atlasOverlayPoints)
+				counts.set(o.nearest_cluster_id, (counts.get(o.nearest_cluster_id) ?? 0) + 1);
+		} else if (SITE_MODE === 'neuroscape') {
+			for (const a of atlasBackdrop)
+				counts.set(a.cluster_id, (counts.get(a.cluster_id) ?? 0) + 1);
+		}
+		return counts;
+	})();
 	// UX-unification: search query + show-map state at the page level,
 	// matching the OHBM 2026 home's pattern (search lives in the
 	// top-row, map toggles in/out via a control-toggle button). Both
@@ -915,21 +960,50 @@
 			{/if}
 		{/if}
 
-		<!-- Layout grid — list pane (browse panel) + detail pane,
-		     mirroring OHBM's home. The browse panel's internal facet
-		     row sits at the top of the list pane (its search input
-		     was hoisted to the top-row above). -->
+		<!-- 3-column layout grid — facets | list | detail. Same shape
+		     as OHBM 2026's `.layout`. Facets sidebar drives the page-
+		     level filter state which feeds the result list AND the
+		     scatter (so the two views stay in sync). -->
 		{#if atlasBackdrop.length > 0}
 			<div class="layout atlas-layout">
+				<div class="facet-pane">
+					{#if SITE_MODE === 'atlas-root'}
+						<AtlasRootFacets
+							clustersById={atlasClustersById}
+							{clusterCounts}
+							ohbmCount={atlasOverlayPoints.length}
+							neuroCount={atlasBackdrop.length}
+							selectedClusterIds={filterClusterIds}
+							showOhbm={filterShowOhbm}
+							showNeuro={filterShowNeuro}
+							on:update={(ev) => {
+								filterClusterIds = ev.detail.cluster_ids;
+								filterShowOhbm = ev.detail.show_ohbm;
+								filterShowNeuro = ev.detail.show_neuro;
+							}}
+						/>
+					{:else}
+						<NeuroscapeFacets
+							clustersById={atlasClustersById}
+							{clusterCounts}
+							selectedClusterIds={filterClusterIds}
+							minYear={filterMinYear}
+							maxYear={filterMaxYear}
+							{yearBounds}
+							on:update={(ev) => {
+								filterClusterIds = ev.detail.cluster_ids;
+								filterMinYear = ev.detail.min_year;
+								filterMaxYear = ev.detail.max_year;
+							}}
+						/>
+					{/if}
+				</div>
 				<div class="list-pane">
 					{#if SITE_MODE === 'neuroscape'}
 						<NeuroscapeBrowsePanel
-							articles={atlasBackdrop}
+							articles={filteredBackdrop}
 							clustersById={atlasClustersById}
 							bind:query={atlasSearchQuery}
-							on:filter={(ev) => {
-								filterClusterIds = ev.detail.cluster_ids;
-							}}
 							on:focus={(ev) => {
 								const url = new URL(window.location.href);
 								url.searchParams.set('focus', String(ev.detail.pubmed_id));
@@ -943,16 +1017,11 @@
 						/>
 					{:else}
 						<AtlasRootBrowsePanel
-							backdropPoints={atlasBackdrop}
-							overlayPoints={atlasOverlayPoints}
+							backdropPoints={filteredBackdrop}
+							overlayPoints={filteredOverlay}
 							clustersById={atlasClustersById}
 							permalinkFor={atlasPermalink}
 							bind:query={atlasSearchQuery}
-							on:filter={(ev) => {
-								filterClusterIds = ev.detail.cluster_ids;
-								filterShowOhbm = ev.detail.show_ohbm;
-								filterShowNeuro = ev.detail.show_neuro;
-							}}
 							on:select={(ev) => {
 								onAtlasPointClick(
 									new CustomEvent('pointclick', { detail: ev.detail })
@@ -1233,25 +1302,40 @@
 	.atlas-home > .top-row {
 		margin-top: 1rem;
 	}
-	/* Atlas-home's grid is 2-column (list + detail). OHBM 2026's
-	   `.layout` is overridden via @media + cart/facet panes; we
-	   stay simpler here. */
+	/* 3-column atlas-home layout — facets | list | detail. Matches
+	   OHBM 2026's `.layout` shape (which is also 3-column with
+	   `.facet-pane` / `.list-pane` / `.detail-pane` on wide screens).
+	   `.has-focus` widens detail; otherwise detail is hidden via CSS
+	   so list takes the spare column. */
 	.atlas-layout {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr);
+		grid-template-columns: 14rem minmax(0, 1fr);
 		gap: 1rem;
 		width: 100%;
 	}
 	.atlas-home.has-focus .atlas-layout {
-		grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+		grid-template-columns: 14rem minmax(0, 2fr) minmax(0, 1fr);
 	}
 	@media (max-width: 720px) {
+		.atlas-layout,
 		.atlas-home.has-focus .atlas-layout {
 			grid-template-columns: minmax(0, 1fr);
 		}
 	}
+	.atlas-home .facet-pane {
+		min-width: 0;
+		display: block;
+	}
 	.atlas-home .detail-pane:not(.active) {
 		display: none;
+	}
+	@media (max-width: 720px) {
+		.atlas-home .facet-pane {
+			/* Facets collapse to top on mobile; the .facets max-height
+			   inside the component keeps the cluster list scrollable. */
+			max-height: 30vh;
+			overflow-y: auto;
+		}
 	}
 	/* Atlas-home search input — same visual weight as OHBM's
 	   SearchBar (large, full-width-ish, prominent). */
