@@ -293,9 +293,11 @@
 	} else {
 		// Atlas / neuroscape mode — different data shape, different
 		// trace structure (backdrop + overlay rather than per-community).
-		// Both panes always render; the 2D pane carries the lasso
-		// highlight via `selectedpoints`, the 3D pane zooms to the
-		// lassoed bounding box.
+		// The 2D pane carries the lasso interaction (scattergl has
+		// native lasso + selectedpoints). The 3D pane mirrors the
+		// lasso highlight via a dual-trace split (scatter3d ignores
+		// selectedpoints), but has no lasso tool of its own — its
+		// dragmode is the orbit default.
 		void renderToken;
 		void renderAtlasChart2D(
 			plotly,
@@ -888,6 +890,10 @@
 		// even with the new selection bbox zoom) and selected pops
 		// at medium opacity — NOT fully opaque, which was previously
 		// too contrastive against the empty zoomed scene.
+		//
+		// The 3D pane has NO lasso interaction of its own (scatter3d
+		// doesn't support lasso; dragmode stays at the orbit default).
+		// It just reflects the lasso state set by the 2D pane.
 		const lassoActive = ohbmLassoSet.size + neuroLassoSet.size > 0;
 		const traces: unknown[] = [];
 		if (lassoActive) {
