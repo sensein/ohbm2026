@@ -203,85 +203,88 @@
 </aside>
 
 <style>
+	/* Visual alignment with OHBM 2026's FacetSidebar — see
+	   AtlasRootFacets.svelte for the rationale. */
 	.facets {
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
-		gap: 0.6rem;
-		min-width: 0;
+		gap: 0.5rem;
+		font-size: 0.85rem;
+		color: var(--text);
 	}
 	header {
 		display: flex;
-		align-items: center;
 		justify-content: space-between;
-		padding-bottom: 0.25rem;
+		align-items: center;
+		gap: 0.5rem;
+		padding-bottom: 0.5rem;
 		border-bottom: 1px solid var(--border);
 	}
 	h2 {
+		margin: 0;
 		font-size: 0.95rem;
 		font-weight: 600;
-		margin: 0;
 	}
 	.clear {
 		all: unset;
 		cursor: pointer;
-		font-size: 0.78rem;
-		color: var(--text-muted);
-		padding: 0.2rem 0.45rem;
+		font-size: 0.75rem;
+		color: var(--accent);
+		padding: 0.2rem 0.5rem;
 		border-radius: 3px;
 		border: 1px solid var(--border);
 	}
 	.clear:hover {
-		background: var(--bg-subtle);
-		color: var(--text);
+		background: var(--bg-sunken);
 	}
 	.facet {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
 	}
 	.facet-header {
 		all: unset;
 		cursor: pointer;
 		display: flex;
 		align-items: center;
-		gap: 0.35rem;
-		padding: 0.35rem 0.3rem;
-		font-size: 0.9rem;
+		gap: 0.4rem;
+		padding: 0.35rem 0;
+		font-weight: 500;
 		color: var(--text);
-		border-radius: 3px;
 	}
 	.facet-header:hover {
-		background: var(--bg-subtle);
+		color: var(--accent);
 	}
 	.caret {
-		font-size: 0.75em;
+		font-size: 0.65rem;
 		color: var(--text-muted);
-		width: 1em;
+		width: 0.7rem;
 	}
 	.facet-label {
-		font-weight: 600;
+		flex: 1;
+		font-size: 0.85rem;
 	}
 	.facet-count {
-		color: var(--text-muted);
-		font-size: 0.78rem;
+		font-size: 0.7rem;
+		color: var(--text-faint);
 		font-variant-numeric: tabular-nums;
 	}
 	.facet-active {
 		color: var(--accent-soft-text, var(--accent));
-		font-size: 0.78rem;
+		font-size: 0.7rem;
 	}
 	.year-row {
 		display: flex;
 		gap: 0.5rem;
-		padding: 0.2rem 0.3rem;
+		padding: 0 0 0.35rem 1.1rem;
 	}
 	.year-input {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
 		gap: 0.15rem;
-		font-size: 0.78rem;
-		color: var(--text-muted);
+		font-size: 0.72rem;
+		color: var(--text-faint);
 	}
 	.year-input input {
 		padding: 0.25rem 0.4rem;
@@ -294,6 +297,7 @@
 	}
 	.cluster-search {
 		padding: 0.3rem 0.5rem;
+		margin: 0 0 0.25rem 1.1rem;
 		border: 1px solid var(--border);
 		border-radius: 3px;
 		background: var(--bg);
@@ -302,50 +306,56 @@
 	}
 	.options {
 		list-style: none;
+		padding: 0 0 0.25rem 1.1rem;
 		margin: 0;
-		padding: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 0.1rem;
 	}
 	.options.scroll {
-		max-height: 16rem;
+		max-height: 14rem;
 		overflow-y: auto;
-		border: 1px solid var(--border);
-		border-radius: 3px;
-		padding: 0.1rem 0;
+		padding-right: 0.4rem;
 	}
 	.opt {
-		display: grid;
-		grid-template-columns: 1rem auto 1fr auto;
+		display: flex;
+		align-items: flex-start;
 		gap: 0.4rem;
-		align-items: center;
-		padding: 0.25rem 0.45rem;
+		padding: 0.15rem 0.35rem;
+		border-radius: 3px;
 		cursor: pointer;
-		font-size: 0.83rem;
-		border-radius: 2px;
+		font-size: 0.8rem;
+	}
+	.opt input[type='checkbox'] {
+		margin: 0;
+		margin-top: 0.18rem;
 	}
 	.opt:hover {
-		background: var(--bg-subtle);
+		background: var(--bg-sunken);
 	}
 	.opt.active {
 		background: var(--accent-soft-bg);
+		color: var(--accent-soft-text);
 	}
 	.cluster-swatch {
 		display: inline-block;
 		width: 0.65rem;
 		height: 0.65rem;
+		margin-top: 0.32rem;
+		flex-shrink: 0;
 		border-radius: 2px;
 		border: 1px solid var(--border);
 	}
 	.opt-label {
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+		flex: 1;
+		min-width: 0;
+		line-height: 1.25;
+		word-break: break-word;
 	}
 	.opt-count {
-		color: var(--text-muted);
-		font-variant-numeric: tabular-nums;
-		font-size: 0.76rem;
+		flex-shrink: 0;
+		font-size: 0.72rem;
+		color: var(--text-faint);
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	}
 </style>
