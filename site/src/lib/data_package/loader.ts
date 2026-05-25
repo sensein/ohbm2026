@@ -32,6 +32,7 @@
  */
 
 import { parquetReadObjects, asyncBufferFromUrl } from 'hyparquet';
+import { fetchParquetCached, prefetchInBackground } from './cache';
 import { compressors } from 'hyparquet-compressors';
 import { SITE_MODE } from '$lib/site_mode';
 
@@ -60,9 +61,7 @@ function pickRawUrl(): string | undefined {
 		| undefined;
 }
 
-export function getDataPackageUrl(): string | null {
-	const url = pickRawUrl();
-	if (!url) return null;
+function normaliseDropboxUrl(url: string): string {
 	// Dropbox shared links served via `www.dropbox.com` redirect (HTTP 302)
 	// to `*.dl.dropboxusercontent.com`, but the redirect step itself lacks
 	// CORS headers — browsers refuse the cross-origin fetch. Rewriting the
@@ -72,6 +71,40 @@ export function getDataPackageUrl(): string | null {
 	return url
 		.replace(/^https:\/\/www\.dropbox\.com\//, 'https://dl.dropboxusercontent.com/')
 		.replace(/[?&]dl=0(\b|$)/, (m) => m.replace('dl=0', ''));
+}
+
+export function getDataPackageUrl(): string | null {
+	const url = pickRawUrl();
+	if (!url) return null;
+	return normaliseDropboxUrl(url);
+}
+
+/**
+ * URLs of the two SIBLING parquets for the current build mode — the
+ * ones that aren't this build's own parquet. Used to warm the Cache
+ * API after the primary load so any cross-subsite click (e.g. from a
+ * permalink on /ohbm2026/ to the atlas-root home) reads from cache
+ * instead of doing a cold network fetch.
+ *
+ * Visitors can land on any subsite first — permalinks bookmark
+ * specific /<mode>/abstract/<id>/ URLs and we never know which mode
+ * starts the session. So the prefetch runs from every mode's
+ * loadDataPackage success branch; each warms the other two parquets.
+ */
+export function getCrossSiblingUrls(): string[] {
+	const env = import.meta.env;
+	const ohbm = env.VITE_DATA_PACKAGE_URL_OHBM2026 ?? env.VITE_DATA_PACKAGE_URL;
+	const neuro = env.VITE_DATA_PACKAGE_URL_NEUROSCAPE;
+	const atlas = env.VITE_DATA_PACKAGE_URL_ATLAS;
+	const all: Array<string | undefined> = [];
+	if (SITE_MODE === 'atlas-root') {
+		all.push(ohbm as string | undefined, neuro as string | undefined);
+	} else if (SITE_MODE === 'ohbm2026') {
+		all.push(atlas as string | undefined, neuro as string | undefined);
+	} else if (SITE_MODE === 'neuroscape') {
+		all.push(atlas as string | undefined, ohbm as string | undefined);
+	}
+	return all.filter((u): u is string => !!u).map(normaliseDropboxUrl);
 }
 
 /** Progress callback fired during the parquet HTTP fetch. The
@@ -109,8 +142,16 @@ export function loadDataPackage(
 	packageCache = (async (): Promise<Map<string, unknown> | null> => {
 		try {
 			onPhase?.('connecting');
-			const response = await fetcher(url);
+			// Wrap the GET in a Cache-API layer: persistent across
+			// sessions, conditionally revalidated via If-None-Match /
+			// If-Modified-Since on subsequent loads. A cache-hit-
+			// validated response is byte-equivalent to a fresh GET so
+			// the rest of the loader doesn't need to know.
+			const { response, source } = await fetchParquetCached(url, fetcher);
 			if (!response.ok || !response.body) return null;
+			if (source === 'cache-hit-validated' || source === 'cache-hit-offline') {
+				console.info(`[ohbm2026] data package served from ${source}`);
+			}
 			// When a progress callback is provided, stream the body via
 			// `getReader()` so we can report bytes-arrived as we go.
 			// Without a callback we still take the simpler `arrayBuffer()`
@@ -152,6 +193,12 @@ export function loadDataPackage(
 			await new Promise<void>((r) => setTimeout(r, 0));
 			const result = await parseParquetSingle(bytes);
 			onPhase?.('ready');
+			// Warm the Cache API with the two sibling parquets so any
+			// cross-subsite navigation lands on cache instead of a
+			// cold fetch. Fire-and-forget; skipped on save-data /
+			// slow-2g connections (see cache.ts).
+			const siblings = getCrossSiblingUrls();
+			if (siblings.length) prefetchInBackground(siblings);
 			return result;
 		} catch (err) {
 			console.error('[ohbm2026] failed to load data package:', err);
