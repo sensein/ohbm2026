@@ -41,6 +41,7 @@
 
 	const dispatch = createEventDispatcher<{
 		focus: { pubmed_id: number; cluster_id: number };
+		filter: { cluster_ids: Set<number> };
 	}>();
 
 	let query = '';
@@ -49,6 +50,44 @@
 	// Year facet — typical visitor wants to narrow to "recent" articles.
 	let minYear: number | null = null;
 	let maxYear: number | null = null;
+
+	// Cluster facet — multi-select; empty = no cluster filter.
+	let selectedClusterIds: Set<number> = new Set();
+	let clusterSearch = '';
+	let clusterFacetOpen = false;
+
+	// Sorted cluster list for the picker. Sort by total article count
+	// descending so the most-populous clusters surface first; ties
+	// broken alphabetically by title.
+	$: clusterCounts = (() => {
+		const counts = new Map<number, number>();
+		for (const a of articles) counts.set(a.cluster_id, (counts.get(a.cluster_id) ?? 0) + 1);
+		return counts;
+	})();
+	$: clusterPickList = (() => {
+		const list = [...clustersById.values()];
+		list.sort((a, b) => {
+			const ca = clusterCounts.get(a.cluster_id) ?? 0;
+			const cb = clusterCounts.get(b.cluster_id) ?? 0;
+			if (ca !== cb) return cb - ca;
+			return a.title.localeCompare(b.title);
+		});
+		if (!clusterSearch.trim()) return list;
+		const needle = normalize(clusterSearch);
+		return list.filter((c) => normalize(c.title).includes(needle));
+	})();
+
+	function toggleCluster(id: number) {
+		const next = new Set(selectedClusterIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		selectedClusterIds = next;
+		dispatch('filter', { cluster_ids: next });
+	}
+	function clearClusters() {
+		selectedClusterIds = new Set();
+		dispatch('filter', { cluster_ids: selectedClusterIds });
+	}
 	$: yearBounds = (() => {
 		if (articles.length === 0) return { lo: 0, hi: 0 };
 		let lo = Infinity;
@@ -61,19 +100,24 @@
 	})();
 
 	$: filtered = (() => {
-		// Year filter first — cheap, narrows the search space.
+		// Year + cluster facets first — cheap, narrow the search space.
 		const yLo = minYear ?? yearBounds.lo;
 		const yHi = maxYear ?? yearBounds.hi;
-		const yearFilt = articles.filter((a) => a.year >= yLo && a.year <= yHi);
+		const facetFilt = articles.filter((a) => {
+			if (a.year < yLo || a.year > yHi) return false;
+			if (selectedClusterIds.size > 0 && !selectedClusterIds.has(a.cluster_id))
+				return false;
+			return true;
+		});
 		if (!query.trim()) {
 			// No query → "Recent first" ordering (descending by year,
 			// then by pubmed_id for stability).
-			return [...yearFilt].sort((a, b) => b.year - a.year || a.pubmed_id - b.pubmed_id);
+			return [...facetFilt].sort((a, b) => b.year - a.year || a.pubmed_id - b.pubmed_id);
 		}
 		const needle = normalize(query);
 		// Score by first-match position; ties broken by year desc.
 		const scored: Array<{ a: Article; score: number }> = [];
-		for (const a of yearFilt) {
+		for (const a of facetFilt) {
 			const hay = normalize(a.title);
 			const idx = hay.indexOf(needle);
 			if (idx === -1) continue;
@@ -146,6 +190,66 @@
 					data-testid="neuroscape-year-max"
 				/>
 			</label>
+
+			<!-- Cluster facet — collapsible because there are 175 of
+			     them; opens to a searchable scrollable checkbox list. -->
+			<details
+				class="ns-cluster-facet"
+				bind:open={clusterFacetOpen}
+				data-testid="neuroscape-cluster-facet"
+			>
+				<summary>
+					Clusters
+					{#if selectedClusterIds.size > 0}
+						<span
+							class="ns-cluster-count"
+							data-testid="neuroscape-cluster-selected-count"
+							>({selectedClusterIds.size})</span
+						>
+					{/if}
+				</summary>
+				<div class="ns-cluster-panel">
+					<div class="ns-cluster-controls">
+						<input
+							type="search"
+							placeholder="Filter clusters…"
+							bind:value={clusterSearch}
+							data-testid="neuroscape-cluster-search"
+						/>
+						{#if selectedClusterIds.size > 0}
+							<button
+								type="button"
+								class="ns-cluster-clear"
+								on:click={clearClusters}
+								data-testid="neuroscape-cluster-clear"
+							>
+								Clear ({selectedClusterIds.size})
+							</button>
+						{/if}
+					</div>
+					<ul class="ns-cluster-list" data-testid="neuroscape-cluster-list">
+						{#each clusterPickList as c (c.cluster_id)}
+							{@const count = clusterCounts.get(c.cluster_id) ?? 0}
+							<li>
+								<label class="ns-cluster-row">
+									<input
+										type="checkbox"
+										checked={selectedClusterIds.has(c.cluster_id)}
+										on:change={() => toggleCluster(c.cluster_id)}
+										data-testid={`neuroscape-cluster-cb-${c.cluster_id}`}
+									/>
+									<span
+										class="ns-cluster-swatch"
+										style="background:{c.colour_hex}"
+									></span>
+									<span class="ns-cluster-title">{c.title}</span>
+									<span class="ns-cluster-n">{count.toLocaleString()}</span>
+								</label>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			</details>
 		</div>
 	</div>
 
@@ -278,6 +382,116 @@
 		background: var(--bg-elevated);
 		color: var(--text);
 		font-size: 0.85rem;
+	}
+	.ns-cluster-facet {
+		position: relative;
+		font-size: 0.85rem;
+	}
+	.ns-cluster-facet > summary {
+		cursor: pointer;
+		padding: 0.3rem 0.6rem;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		background: var(--bg-elevated);
+		color: var(--text);
+		list-style: none;
+		user-select: none;
+	}
+	.ns-cluster-facet > summary::-webkit-details-marker {
+		display: none;
+	}
+	.ns-cluster-facet > summary::before {
+		content: '▸';
+		display: inline-block;
+		margin-right: 0.3em;
+		font-size: 0.7em;
+		color: var(--text-muted);
+	}
+	.ns-cluster-facet[open] > summary::before {
+		content: '▾';
+	}
+	.ns-cluster-count {
+		color: var(--text-muted);
+		font-weight: 500;
+		margin-left: 0.3em;
+	}
+	.ns-cluster-panel {
+		position: absolute;
+		z-index: 50;
+		top: calc(100% + 0.25rem);
+		left: 0;
+		min-width: 22rem;
+		max-width: 30rem;
+		max-height: 22rem;
+		display: flex;
+		flex-direction: column;
+		background: var(--bg-elevated);
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+	}
+	.ns-cluster-controls {
+		display: flex;
+		gap: 0.5rem;
+		padding: 0.5rem;
+		border-bottom: 1px solid var(--border);
+	}
+	.ns-cluster-controls input[type='search'] {
+		flex: 1;
+		padding: 0.35rem 0.5rem;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		background: var(--bg);
+		color: var(--text);
+		font-size: 0.85rem;
+	}
+	.ns-cluster-clear {
+		all: unset;
+		cursor: pointer;
+		padding: 0.35rem 0.6rem;
+		border-radius: 3px;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		border: 1px solid var(--border);
+	}
+	.ns-cluster-clear:hover {
+		color: var(--text);
+		background: var(--bg-subtle);
+	}
+	.ns-cluster-list {
+		list-style: none;
+		margin: 0;
+		padding: 0.25rem 0;
+		overflow-y: auto;
+		flex: 1;
+	}
+	.ns-cluster-row {
+		display: grid;
+		grid-template-columns: 1rem 0.7rem 1fr auto;
+		gap: 0.5rem;
+		align-items: center;
+		padding: 0.3rem 0.6rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+	.ns-cluster-row:hover {
+		background: var(--bg-subtle);
+	}
+	.ns-cluster-swatch {
+		display: inline-block;
+		width: 0.7rem;
+		height: 0.7rem;
+		border-radius: 2px;
+		border: 1px solid var(--border);
+	}
+	.ns-cluster-title {
+		overflow-wrap: anywhere;
+		line-height: 1.3;
+	}
+	.ns-cluster-n {
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
+		font-size: 0.78rem;
 	}
 	.ns-count {
 		margin: 0;

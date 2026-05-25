@@ -43,6 +43,7 @@
 	import AtlasUmapPanel from '$lib/components/AtlasUmapPanel.svelte';
 	import AtlasRootDetailPanel from '$lib/components/AtlasRootDetailPanel.svelte';
 	import AtlasRootLassoResults from '$lib/components/AtlasRootLassoResults.svelte';
+	import AtlasRootBrowsePanel from '$lib/components/AtlasRootBrowsePanel.svelte';
 	import DimensionalityToggle from '$lib/components/DimensionalityToggle.svelte';
 	import NeuroscapeBrowsePanel from '$lib/components/NeuroscapeBrowsePanel.svelte';
 	import { base } from '$app/paths';
@@ -455,6 +456,22 @@
 		atlasClusters.map((c) => [c.cluster_id, { cluster_id: c.cluster_id, title: c.title, colour_hex: c.colour_hex }])
 	);
 
+	// Filtered point lists threaded into AtlasUmapPanel so the
+	// scatter visibly reflects browse-panel facet state. Empty cluster
+	// set means "all clusters". For neuroscape mode, filterShowOhbm
+	// is irrelevant (overlay is always empty) and filterShowNeuro is
+	// always true (we never want to hide ALL backdrop points there).
+	$: filteredBackdrop = (() => {
+		if (SITE_MODE === 'atlas-root' && !filterShowNeuro) return [];
+		if (filterClusterIds.size === 0) return atlasBackdrop;
+		return atlasBackdrop.filter((p) => filterClusterIds.has(p.cluster_id));
+	})();
+	$: filteredOverlay = (() => {
+		if (SITE_MODE !== 'atlas-root' || !filterShowOhbm) return [] as AtlasOverlayPoint[];
+		if (filterClusterIds.size === 0) return atlasOverlayPoints;
+		return atlasOverlayPoints.filter((p) => filterClusterIds.has(p.nearest_cluster_id));
+	})();
+
 	// Permalink construction. cross_pointers in atlas.parquet documents
 	// these URLs at build time; constructing them here is equivalent
 	// (the convention is part of the spec) and avoids round-tripping
@@ -511,6 +528,13 @@
 	// T043 — drift banner state. Populated by the sibling-state-key
 	// check that fires in the background after atlas.parquet loads.
 	let atlasDrift: AtlasDriftEntry[] = [];
+	// UX unification — browse-panel facet state (clusters + sites for
+	// atlas-root, clusters for neuroscape). Drives both the result-list
+	// filter inside the panel AND the scatter via filteredBackdrop /
+	// filteredOverlay below.
+	let filterClusterIds: Set<number> = new Set();
+	let filterShowOhbm = true;
+	let filterShowNeuro = true;
 	let atlasLoading = false;
 	let atlasError: string | null = null;
 	let atlasProgressLoaded = 0;
@@ -701,25 +725,47 @@
 			{#if SITE_MODE === 'neuroscape' && atlasBackdrop.length > 0}
 				<!-- T067 — NeuroScape browse panel. Title search + paginated
 				     result list bound to neuroscape.parquet's articles +
-				     clusters. Clicking a row navigates to /neuroscape/
-				     abstract/<pubmed_id>/; clicking the inline "On atlas"
-				     control navigates with ?focus=… so the scatter can
-				     centre + highlight the point (focus handler reads URL
-				     params on mount + reactively). -->
+				     clusters. Cluster facet wired to filterClusterIds so
+				     the scatter visibly reflects the filter. -->
 				<NeuroscapeBrowsePanel
 					articles={atlasBackdrop}
 					clustersById={atlasClustersById}
+					on:filter={(ev) => {
+						filterClusterIds = ev.detail.cluster_ids;
+					}}
 					on:focus={(ev) => {
-						// In-page navigation rather than a full reload — Svelte
-						// reactivity picks up the new ?focus param via $page.url
-						// (the +layout.svelte instance is reused).
 						const url = new URL(window.location.href);
 						url.searchParams.set('focus', String(ev.detail.pubmed_id));
 						url.searchParams.set('cluster', String(ev.detail.cluster_id));
 						window.history.pushState({}, '', url);
-						// Scroll the scatter section into view as a visible cue.
 						const el = document.querySelector('[data-testid="atlas-umap-panel"]');
 						if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+					}}
+				/>
+			{/if}
+			{#if SITE_MODE === 'atlas-root' && atlasBackdrop.length > 0}
+				<!-- Cross-conference browse panel: search across both
+				     corpora + Clusters facet + Sites facet (toggle OHBM
+				     2026 / NeuroScape PubMed visibility). Facet state
+				     drives `filteredBackdrop` / `filteredOverlay` which
+				     in turn feed AtlasUmapPanel — so the scatter
+				     visibly reflects the filter. -->
+				<AtlasRootBrowsePanel
+					backdropPoints={atlasBackdrop}
+					overlayPoints={atlasOverlayPoints}
+					clustersById={atlasClustersById}
+					permalinkFor={atlasPermalink}
+					on:filter={(ev) => {
+						filterClusterIds = ev.detail.cluster_ids;
+						filterShowOhbm = ev.detail.show_ohbm;
+						filterShowNeuro = ev.detail.show_neuro;
+					}}
+					on:select={(ev) => {
+						// Open the detail panel (slide-in) without leaving
+						// the atlas page. Same handler as a scatter point-click.
+						onAtlasPointClick(
+							new CustomEvent('pointclick', { detail: ev.detail })
+						);
 					}}
 				/>
 			{/if}
@@ -786,8 +832,8 @@
 				</div>
 			{:else}
 				<AtlasUmapPanel
-					backdropPoints={atlasBackdrop}
-					overlayPoints={atlasOverlayPoints}
+					backdropPoints={filteredBackdrop}
+					overlayPoints={filteredOverlay}
 					clusters={atlasClusters}
 					showOverlay={SITE_MODE === 'atlas-root' ? $atlasOverlay : false}
 					backdropOpacity={backdropDensity}
