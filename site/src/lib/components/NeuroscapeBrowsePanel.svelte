@@ -62,15 +62,49 @@
 		dispatch('focus', { pubmed_id: a.pubmed_id, cluster_id: a.cluster_id });
 	}
 
-	// Visible-not-in-cart pubmed_ids, for the bulk "+ Add N to cart"
-	// button. Same pattern as OHBM 2026's ResultList.
-	$: visibleNotInCart = visible
+	// Bulk-add over the FULL filtered set (every article matching
+	// the current facets + search + lasso), not just the paginated
+	// `visible` slice — OHBM 2026 ResultList does the same. "Add
+	// N to cart" reflects the size of the user's actual selection.
+	//
+	// Sanity-cap at 5,000 items — localStorage caps at ~5 MB
+	// per origin, each typed cart item serialises to ~25 bytes JSON,
+	// so > ~200k items breaks `JSON.stringify(...)` → setItem(). The
+	// cart drawer also stops being useful well before then (you
+	// can't email or read a 1,000-item list). Above the warn
+	// threshold (200) the user gets a confirm() so accidental
+	// "add the whole 461k corpus" clicks don't silently nuke their
+	// cart.
+	const CART_BULK_WARN_AT = 200;
+	const CART_BULK_HARD_CAP = 5000;
+	$: filteredNotInCart = filtered
 		.map((a) => a.pubmed_id)
 		.filter((id) => !$cartNeuroPubmedIds.has(id));
 	function addAllVisible() {
-		if (visibleNotInCart.length === 0) return;
+		const n = filteredNotInCart.length;
+		if (n === 0) return;
+		let toAdd = filteredNotInCart;
+		if (n > CART_BULK_HARD_CAP) {
+			const ok =
+				typeof window !== 'undefined' &&
+				window.confirm(
+					`This selection has ${n.toLocaleString()} articles.\n\n` +
+						`The cart can hold up to ${CART_BULK_HARD_CAP.toLocaleString()} items before browser storage fills up.\n\n` +
+						`Add the first ${CART_BULK_HARD_CAP.toLocaleString()} (sorted by year, newest first)?`
+				);
+			if (!ok) return;
+			toAdd = filteredNotInCart.slice(0, CART_BULK_HARD_CAP);
+		} else if (n > CART_BULK_WARN_AT) {
+			const ok =
+				typeof window !== 'undefined' &&
+				window.confirm(
+					`Add ${n.toLocaleString()} articles to your cart? ` +
+						`Large carts can be slow to email or display.`
+				);
+			if (!ok) return;
+		}
 		cartStore.addManyItems(
-			visibleNotInCart.map((id) => ({ kind: 'neuroscape' as const, id }))
+			toAdd.map((id) => ({ kind: 'neuroscape' as const, id }))
 		);
 	}
 </script>
@@ -83,15 +117,15 @@
 				· showing first {limit}
 			{/if}
 		</p>
-		{#if visibleNotInCart.length > 0}
+		{#if filteredNotInCart.length > 0}
 			<button
 				type="button"
 				class="ns-bulk-cart-add"
 				on:click={addAllVisible}
-				title={`Add the ${visibleNotInCart.length} visible article${visibleNotInCart.length === 1 ? '' : 's'} not yet in your cart`}
+				title={`Add the ${filteredNotInCart.length} article${filteredNotInCart.length === 1 ? '' : 's'} not yet in your cart`}
 				data-testid="neuroscape-bulk-cart-add"
 			>
-				+ Add {visibleNotInCart.length} to cart
+				+ Add {filteredNotInCart.length} to cart
 			</button>
 		{/if}
 	</header>

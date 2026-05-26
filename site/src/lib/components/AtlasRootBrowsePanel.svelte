@@ -138,19 +138,46 @@
 	$: visible = filtered.slice(0, limit);
 	$: totalCount = filtered.length;
 
-	// Visible-not-in-cart rows (mixed kinds). Same pattern as
-	// OHBM 2026's ResultList + NeuroscapeBrowsePanel — bulk-add
-	// every row currently visible that isn't already in the cart.
-	$: visibleNotInCart = visible.filter((r) =>
+	// Bulk-add over the FULL filtered set (mixed kinds), not just
+	// the paginated `visible` slice — matches OHBM 2026 ResultList
+	// + NeuroscapeBrowsePanel.
+	//
+	// Sanity-cap + confirmation: localStorage tops out at ~5 MB
+	// (~200k typed cart items), and even well below that the cart
+	// drawer + email exports become unwieldy. CART_BULK_WARN_AT
+	// triggers a confirm() so accidental "add the entire 464k
+	// corpus" clicks don't silently overflow the cart.
+	const CART_BULK_WARN_AT = 200;
+	const CART_BULK_HARD_CAP = 5000;
+	$: filteredNotInCart = filtered.filter((r) =>
 		r.kind === 'ohbm2026'
 			? !$cartOhbmPosterIds.has(r.id)
 			: !$cartNeuroPubmedIds.has(r.id)
 	);
 	function addAllVisible() {
-		if (visibleNotInCart.length === 0) return;
-		cartStore.addManyItems(
-			visibleNotInCart.map((r) => ({ kind: r.kind, id: r.id }))
-		);
+		const n = filteredNotInCart.length;
+		if (n === 0) return;
+		let toAdd = filteredNotInCart;
+		if (n > CART_BULK_HARD_CAP) {
+			const ok =
+				typeof window !== 'undefined' &&
+				window.confirm(
+					`This selection has ${n.toLocaleString()} rows.\n\n` +
+						`The cart can hold up to ${CART_BULK_HARD_CAP.toLocaleString()} items before browser storage fills up.\n\n` +
+						`Add the first ${CART_BULK_HARD_CAP.toLocaleString()}?`
+				);
+			if (!ok) return;
+			toAdd = filteredNotInCart.slice(0, CART_BULK_HARD_CAP);
+		} else if (n > CART_BULK_WARN_AT) {
+			const ok =
+				typeof window !== 'undefined' &&
+				window.confirm(
+					`Add ${n.toLocaleString()} rows to your cart? ` +
+						`Large carts can be slow to email or display.`
+				);
+			if (!ok) return;
+		}
+		cartStore.addManyItems(toAdd.map((r) => ({ kind: r.kind, id: r.id })));
 	}
 </script>
 
@@ -162,15 +189,15 @@
 				· showing first {limit}
 			{/if}
 		</p>
-		{#if visibleNotInCart.length > 0}
+		{#if filteredNotInCart.length > 0}
 			<button
 				type="button"
 				class="ar-bulk-cart-add"
 				on:click={addAllVisible}
-				title={`Add the ${visibleNotInCart.length} visible row${visibleNotInCart.length === 1 ? '' : 's'} not yet in your cart`}
+				title={`Add the ${filteredNotInCart.length} row${filteredNotInCart.length === 1 ? '' : 's'} not yet in your cart`}
 				data-testid="atlas-root-bulk-cart-add"
 			>
-				+ Add {visibleNotInCart.length} to cart
+				+ Add {filteredNotInCart.length} to cart
 			</button>
 		{/if}
 	</header>
