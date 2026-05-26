@@ -835,12 +835,14 @@
 			}
 		}
 		const colours = points.map((p) => clusters.get(p.cluster_id)?.colour_hex ?? '#9c9c9c');
-		const hoverText = points.map(
-			(p) =>
-				`<b>${atlasEscape(p.title)}</b><br>${p.year} · ${atlasEscape(
-					clusters.get(p.cluster_id)?.title ?? `Cluster ${p.cluster_id}`
-				)}`
-		);
+		// `hoverText` was a 461k-element array of long HTML strings
+		// (title + cluster name per point) used by Plotly's hover
+		// tooltip. Now that `hoverinfo: 'none'` is set on the
+		// backdrop trace (the tooltip is suppressed to kill the
+		// hit-test perf cliff on mobile), allocating this string
+		// array on every render is pure waste. Dropped — the
+		// overlay trace (3k OHBM points) still computes its own
+		// hoverText since it does show tooltips.
 		const customdata = points.map((p) => ({ kind: 'neuroscape', id: p.pubmed_id }));
 		const symbol = useShapes ? points.map((p) => atlasShape2D(p.cluster_id)) : undefined;
 		// In 2D lasso mode the unselected backdrop stays VISIBLE so
@@ -1078,7 +1080,10 @@
 		x: number[];
 		y: number[];
 		colours: string[];
-		hoverText: string[];
+		/** Optional — only the overlay (3k OHBM rows) computes
+		 *  this; the 461k backdrop has `hoverinfo: 'none'` and
+		 *  skips the allocation entirely. */
+		hoverText?: string[];
 		customdata: Array<{ kind: string; id: number }>;
 		symbol?: string[];
 	};
@@ -1107,16 +1112,14 @@
 		if (cached2dBackdropArrays && cached2dBackdropKey === key) {
 			return cached2dBackdropArrays;
 		}
+		// Backdrop has `hoverinfo: 'none'` on its trace — skip the
+		// 461k `hoverText` allocation. Was the single biggest
+		// per-render cost in `getAtlasBackdropArrays` (each entry
+		// is a long HTML string with title + cluster title).
 		cached2dBackdropArrays = {
 			x: points.map((p) => (p.umap_2d ?? [0, 0])[0]),
 			y: points.map((p) => (p.umap_2d ?? [0, 0])[1]),
 			colours: points.map((p) => clusters.get(p.cluster_id)?.colour_hex ?? '#9c9c9c'),
-			hoverText: points.map(
-				(p) =>
-					`<b>${atlasEscape(p.title)}</b><br>${p.year} · ${atlasEscape(
-						clusters.get(p.cluster_id)?.title ?? `Cluster ${p.cluster_id}`
-					)}`
-			),
 			customdata: points.map((p) => ({ kind: 'neuroscape', id: p.pubmed_id })),
 			symbol: useShapes ? points.map((p) => atlasShape2D(p.cluster_id)) : undefined
 		};
