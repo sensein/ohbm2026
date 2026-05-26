@@ -245,6 +245,13 @@
 		padding: 0.5rem 0.65rem;
 		border-radius: 4px;
 		border: 1px solid var(--border);
+		min-width: 0;
+		box-sizing: border-box;
+	}
+	.ar-browse,
+	.ar-results {
+		min-width: 0;
+		box-sizing: border-box;
 	}
 	.ar-row:hover {
 		background: var(--bg-subtle);

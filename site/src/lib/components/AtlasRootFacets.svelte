@@ -203,6 +203,8 @@
 	   line up with the first wrapped line. */
 	.facets {
 		min-width: 0;
+		box-sizing: border-box;
+		max-width: 100%;
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;

@@ -159,6 +159,13 @@
 		padding: 0.5rem 0.65rem;
 		border-radius: 4px;
 		border: 1px solid var(--border);
+		min-width: 0;
+		box-sizing: border-box;
+	}
+	.ns-browse,
+	.ns-results {
+		min-width: 0;
+		box-sizing: border-box;
 	}
 	.ns-row:hover {
 		background: var(--bg-subtle);

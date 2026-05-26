@@ -332,9 +332,23 @@
 	.atlas-detail-card--inline {
 		/* Hosted by the parent's `.detail-pane` grid column. */
 		width: 100%;
+		min-width: 0;
+		box-sizing: border-box;
 		border: 1px solid var(--border);
 		border-radius: 6px;
 		max-height: 80vh;
+	}
+	/* On narrow viewports the 7rem label column eats most of the
+	   row — collapse meta rows to a stacked label-above-value
+	   layout so values get full width. */
+	@media (max-width: 480px) {
+		.meta-row {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 0.1rem;
+		}
+		.atlas-detail-card {
+			padding: 0.85rem 0.9rem;
+		}
 	}
 	.card-head {
 		display: flex;
@@ -374,16 +388,22 @@
 		font-size: 1.05rem;
 		font-weight: 600;
 		line-height: 1.35;
+		/* Long titles must break instead of pushing the panel wider
+		   than its parent grid cell. */
+		min-width: 0;
+		word-break: break-word;
+		overflow-wrap: anywhere;
 	}
 	.meta {
 		margin: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 0.4rem;
+		min-width: 0;
 	}
 	.meta-row {
 		display: grid;
-		grid-template-columns: 7rem 1fr;
+		grid-template-columns: 7rem minmax(0, 1fr);
 		gap: 0.5rem;
 		align-items: baseline;
 	}
@@ -396,6 +416,9 @@
 		color: var(--text);
 		font-size: 0.92rem;
 		margin: 0;
+		min-width: 0;
+		word-break: break-word;
+		overflow-wrap: anywhere;
 	}
 	.cluster-swatch {
 		display: inline-block;

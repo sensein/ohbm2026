@@ -1662,8 +1662,20 @@
 			grid-template-columns: minmax(0, 1fr);
 		}
 	}
-	.atlas-home .facet-pane {
+	/* Every grid cell of the atlas-layout (facets, list, detail) gets
+	   `min-width: 0` so wide children (long cluster titles, neighbour
+	   titles, etc.) don't push the cell past the column track. Plus
+	   `overflow-x: hidden` as a defensive guard — long unbroken
+	   strings still wrap via the per-component word-break rules, but
+	   if something slips through it stays inside the pane instead of
+	   pushing the viewport. */
+	.atlas-home .facet-pane,
+	.atlas-home .list-pane,
+	.atlas-home .detail-pane {
 		min-width: 0;
+		overflow-x: hidden;
+	}
+	.atlas-home .facet-pane {
 		display: block;
 	}
 	.atlas-home .detail-pane:not(.active) {
@@ -1675,6 +1687,22 @@
 			   inside the component keeps the cluster list scrollable. */
 			max-height: 30vh;
 			overflow-y: auto;
+		}
+	}
+	/* Mobile: when a row is focused the detail panel takes over the
+	   viewport so the user has somewhere to read + a real Close
+	   button. Mirrors OHBM 2026's `.home.has-focus .list-pane {
+	   display: none }` rule. Without this both list and detail stay
+	   stacked single-column, the user has to scroll past the list to
+	   find the panel, and closing it leaves them at the bottom of
+	   the page. */
+	@media (max-width: 1023px) {
+		.atlas-home.has-focus .list-pane,
+		.atlas-home.has-focus .facet-pane {
+			display: none;
+		}
+		.atlas-home.has-focus .detail-pane {
+			display: block;
 		}
 	}
 	/* Atlas-home search input — same visual weight as OHBM's
