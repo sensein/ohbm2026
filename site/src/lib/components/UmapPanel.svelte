@@ -125,6 +125,11 @@
 
 	let chart2dEl: HTMLDivElement | null = null;
 	let chart3dEl: HTMLDivElement | null = null;
+	// `webglcontextlost` flag for the 3D chart. When true, our
+	// custom overlay covers the chart area + a CSS rule hides
+	// Plotly's red "WebGL not supported" SVG underneath. Cleared
+	// when the chart is unmounted / remounted.
+	let chart3dContextLost = false;
 	let cellShard: CellShard | null = null;
 	let topicsShard: TopicShard | null = null;
 	let cellLoading = false;
@@ -309,6 +314,7 @@
 				handlers3dAttached = false;
 				atlas3dHandlersAttached = false;
 				chart3dInitialized = false;
+				chart3dContextLost = false;
 				currentEye3D = null;
 				rotateAngle = 0;
 				stopRotate();
@@ -852,6 +858,18 @@
 					unselected: { marker: { opacity: Math.max(opacity * 4, 0.2) } }
 			  }
 			: {};
+		// Backdrop hover tooltip is INTENTIONALLY off on both 2D and
+		// 3D — the per-frame hit-test on 461k points is the
+		// dominant interaction-cost contributor (plotly.js community
+		// forum: lasso/hover both walk a hit-test structure that
+		// scales with point count). On 3D specifically, sustained
+		// hover hit-tests during orbit / zoom drive the GPU into
+		// thermal pressure → `webglcontextlost`.
+		// `hoverinfo: 'none'` (NOT `'skip'`) suppresses the tooltip
+		// without disabling `plotly_click` / `plotly_selected`
+		// events — clicks still open the inline detail panel via
+		// `customdata`. The 3,240-point OHBM overlay keeps its
+		// tooltip (light, useful for the small dataset).
 		if (is3d) {
 			return {
 				type: 'scatter3d' as const,
@@ -867,8 +885,7 @@
 					line: { width: 0 },
 					...(useShapes ? { symbol: points.map((p) => atlasShape3D(p.cluster_id)) } : {})
 				},
-				hovertemplate: '%{text}<extra></extra>',
-				text: hoverText,
+				hoverinfo: 'none' as const,
 				showlegend: false,
 				customdata,
 				...selectedConfig
@@ -881,8 +898,7 @@
 			y,
 			name: 'NeuroScape backdrop',
 			marker: { size: 3, color: colours, opacity, line: { width: 0 }, ...(symbol ? { symbol } : {}) },
-			hovertemplate: '%{text}<extra></extra>',
-			text: hoverText,
+			hoverinfo: 'none' as const,
 			showlegend: false,
 			customdata,
 			...selectedConfig
@@ -1645,14 +1661,20 @@
 			.then(() => {
 				chart3dInitialized = true;
 				// `webglcontextlost` — handle gracefully. Sustained
-				// 3D rotation at 461k points on a mobile GPU can hit
-				// thermal / memory pressure and the browser revokes
-				// the context. Plotly's default behaviour overlays a
-				// misleading "WebGL not supported" message. We stop
-				// rotation immediately + set `plotlyError` so the
-				// component renders our own message instead. Re-
-				// attaching is safe: the action fires the listener on
-				// every canvas Plotly creates on this chart div.
+				// scatter3d interaction at 461k points on a mobile
+				// GPU hits thermal / memory pressure and the browser
+				// revokes the context. Plotly's default response is
+				// to overlay a red "WebGL is not supported" rectangle
+				// INSIDE the chart div via its own SVG / DOM. We flip
+				// `chart3dContextLost = true` so:
+				//   1. Our positioned overlay (a flexbox over the
+				//      `.chart-3d` div) renders the actual cause +
+				//      a meaningful next action.
+				//   2. A scoped CSS rule hides Plotly's red SVG
+				//      rectangle underneath ours.
+				//   3. We stop rotation and clear autoRotate so any
+				//      browser-restored context isn't immediately
+				//      re-stressed.
 				for (const canvas of Array.from(el.querySelectorAll('canvas'))) {
 					canvas.addEventListener(
 						'webglcontextlost',
@@ -1660,8 +1682,7 @@
 							ev.preventDefault();
 							stopRotate();
 							autoRotate = false;
-							plotlyError =
-								'GPU temporarily paused (WebGL context lost — typically thermal or memory pressure on the device). Refresh to try again.';
+							chart3dContextLost = true;
 						},
 						{ once: true }
 					);
@@ -2038,12 +2059,37 @@
 						</button>
 					</span>
 				</figcaption>
+				<div class="chart-3d-wrap" class:context-lost={chart3dContextLost}>
 				<div
-				bind:this={chart3dEl}
-				use:chartCleanupAction
-				class="chart chart-3d"
-				data-testid="umap-chart-3d"
-			></div>
+					bind:this={chart3dEl}
+					use:chartCleanupAction
+					class="chart chart-3d"
+					data-testid="umap-chart-3d"
+				></div>
+				{#if chart3dContextLost}
+					<aside
+						class="chart-3d-context-lost-overlay"
+						data-testid="umap-3d-context-lost"
+						role="alert"
+					>
+						<strong>GPU paused</strong>
+						<p>
+							The 3D scatter exhausted the WebGL context — usually
+							thermal or memory pressure on the device. Common on
+							mobile after sustained orbit or rotation of a large
+							scatter.
+						</p>
+						<button
+							type="button"
+							class="chart-3d-context-lost-retry"
+							on:click={() => location.reload()}
+							data-testid="umap-3d-context-lost-retry"
+						>
+							Refresh page to retry
+						</button>
+					</aside>
+				{/if}
+			</div>
 			</figure>
 		{:else if mode !== 'ohbm'}
 			<!-- 3D pane hidden because no WebGL context is available
@@ -2190,6 +2236,56 @@
 	}
 	.chart-3d {
 		height: clamp(280px, 45vh, 480px);
+	}
+	.chart-3d-wrap {
+		position: relative;
+	}
+	/* When the WebGL context is lost, Plotly draws a red SVG
+	   rectangle ("WebGL is not supported") inside the chart div.
+	   Hide every SVG + canvas child while our overlay is up so the
+	   visitor sees only our message — not Plotly's misleading one
+	   underneath. */
+	.chart-3d-wrap.context-lost .chart-3d > * {
+		visibility: hidden;
+	}
+	.chart-3d-context-lost-overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 1rem 1.25rem;
+		background: var(--bg-elevated);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		text-align: center;
+		color: var(--text);
+	}
+	.chart-3d-context-lost-overlay strong {
+		font-size: 1rem;
+		color: var(--accent);
+	}
+	.chart-3d-context-lost-overlay p {
+		margin: 0;
+		max-width: 28rem;
+		font-size: 0.85rem;
+		line-height: 1.4;
+		color: var(--text-muted);
+	}
+	.chart-3d-context-lost-retry {
+		all: unset;
+		cursor: pointer;
+		margin-top: 0.4rem;
+		padding: 0.4rem 0.85rem;
+		border-radius: 4px;
+		background: var(--accent);
+		color: var(--accent-text);
+		font-size: 0.85rem;
+	}
+	.chart-3d-context-lost-retry:hover {
+		filter: brightness(1.05);
 	}
 	.status,
 	.error {
