@@ -1133,15 +1133,18 @@
 					unselected: { marker: { opacity: Math.max(opacity * 4, 0.2) } }
 			  }
 			: {};
-		// Backdrop hover is INTENTIONALLY off. The 461k-point hover
-		// hit-test on scattergl is the documented latency hotspot
-		// (plotly.js community forum: lasso/hover both walk a
-		// hit-test structure that scales with point count). Skipping
-		// hover here makes pan / zoom / lasso feel fluid; the
-		// overlay (3k OHBM points) keeps its hover tooltip below.
-		// `customdata` is retained because the click handler reads
-		// it to open the inline detail panel — click-to-focus is a
-		// cheap point pick, not a hover hit-test.
+		// Backdrop hover TOOLTIP is intentionally off (461k-point
+		// hover hit-test on scattergl is the documented latency
+		// hotspot — community.plotly.com confirms lasso/hover both
+		// walk a hit-test structure that scales with point count).
+		// We use `hoverinfo: 'none'` here, NOT `'skip'`: the docs
+		// at plotly.com/javascript/reference/scatter/#scatter-
+		// hoverinfo are explicit — `'none'` suppresses the tooltip
+		// but still fires `plotly_click` + `plotly_selected`,
+		// whereas `'skip'` silently drops those events too. We need
+		// the click event so a tap on a backdrop point opens its
+		// inline detail panel. The overlay (3k OHBM points) keeps
+		// its hover tooltip below.
 		const backdropTrace: Record<string, unknown> = {
 			type: 'scattergl' as const,
 			mode: 'markers' as const,
@@ -1155,7 +1158,7 @@
 				line: { width: 0 },
 				...(bdr.symbol ? { symbol: bdr.symbol } : {})
 			},
-			hoverinfo: 'skip',
+			hoverinfo: 'none',
 			showlegend: false,
 			customdata: bdr.customdata,
 			...backdropSelectedConfig
