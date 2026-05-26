@@ -1261,16 +1261,29 @@
 		(api as unknown as { react: (...args: unknown[]) => Promise<unknown> })
 			.react(el, traces, layout, config)
 			.then(() => {
-				// Apply zoom-aware opacity to the initial render too —
-				// if the chart starts in a focus-zoom (xRange set per
-				// last2dFocusKey change), the backdrop should already
-				// be more opaque to match the smaller window.
-				if (xRange) {
+				// Re-apply zoom-aware opacity after EVERY react. The
+				// backdrop trace's `marker.opacity` is rebuilt to the
+				// base value (e.g. 0.05) on every render, which would
+				// otherwise overwrite the restyle that
+				// `plotly_relayout` performs on zoom. Two cases:
+				//   1. We just snapped to a new focus window
+				//      (`xRange` set) — use that as the current span.
+				//   2. The user was already zoomed in / out manually
+				//      (`current2dXSpan > 0`) — preserve their state.
+				// First render before any handler fires falls through
+				// to the base opacity, which is correct for the
+				// default autorange view.
+				const reapplySpan = xRange
+					? Math.abs(xRange[1] - xRange[0])
+					: current2dXSpan > 0
+						? current2dXSpan
+						: 0;
+				if (reapplySpan > 0) {
 					applyAtlasZoomOpacity(
 						api as PlotlyApi,
 						el as HTMLDivElement,
 						backdropOpacity,
-						Math.abs(xRange[1] - xRange[0])
+						reapplySpan
 					);
 				}
 				if (atlas2dHandlersAttached) return;
