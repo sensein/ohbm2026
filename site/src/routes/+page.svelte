@@ -561,14 +561,40 @@
 	//   - `atlasPermalink(kind, id)` — the SPA-shell+`?spa=` form
 	//     above. Used for href attributes on in-page anchors so the
 	//     navigation actually works.
+	// Strip the per-mode suffix off `base` so the permalink helpers
+	// can compose URLs against the deploy ROOT regardless of which
+	// build is currently running. Without this, on `/neuroscape/`
+	// `base` already ends in `/neuroscape`, and the naive
+	// `${base}/neuroscape/abstract/<id>/` form produced
+	// `/neuroscape/neuroscape/abstract/<id>/` — the `?spa=` shim then
+	// looped trying to resolve the non-existent path.
+	function permalinkRoot(): string {
+		if (SITE_MODE === 'ohbm2026' && base.endsWith('/ohbm2026')) {
+			return base.slice(0, -'/ohbm2026'.length);
+		}
+		if (SITE_MODE === 'neuroscape' && base.endsWith('/neuroscape')) {
+			return base.slice(0, -'/neuroscape'.length);
+		}
+		return base;
+	}
 	function cleanPermalink(kind: 'ohbm2026' | 'neuroscape', id: number): string {
-		const root = base;
+		const root = permalinkRoot();
 		return kind === 'ohbm2026'
 			? `${root}/ohbm2026/abstract/${id}/`
 			: `${root}/neuroscape/abstract/${id}/`;
 	}
 	function atlasPermalink(kind: 'ohbm2026' | 'neuroscape', id: number): string {
-		const root = base;
+		// Same-mode permalink (e.g. /neuroscape/ → NeuroScape detail
+		// page): use the clean in-app URL directly. SvelteKit handles
+		// the navigation within the same bundle; no `?spa=` shim
+		// dance needed.
+		if (SITE_MODE === kind) {
+			return cleanPermalink(kind, id);
+		}
+		// Cross-mode (atlas-root → either subsite, or sibling → sibling
+		// in some future routing): wrap in the `?spa=` payload so the
+		// gh-pages root 404 shim bounces into the right sibling shell.
+		const root = permalinkRoot();
 		const target = cleanPermalink(kind, id);
 		const shellPath = kind === 'ohbm2026' ? `${root}/ohbm2026/` : `${root}/neuroscape/`;
 		return `${shellPath}?spa=${encodeURIComponent(target)}`;

@@ -721,7 +721,15 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
-		padding: 1rem 0;
+		/* Side padding lives here as well as on the layout's <main>
+		   so the page reads with breathing room even if a parent
+		   route strips its padding (atlas-root + neuroscape modes
+		   set `main.atlas-main { padding: 0 }` for the home route's
+		   full-bleed UMAP + facets grid). On wide viewports the
+		   max-width centring + side padding combine to a generous
+		   reading column; on mobile the padding keeps prose off
+		   the edges. */
+		padding: 1rem clamp(0.75rem, 3vw, 1.25rem);
 	}
 	.back a {
 		color: var(--accent);
@@ -831,6 +839,10 @@
 		padding: 0 0.25rem;
 		border-radius: 3px;
 		font-size: 0.85em;
+		/* Long inline strings (file paths, cache keys) would otherwise
+		   force a horizontal scrollbar at narrow viewports. */
+		overflow-wrap: anywhere;
+		word-break: break-word;
 	}
 	.ai-pill-demo {
 		font-size: 0.7rem;
