@@ -133,6 +133,39 @@
 	let viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1280;
 	let mobile = viewportWidth < mobileBreakpoint;
 
+	// scatter3d in Plotly 3.x silently requires WebGL2 (the
+	// regl-gl3d / gl-scatter3d stack uses WebGL2-only features
+	// like vertex array objects). Some mobile Chrome variants
+	// — Samsung Internet on older Android, certain WebView
+	// embeddings, browser-in-app shells — ship WebGL1 only and
+	// fail the scatter3d render with a cryptic "this needs
+	// WebGL" message even though basic WebGL works. Detect
+	// upfront so we can (a) skip mounting the 3D pane on
+	// mobile (where it's marginally useful anyway), and (b)
+	// show a clearer message than Plotly's default error.
+	function detectWebGL2(): boolean {
+		if (typeof document === 'undefined') return true; // SSR
+		try {
+			const c = document.createElement('canvas');
+			return !!c.getContext('webgl2');
+		} catch {
+			return false;
+		}
+	}
+	const hasWebGL2 =
+		typeof document === 'undefined' ? true : detectWebGL2();
+
+	// 3D pane gating:
+	//   - OHBM mode (~3k per-community scatter) — keep 3D on all
+	//     viewports; it works on mobile WebGL1 and the dataset
+	//     is small.
+	//   - atlas / neuroscape mode (461k scatter3d) — skip 3D on
+	//     mobile width (it's hard to use on a phone screen
+	//     anyway) OR when WebGL2 isn't available (silently fails
+	//     in the affected browsers).
+	$: show3dPane =
+		mode === 'ohbm' ? true : !mobile && hasWebGL2;
+
 	let autoRotate = true;
 	let rotateFrame: number | null = null;
 	let rotateAngle = 0;
@@ -1864,28 +1897,44 @@
 		</div>
 	</header>
 
-	<div class="charts" data-testid="umap-chart-wrap">
+	<div class="charts" data-testid="umap-chart-wrap" class:two-up={show3dPane}>
 		<figure class="chart-card">
 			<figcaption>2D <span class="caption-aside">{mobile ? 'tap to filter by community' : 'lasso to filter'}</span></figcaption>
 			<div bind:this={chart2dEl} class="chart" data-testid="umap-chart-2d"></div>
 		</figure>
-		<figure class="chart-card">
-			<figcaption>
-				3D
-				<span class="caption-aside">
-					<button
-						type="button"
-						on:click={toggleRotate}
-						class="rotate-btn"
-						aria-pressed={autoRotate}
-						data-testid="umap-rotate-toggle"
-					>
-						{autoRotate ? '⏸ pause' : '▶ rotate'}
-					</button>
-				</span>
-			</figcaption>
-			<div bind:this={chart3dEl} class="chart chart-3d" data-testid="umap-chart-3d"></div>
-		</figure>
+		{#if show3dPane}
+			<figure class="chart-card">
+				<figcaption>
+					3D
+					<span class="caption-aside">
+						<button
+							type="button"
+							on:click={toggleRotate}
+							class="rotate-btn"
+							aria-pressed={autoRotate}
+							data-testid="umap-rotate-toggle"
+						>
+							{autoRotate ? '⏸ pause' : '▶ rotate'}
+						</button>
+					</span>
+				</figcaption>
+				<div bind:this={chart3dEl} class="chart chart-3d" data-testid="umap-chart-3d"></div>
+			</figure>
+		{:else if mode !== 'ohbm'}
+			<!-- 3D pane intentionally hidden on this device. Either
+			     the viewport is mobile-width (3D scatter3d at 461k
+			     points is unusable on a phone) or the browser lacks
+			     WebGL2 (some Chrome-based mobile shells silently
+			     fail to render scatter3d). The 2D pane carries the
+			     full functionality — lasso, focus halo, click-to-
+			     detail. -->
+			<aside class="three-d-skipped" data-testid="umap-3d-skipped">
+				<p>
+					3D view available on wider viewports
+					{hasWebGL2 ? '' : 'with WebGL 2 support'}.
+				</p>
+			</aside>
+		{/if}
 	</div>
 
 	{#if plotlyError || cellError}
@@ -1947,10 +1996,26 @@
 		gap: 0.75rem;
 		grid-template-columns: 1fr;
 	}
+	/* `.two-up` is applied when both 2D + 3D panes will render —
+	   only then do we move to side-by-side at ≥880 px. Single-pane
+	   mode (mobile / no WebGL2) keeps the 2D pane at full width on
+	   every viewport. */
 	@media (min-width: 880px) {
-		.charts {
+		.charts.two-up {
 			grid-template-columns: 1fr 1fr;
 		}
+	}
+	.three-d-skipped {
+		margin: 0;
+		padding: 0.6rem 0.8rem;
+		border: 1px dashed var(--border);
+		border-radius: 6px;
+		font-size: 0.78rem;
+		color: var(--text-muted);
+		background: var(--bg-subtle);
+	}
+	.three-d-skipped p {
+		margin: 0;
 	}
 	.chart-card {
 		margin: 0;
