@@ -157,14 +157,16 @@
 
 	// 3D pane gating:
 	//   - OHBM mode (~3k per-community scatter) — keep 3D on all
-	//     viewports; it works on mobile WebGL1 and the dataset
-	//     is small.
-	//   - atlas / neuroscape mode (461k scatter3d) — skip 3D on
-	//     mobile width (it's hard to use on a phone screen
-	//     anyway) OR when WebGL2 isn't available (silently fails
-	//     in the affected browsers).
-	$: show3dPane =
-		mode === 'ohbm' ? true : !mobile && hasWebGL2;
+	//     viewports; works on mobile WebGL1 and the dataset is
+	//     small.
+	//   - atlas / neuroscape mode (461k scatter3d) — gated on
+	//     WebGL2 availability ONLY. Mobile WebGL2-capable browsers
+	//     (modern Chrome/Safari/Firefox Android, Safari iOS 15+)
+	//     get the full 3D pane. The visitor has already opted in
+	//     via the "Show map" toggle (off-by-default on mobile per
+	//     the admonition), so the explicit hide-on-mobile was
+	//     redundantly protective.
+	$: show3dPane = mode === 'ohbm' || hasWebGL2;
 
 	let autoRotate = true;
 	let rotateFrame: number | null = null;
@@ -1921,17 +1923,17 @@
 				<div bind:this={chart3dEl} class="chart chart-3d" data-testid="umap-chart-3d"></div>
 			</figure>
 		{:else if mode !== 'ohbm'}
-			<!-- 3D pane intentionally hidden on this device. Either
-			     the viewport is mobile-width (3D scatter3d at 461k
-			     points is unusable on a phone) or the browser lacks
-			     WebGL2 (some Chrome-based mobile shells silently
-			     fail to render scatter3d). The 2D pane carries the
-			     full functionality — lasso, focus halo, click-to-
-			     detail. -->
+			<!-- 3D pane hidden because the browser lacks WebGL 2.
+			     Some Chrome-based mobile shells (Samsung Internet
+			     on older Android, in-app WebView embeddings) ship
+			     WebGL 1 only, and Plotly 3.x's scatter3d silently
+			     fails on them with a generic "needs WebGL" error.
+			     The 2D pane carries the full functionality
+			     (lasso, focus halo, click-to-detail). -->
 			<aside class="three-d-skipped" data-testid="umap-3d-skipped">
 				<p>
-					3D view available on wider viewports
-					{hasWebGL2 ? '' : 'with WebGL 2 support'}.
+					3D view requires WebGL 2 — this browser doesn't expose it.
+					Try a different browser if you'd like the 3D scatter.
 				</p>
 			</aside>
 		{/if}
