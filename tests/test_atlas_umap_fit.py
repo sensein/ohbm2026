@@ -18,6 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
@@ -185,6 +187,112 @@ class FitModelHandleTests(unittest.TestCase):
         oos = _synthetic_vectors(n=3, seed=42)
         projected = result.model.transform(oos)
         self.assertEqual(projected.shape, (3, 3))
+
+
+class FitCacheTests(unittest.TestCase):
+    """The cache_root parameter should short-circuit a refit when the
+    same (vectors, params) combination is reused, and persist a fresh
+    entry on first run. The cache is the contract behind R-007 /
+    SC-005 — second invocation byte-identical and <60s.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cache_root = Path(self._tmp.name) / "atlas-umap"
+        self.vectors = _synthetic_vectors(n=50)
+        self.params = umap_fit.UmapFitParams(n_components=3, n_neighbors=10)
+
+    def test_cache_miss_writes_complete_entry(self) -> None:
+        result = umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        entry = umap_fit.cache_paths(self.cache_root, result.state_key)
+        self.assertTrue(entry["model"].exists(), "model.joblib should be written")
+        self.assertTrue(entry["embedded"].exists(), "embedded.npy should be written")
+        self.assertTrue(entry["params"].exists(), "params.json should be written")
+        # Forensic params blob carries the same state_key + params.
+        payload = json.loads(entry["params"].read_text())
+        self.assertEqual(payload["state_key"], result.state_key)
+        self.assertEqual(payload["n_components"], 3)
+        self.assertEqual(payload["n_neighbors"], 10)
+
+    def test_cache_hit_returns_identical_embedding(self) -> None:
+        # First fit populates the cache.
+        first = umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        # Second call returns the cached embedding byte-for-byte.
+        second = umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        self.assertEqual(first.state_key, second.state_key)
+        self.assertTrue(
+            np.array_equal(first.embedded, second.embedded),
+            "cache hit must return byte-identical embedded array",
+        )
+
+    def test_cache_hit_returns_working_model_handle(self) -> None:
+        # A cache hit must produce a model whose .transform still
+        # works — the OHBM projector depends on it.
+        umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        cached = umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        oos = _synthetic_vectors(n=4, seed=99)
+        projected = cached.model.transform(oos)
+        self.assertEqual(projected.shape, (4, 3))
+
+    def test_cache_isolates_2d_and_3d_state_keys(self) -> None:
+        # Both 2D and 3D fits under the same cache_root must coexist
+        # without overwriting each other (the orchestrator runs both).
+        params_3d = umap_fit.UmapFitParams(n_components=3, n_neighbors=10)
+        params_2d = umap_fit.UmapFitParams(n_components=2, n_neighbors=10)
+        r3 = umap_fit.fit(self.vectors, params_3d, cache_root=self.cache_root)
+        r2 = umap_fit.fit(self.vectors, params_2d, cache_root=self.cache_root)
+        self.assertNotEqual(r3.state_key, r2.state_key)
+        e3 = umap_fit.cache_paths(self.cache_root, r3.state_key)
+        e2 = umap_fit.cache_paths(self.cache_root, r2.state_key)
+        self.assertTrue(e3["model"].exists())
+        self.assertTrue(e2["model"].exists())
+        # And re-hit each one independently.
+        again3 = umap_fit.fit(self.vectors, params_3d, cache_root=self.cache_root)
+        again2 = umap_fit.fit(self.vectors, params_2d, cache_root=self.cache_root)
+        self.assertTrue(np.array_equal(r3.embedded, again3.embedded))
+        self.assertTrue(np.array_equal(r2.embedded, again2.embedded))
+
+    def test_partial_entry_raises_umap_cache_error(self) -> None:
+        # Half-written entry (model present, embedded missing) must
+        # raise loudly so operators delete + retry rather than
+        # silently pay the refit cost.
+        umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        state_key = umap_fit.compute_state_key(self.vectors, self.params)
+        entry = umap_fit.cache_paths(self.cache_root, state_key)
+        entry["embedded"].unlink()
+        with self.assertRaises(exceptions.UmapCacheError) as ctx:
+            umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        self.assertEqual(ctx.exception.reason, "incomplete_entry")
+
+    def test_corrupt_model_raises_umap_cache_error(self) -> None:
+        umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        state_key = umap_fit.compute_state_key(self.vectors, self.params)
+        entry = umap_fit.cache_paths(self.cache_root, state_key)
+        entry["model"].write_bytes(b"not a real joblib payload")
+        with self.assertRaises(exceptions.UmapCacheError) as ctx:
+            umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        self.assertEqual(ctx.exception.reason, "model_unreadable")
+
+    def test_embedded_shape_mismatch_raises_umap_cache_error(self) -> None:
+        # A cached entry whose embedded.npy carries the wrong number
+        # of columns (e.g. an old 2D fit pasted into a 3D slot) must
+        # be flagged, not silently used.
+        umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        state_key = umap_fit.compute_state_key(self.vectors, self.params)
+        entry = umap_fit.cache_paths(self.cache_root, state_key)
+        # Replace the 3-col embedded with a 2-col version.
+        np.save(entry["embedded"], np.zeros((50, 2), dtype=np.float32))
+        with self.assertRaises(exceptions.UmapCacheError) as ctx:
+            umap_fit.fit(self.vectors, self.params, cache_root=self.cache_root)
+        self.assertEqual(ctx.exception.reason, "embedded_shape_mismatch")
+
+    def test_no_cache_when_cache_root_is_none(self) -> None:
+        # Calling without a cache_root falls back to the historical
+        # uncached behaviour (no files written, fresh fit each call).
+        empty_cache = Path(self._tmp.name) / "should-stay-empty"
+        umap_fit.fit(self.vectors, self.params)
+        self.assertFalse(empty_cache.exists())
 
 
 if __name__ == "__main__":

@@ -73,6 +73,7 @@ __all__ = [
     "Stage15Error",
     "NeuroScapeInputError",
     "UmapFitError",
+    "UmapCacheError",
     "OhbmProjectionError",
     "CrossParquetDriftError",
     "AtlasProvenanceError",
@@ -425,6 +426,31 @@ class UmapFitError(Stage15Error):
         super().__init__(message)
         self.reason = reason
         self.n_vectors = n_vectors
+
+
+class UmapCacheError(Stage15Error):
+    """The UMAP fit on-disk cache is unreadable or inconsistent.
+
+    Raised by :func:`ohbm2026.atlas_package.umap_fit.fit` when a cache
+    entry exists at the expected ``<cache_root>/<state_key>/`` path
+    but cannot be loaded (corrupted joblib, missing companion file,
+    embedded-shape mismatch with the requested ``n_components``). The
+    builder treats this as a precise, recoverable failure: the
+    operator can delete the offending directory and re-run to re-fit
+    cleanly. Carries (``path``, ``reason``) so the message points at
+    the exact file.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.path = path
+        self.reason = reason
 
 
 class OhbmProjectionError(Stage15Error):

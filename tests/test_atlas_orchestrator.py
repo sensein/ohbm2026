@@ -54,7 +54,7 @@ def _build_config(neuroscape_root: Path, output: Path, cache: Path) -> orchestra
         ],
         ohbm2026_state_key="ohbm00000001",
         output_root=output,
-        cache_root=cache,
+        umap_cache_root=cache,
         decimated_backdrop_size=3,
         neighbors_k=3,
         # Synthetic fixture has 6 articles — production R-001 defaults
