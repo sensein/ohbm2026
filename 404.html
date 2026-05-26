@@ -51,9 +51,9 @@
 			// `?spa=` redirect to the same subsite shell, the target
 			// SvelteKit bundle isn't deployed in this environment
 			// (e.g. /neuroscape/ exists in PR-preview but not on
-			// production until the spec-015 site code lands).
-			// Re-redirecting would loop forever. Detect that case and
-			// fall through to the safe atlas-root home instead.
+			// production until the spec-015 PR merges). Re-redirecting
+			// would loop forever. Detect that case and fall through
+			// to the safe atlas-root home instead.
 			var alreadyRedirected = /[?&]spa=/.test(search);
 
 			// 1. Inside /neuroscape/ → bounce to that bundle's SPA shell.

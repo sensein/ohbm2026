@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<script>
+			// Theme boot — runs before any rendering to avoid FOUC.
+			// Resolves `light` | `dark` | `auto` from localStorage and sets
+			// data-theme on <html> + the CSS color-scheme so native form
+			// controls + scrollbars adopt the right palette immediately.
+			(function () {
+				try {
+					var raw = localStorage.getItem('ohbm2026.ui.theme.v1');
+					var choice = raw === 'light' || raw === 'dark' || raw === 'auto' ? raw : 'auto';
+					var effective =
+						choice === 'auto'
+							? window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+							: choice;
+					document.documentElement.setAttribute('data-theme', effective);
+					document.documentElement.style.colorScheme = effective;
+				} catch (e) {
+					// localStorage might be unavailable; default to system pref.
+					document.documentElement.setAttribute(
+						'data-theme',
+						window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+					);
+				}
+			})();
+		</script>
+		<link href="/neuroscape/_app/immutable/entry/start.DBzB9CMu.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/cJ-Ao63Y.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/B1nrzDZt.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/B56wvuf1.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/entry/app.DwRErfhE.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/BryhfGX4.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/B_zOW6w2.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/BmZDk6VL.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/BN2SbDcR.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/nodes/0.DgszyXJm.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/BNvtD8eR.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/BlBQ8KBy.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/B2I6yqz2.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/dVSDwV-g.js" rel="modulepreload">
+		<link href="/neuroscape/_app/immutable/chunks/DPXedgNA.js" rel="modulepreload">
+		
+		<link href="/neuroscape/_app/immutable/assets/0.C3rAhFvx.css" rel="stylesheet">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_1z09gw = {
+						base: "/neuroscape",
+						assets: "/neuroscape"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/neuroscape/_app/immutable/entry/start.DBzB9CMu.js"),
+						import("/neuroscape/_app/immutable/entry/app.DwRErfhE.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>
