@@ -723,8 +723,26 @@
 	// matching the OHBM 2026 home's pattern (search lives in the
 	// top-row, map toggles in/out via a control-toggle button). Both
 	// atlas-root and neuroscape modes share these.
+	//
+	// `atlasShowMap` defaults to false on mobile-width viewports —
+	// the 461k-point scatter3d hammers SwiftShader CPU rendering on
+	// phones, drains battery, and forces the parquet download
+	// (~25–96 MB) over cellular before the user has even decided
+	// they want the map. They can flip it on with the same toggle
+	// after reading the admonition near the top of the page.
 	let atlasSearchQuery = '';
-	let atlasShowMap = true;
+	let atlasShowMap =
+		typeof window === 'undefined' ? true : window.innerWidth >= 1024;
+
+	// Mobile-viewport reactive — tracked via a resize listener so the
+	// admonition + map default re-flow if the user rotates / resizes.
+	// `mobileViewport` mirrors UmapPanel's 1024px breakpoint so the
+	// page-level chrome and the chart-level layout switch in lockstep.
+	let mobileViewport =
+		typeof window === 'undefined' ? false : window.innerWidth < 1024;
+	function onWindowResize() {
+		mobileViewport = window.innerWidth < 1024;
+	}
 	// Lasso selection. When non-null, the result list filters to these
 	// ids and the 2D scatter dims unselected points + zooms the 3D
 	// camera to the lassoed bounding box.
@@ -880,6 +898,8 @@
 
 	onMount(() => {
 		void loadAtlasData();
+		window.addEventListener('resize', onWindowResize);
+		return () => window.removeEventListener('resize', onWindowResize);
 	});
 
 	// Auto-open the inline detail panel when the URL carries
@@ -940,6 +960,31 @@
 	>
 		{#if SITE_MODE === 'atlas-root'}
 			<AtlasSubsiteNav />
+		{/if}
+		<!-- Mobile admonition — the 461k-point scatter3d via Plotly +
+		     SwiftShader is unkind to phones. Visible only when the
+		     viewport is narrow; the underlying parquet (25-96 MB) is
+		     also fetched lazily only when the user opts into the map.
+		     The map toggle (top-row, below) starts OFF on mobile;
+		     this banner explains why. -->
+		{#if mobileViewport}
+			<aside
+				class="atlas-mobile-warning"
+				data-testid="atlas-mobile-warning"
+				role="note"
+			>
+				<strong>Mobile viewing tip</strong>
+				<p>
+					The 3D atlas renders {SITE_MODE === 'atlas-root'
+						? '~461k PubMed points + the OHBM overlay'
+						: '~461k PubMed points'}
+					and downloads a {SITE_MODE === 'atlas-root'
+						? '~35 MB'
+						: '~96 MB'} data file. On phones this drains battery
+					quickly and may incur cellular charges. The map is hidden
+					by default — tap "Show map" to load it if you're on Wi-Fi.
+				</p>
+			</aside>
 		{/if}
 		{#if SITE_MODE === 'atlas-root' && atlasDrift.length > 0}
 			<!-- T043 / R-012 — surface BOTH drift signals loudly.
@@ -1524,8 +1569,34 @@
 	.atlas-home > .top-row,
 	.atlas-home > .layout,
 	.atlas-home > .atlas-drift-banner,
+	.atlas-home > .atlas-mobile-warning,
 	.atlas-home > .atlas-scatter-placeholder {
 		margin: 0 clamp(1rem, 2vw, 2rem);
+	}
+	.atlas-mobile-warning {
+		margin-top: 0.75rem;
+		padding: 0.7rem 0.9rem;
+		border-radius: 6px;
+		border: 1px solid var(--warning-border, #b8860b);
+		background: var(--warning-bg, #fff7e0);
+		color: var(--warning-text, #5c4400);
+		font-size: 0.85rem;
+		line-height: 1.4;
+	}
+	.atlas-mobile-warning strong {
+		display: block;
+		margin-bottom: 0.2rem;
+		font-size: 0.9rem;
+	}
+	.atlas-mobile-warning p {
+		margin: 0;
+	}
+	@media (prefers-color-scheme: dark) {
+		.atlas-mobile-warning {
+			background: rgba(184, 134, 11, 0.18);
+			color: #f0d68d;
+			border-color: rgba(184, 134, 11, 0.45);
+		}
 	}
 	.atlas-home > .top-row {
 		margin-top: 1rem;
