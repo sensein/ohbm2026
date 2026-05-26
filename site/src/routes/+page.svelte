@@ -1199,68 +1199,15 @@
 			{/each}
 		{/if}
 
-		<!-- Map panel — toggleable above the layout grid, OHBM-style. -->
+		<!-- Map panel — toggleable above the layout grid, OHBM-style.
+		     The loading state OVERLAYS the UmapPanel containers (the
+		     2D + 3D chart frames render immediately, the loading
+		     status floats on top of the frame area) instead of
+		     replacing them with a bottom-of-page placeholder. Same
+		     pattern as native map widgets: visitor sees where the
+		     map WILL be while it loads. -->
 		{#if atlasShowMap}
-			{#if atlasError}
-				<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-error" role="alert">
-					<p class="placeholder-text">{atlasError}</p>
-				</div>
-			{:else if atlasBackdrop.length === 0}
-				<div class="atlas-scatter-placeholder" data-testid="atlas-scatter-loading">
-					<p class="placeholder-text">
-						{#if atlasPhase === 'connecting'}
-							Connecting to {SITE_MODE === 'atlas-root'
-								? 'cross-conference atlas'
-								: 'NeuroScape atlas'}…
-						{:else if atlasPhase === 'downloading'}
-							Downloading {SITE_MODE === 'atlas-root'
-								? 'cross-conference atlas'
-								: 'NeuroScape atlas'}…
-							{#if atlasProgressPercent !== null}
-								<strong data-testid="atlas-loading-percent">{atlasProgressPercent}%</strong>
-							{:else if atlasProgressLoaded > 0}
-								<strong data-testid="atlas-loading-bytes"
-									>{formatMb(atlasProgressLoaded)}</strong
-								>
-							{/if}
-						{:else if atlasPhase === 'parsing'}
-							Parsing
-							{#if atlasProgressLoaded > 0}
-								<strong data-testid="atlas-loading-parsing-bytes"
-									>{formatMb(atlasProgressLoaded)}</strong
-								>
-							{/if}
-							{SITE_MODE === 'atlas-root' ? 'cross-conference atlas' : 'NeuroScape atlas'}…
-						{:else}
-							Loading {SITE_MODE === 'atlas-root'
-								? 'cross-conference atlas'
-								: 'NeuroScape atlas'}…
-						{/if}
-					</p>
-					{#if atlasPhase === 'downloading' && atlasProgressPercent !== null}
-						<progress
-							class="atlas-progress"
-							value={atlasProgressPercent}
-							max="100"
-							data-testid="atlas-loading-progressbar"
-						></progress>
-					{:else}
-						<progress class="atlas-progress" data-testid="atlas-loading-indeterminate"></progress>
-					{/if}
-				</div>
-			{:else}
-				<!-- Unified UmapPanel — same component as `/ohbm2026/`, branched
-				     by mode. Single instance renders 2D + 3D side-by-side
-				     internally (matching OHBM's pattern); pause/rotate
-				     preserves the 3D camera across toggles via the shared
-				     `currentEye3D` tracker.
-
-				     Backdrop is decimated to ≤50k points per pane via
-				     `scatterBackdrop` — rendering the full 461k on BOTH
-				     2D scattergl AND 3D scatter3d simultaneously freezes
-				     the browser. The result list + search work off the
-				     un-decimated `filteredBackdrop` so no titles are
-				     hidden from the UX outside the scatter. -->
+			<div class="atlas-map-wrap">
 				<UmapPanel
 					mode={SITE_MODE === 'atlas-root' ? 'atlas' : 'neuroscape'}
 					backdropPoints={scatterBackdrop}
@@ -1280,7 +1227,55 @@
 					on:lassoselect={onAtlasLasso}
 					on:lassoclear={clearAtlasLasso}
 				/>
-			{/if}
+				{#if atlasError}
+					<div class="atlas-map-overlay" data-testid="atlas-scatter-error" role="alert">
+						<p class="placeholder-text">{atlasError}</p>
+					</div>
+				{:else if atlasBackdrop.length === 0}
+					<div class="atlas-map-overlay" data-testid="atlas-scatter-loading">
+						<p class="placeholder-text">
+							{#if atlasPhase === 'connecting'}
+								Connecting to {SITE_MODE === 'atlas-root'
+									? 'cross-conference atlas'
+									: 'NeuroScape atlas'}…
+							{:else if atlasPhase === 'downloading'}
+								Downloading {SITE_MODE === 'atlas-root'
+									? 'cross-conference atlas'
+									: 'NeuroScape atlas'}…
+								{#if atlasProgressPercent !== null}
+									<strong data-testid="atlas-loading-percent">{atlasProgressPercent}%</strong>
+								{:else if atlasProgressLoaded > 0}
+									<strong data-testid="atlas-loading-bytes"
+										>{formatMb(atlasProgressLoaded)}</strong
+									>
+								{/if}
+							{:else if atlasPhase === 'parsing'}
+								Parsing
+								{#if atlasProgressLoaded > 0}
+									<strong data-testid="atlas-loading-parsing-bytes"
+										>{formatMb(atlasProgressLoaded)}</strong
+									>
+								{/if}
+								{SITE_MODE === 'atlas-root' ? 'cross-conference atlas' : 'NeuroScape atlas'}…
+							{:else}
+								Loading {SITE_MODE === 'atlas-root'
+									? 'cross-conference atlas'
+									: 'NeuroScape atlas'}…
+							{/if}
+						</p>
+						{#if atlasPhase === 'downloading' && atlasProgressPercent !== null}
+							<progress
+								class="atlas-progress"
+								value={atlasProgressPercent}
+								max="100"
+								data-testid="atlas-loading-progressbar"
+							></progress>
+						{:else}
+							<progress class="atlas-progress" data-testid="atlas-loading-indeterminate"></progress>
+						{/if}
+					</div>
+				{/if}
+			</div>
 		{/if}
 
 		<!-- 3-column layout grid — facets | list | detail. Uses OHBM's
@@ -1655,6 +1650,50 @@
 		.atlas-umap-row {
 			grid-template-columns: 1fr;
 		}
+	}
+	/* `.atlas-map-wrap` hosts the UmapPanel + an absolutely-positioned
+	   loading overlay so the chart frames are visible as soon as the
+	   map toggle flips on, with the loading status floating over them
+	   until the parquet finishes parsing. */
+	.atlas-map-wrap {
+		position: relative;
+	}
+	.atlas-map-overlay {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.6rem;
+		padding: 1rem;
+		background: rgba(255, 255, 255, 0.78);
+		backdrop-filter: blur(2px);
+		-webkit-backdrop-filter: blur(2px);
+		z-index: 10;
+		border-radius: 6px;
+		pointer-events: none;
+	}
+	@media (prefers-color-scheme: dark) {
+		.atlas-map-overlay {
+			background: rgba(20, 22, 28, 0.78);
+		}
+	}
+	.atlas-map-overlay .placeholder-text {
+		margin: 0;
+		color: var(--text);
+		font-size: 0.95rem;
+		text-align: center;
+		max-width: 32rem;
+	}
+	.atlas-map-overlay .placeholder-text strong {
+		color: var(--accent);
+		font-variant-numeric: tabular-nums;
+		margin-left: 0.3rem;
+	}
+	.atlas-map-overlay .atlas-progress {
+		width: min(20rem, 80%);
+		height: 0.45rem;
 	}
 	/* Atlas-home search input — same visual weight as OHBM's
 	   SearchBar (large, full-width-ish, prominent). */
