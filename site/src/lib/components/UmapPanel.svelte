@@ -214,6 +214,8 @@
 		// range (the chart's prior range was wiped along with the
 		// rest of its state).
 		last2dFocusKey = '';
+		last2dUirev = 'atlas-2d';
+		current2dXSpan = 0;
 		// Drop the 2D array cache so post-bfcache restore renders
 		// build fresh references that match the (purged-then-reborn)
 		// chart's internal data buffers. Stale cached arrays could
@@ -862,6 +864,11 @@
 	// renders with the SAME focus don't re-zoom (which would override
 	// the user's manual zoom out / pan).
 	let last2dFocusKey = '';
+	// Sticky uirevision for the 2D atlas chart. Only bumps when we
+	// auto-snap to a focus point; otherwise reused across renders so
+	// the user's manual pan/zoom survives close-detail / theme / data
+	// changes.
+	let last2dUirev = 'atlas-2d';
 
 	// Zoom-aware backdrop opacity. The 2D scattergl renders the full
 	// 461k-point backdrop at a low scalar opacity (~0.05) so the
@@ -874,6 +881,13 @@
 	// `data2dFullSpan` cache is the corpus' full x-extent, computed
 	// once when the parquet finishes loading.
 	let data2dFullSpan = 0;
+	// Live x-span of the 2D chart's current viewport. Updated by the
+	// `plotly_relayout` handler on every pan / zoom / autorange
+	// change. Used by the focus-zoom logic to decide whether to snap
+	// the camera in (when the user is at default / zoomed out) or to
+	// leave the existing zoom alone (when the user has already
+	// manually zoomed closer than the focus-snap target).
+	let current2dXSpan = 0;
 	// Re-cache the full x-span whenever the backdrop dataset arrives
 	// or changes (parquet load, mode swap). Cheap one-pass scan.
 	$: data2dFullSpan = computeAtlasFullSpan(backdropPoints);
@@ -1177,25 +1191,42 @@
 			});
 		}
 		// Camera zoom on focus change. When the focus id changed
-		// since the last render, snap the 2D viewport to a tight
-		// window around the focused point so the visitor sees it
-		// even when the rest of the corpus is otherwise dense.
-		// `uirevision` is bumped per-focus so Plotly accepts the
-		// new range; if the user pans/zooms manually afterwards
-		// the same uirevision preserves their gesture for further
-		// re-renders. When focus clears, uirevision goes back to
-		// 'atlas-2d' and `autorange: true` restores the full view.
+		// since the last render AND the user isn't already zoomed in
+		// closer than the focus-snap target, snap the 2D viewport to
+		// a tight window around the focused point so the visitor
+		// sees it even when the rest of the corpus is dense.
+		//
+		// Rule: respect the user's existing zoom level. If they've
+		// manually zoomed in tighter than the focus-snap target
+		// (current2dXSpan < FOCUS_WINDOW_SPAN), DON'T pan/zoom — they
+		// clicked a different point at high zoom and expect to stay
+		// there, with just the halo moving. Only auto-snap when the
+		// current view is wider than the focus target.
 		const focusChanged2d = focusKey2d !== last2dFocusKey;
 		const ZOOM_HALF_SPAN = 3.0; // ~6 UMAP units of window
-		const xRange =
-			focus2d && focusChanged2d
-				? [focus2d.x - ZOOM_HALF_SPAN, focus2d.x + ZOOM_HALF_SPAN]
-				: null;
-		const yRange =
-			focus2d && focusChanged2d
-				? [focus2d.y - ZOOM_HALF_SPAN, focus2d.y + ZOOM_HALF_SPAN]
-				: null;
-		const uirev2d = focusKey2d ? `atlas-2d-focus-${focusKey2d}` : 'atlas-2d';
+		const FOCUS_WINDOW_SPAN = ZOOM_HALF_SPAN * 2;
+		// `current2dXSpan === 0` on first render (handler hasn't
+		// fired yet) → treat as default zoom = full span, so the
+		// focus snap applies.
+		const userWiderThanFocus =
+			current2dXSpan === 0 || current2dXSpan > FOCUS_WINDOW_SPAN;
+		const shouldZoomToFocus = focus2d && focusChanged2d && userWiderThanFocus;
+		const xRange = shouldZoomToFocus
+			? [focus2d.x - ZOOM_HALF_SPAN, focus2d.x + ZOOM_HALF_SPAN]
+			: null;
+		const yRange = shouldZoomToFocus
+			? [focus2d.y - ZOOM_HALF_SPAN, focus2d.y + ZOOM_HALF_SPAN]
+			: null;
+		// uirevision is STICKY — only bumps when we actually want to
+		// override the user's zoom. Otherwise we reuse the previous
+		// render's uirev so Plotly preserves the user's manual
+		// pan/zoom gesture across re-renders (theme change, focus
+		// clear, etc.). Closing the detail panel does NOT yank the
+		// user back to autorange; their exploration is preserved.
+		if (shouldZoomToFocus) {
+			last2dUirev = `atlas-2d-focus-${focusKey2d}`;
+		}
+		const uirev2d = last2dUirev;
 		last2dFocusKey = focusKey2d;
 		// We DON'T set `selectionrevision` — see the earlier attempt
 		// that emitted `unrecognized GUI edit: selections[0].yref`
@@ -1293,15 +1324,17 @@
 						xMax = arr[1];
 					}
 					if (typeof xMin === 'number' && typeof xMax === 'number') {
+						current2dXSpan = Math.abs(xMax - xMin);
 						applyAtlasZoomOpacity(
 							api as PlotlyApi,
 							el as HTMLDivElement,
 							backdropOpacity,
-							Math.abs(xMax - xMin)
+							current2dXSpan
 						);
 					} else if (ev['xaxis.autorange'] === true) {
 						// User double-clicked to reset axes → autorange
 						// ON → back to the base opacity (full corpus).
+						current2dXSpan = data2dFullSpan;
 						applyAtlasZoomOpacity(
 							api as PlotlyApi,
 							el as HTMLDivElement,
