@@ -226,9 +226,9 @@
 		</div>
 	{:else}
 		<!-- Inline: hosted by the parent's `.detail-pane` grid column.
-		     No backdrop, no fixed positioning. The close button is
-		     still present so the user can clear the selection without
-		     having to click elsewhere. -->
+		     Header mirrors OHBM 2026 DetailPanel's inline pattern —
+		     cart + "Full details ↗" + close — instead of a big CTA
+		     button below. -->
 		<aside
 			class="atlas-detail-card atlas-detail-card--inline"
 			data-testid="atlas-root-detail-card"
@@ -238,15 +238,34 @@
 				<span class="kind-tag" data-testid="atlas-root-kind-tag">
 					{selection.kind === 'ohbm2026' ? 'OHBM 2026' : 'NeuroScape PubMed'}
 				</span>
-				<button
-					type="button"
-					class="close"
-					on:click={close}
-					aria-label="Close detail panel"
-					data-testid="atlas-root-detail-close"
-				>
-					×
-				</button>
+				<div class="head-actions">
+					{#if selection && cartItemId}
+						<CartIconButton
+							kind={selection.kind}
+							id={cartItemId}
+							{inCart}
+							testidPrefix="atlas-root-detail-cart"
+						/>
+					{/if}
+					<a
+						class="permalink-link"
+						href={selection.permalink}
+						rel="external"
+						title="Open the full-detail page"
+						data-testid="atlas-root-detail-permalink"
+					>
+						Full details ↗
+					</a>
+					<button
+						type="button"
+						class="close"
+						on:click={close}
+						aria-label="Close detail panel"
+						data-testid="atlas-root-detail-close"
+					>
+						×
+					</button>
+				</div>
 			</header>
 			<h2 class="title" data-testid="atlas-root-detail-title">{selection.title}</h2>
 			<dl class="meta">
@@ -293,14 +312,6 @@
 					</ol>
 				</section>
 			{/if}
-			<a
-				class="cta"
-				href={selection.permalink}
-				rel="external"
-				data-testid="atlas-root-detail-cta"
-			>
-				{ctaLabel} <span aria-hidden="true">→</span>
-			</a>
 		</aside>
 	{/if}
 {/if}
@@ -429,6 +440,25 @@
 		vertical-align: middle;
 		border: 1px solid var(--border);
 	}
+	/* Compact "Full details ↗" link in the head-actions row, sitting
+	   between the cart icon and the close button. Same visual weight
+	   as OHBM's inline DetailPanel's `.permalink permalink-top` link. */
+	.permalink-link {
+		font-size: 0.78rem;
+		color: var(--text-muted);
+		text-decoration: none;
+		padding: 0.25rem 0.45rem;
+		border-radius: 3px;
+		white-space: nowrap;
+	}
+	.permalink-link:hover {
+		color: var(--accent);
+		background: var(--accent-soft-bg);
+	}
+	/* `.cta` was the big primary "Open on /<sibling>/" button at the
+	   bottom of the inline card — replaced by the compact
+	   permalink-link in the head-actions row (matches OHBM 2026's
+	   inline detail card pattern). The modal layout still uses it. */
 	.cta {
 		display: inline-flex;
 		align-items: center;
