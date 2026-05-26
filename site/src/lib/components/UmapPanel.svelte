@@ -863,6 +863,52 @@
 	// the user's manual zoom out / pan).
 	let last2dFocusKey = '';
 
+	// Zoom-aware backdrop opacity. The 2D scattergl renders the full
+	// 461k-point backdrop at a low scalar opacity (~0.05) so the
+	// cluster carpet shows through without saturating. As the user
+	// zooms in, points-per-pixel drops and at high zoom the dots
+	// become almost invisible against the page background. The
+	// plotly_relayout handler below catches every axis-range change
+	// and rescales `marker.opacity` on the backdrop trace (index 0
+	// in renderAtlasChart2D) inversely to the visible x-range. The
+	// `data2dFullSpan` cache is the corpus' full x-extent, computed
+	// once when the parquet finishes loading.
+	let data2dFullSpan = 0;
+	// Re-cache the full x-span whenever the backdrop dataset arrives
+	// or changes (parquet load, mode swap). Cheap one-pass scan.
+	$: data2dFullSpan = computeAtlasFullSpan(backdropPoints);
+	function computeAtlasFullSpan(points: BackdropPoint[]): number {
+		if (points.length === 0) return 0;
+		let xmin = Infinity;
+		let xmax = -Infinity;
+		for (const p of points) {
+			const x = (p.umap_2d ?? [0, 0])[0];
+			if (x < xmin) xmin = x;
+			if (x > xmax) xmax = x;
+		}
+		const span = xmax - xmin;
+		return Number.isFinite(span) && span > 0 ? span : 0;
+	}
+	function applyAtlasZoomOpacity(
+		api: PlotlyApi,
+		el: HTMLDivElement,
+		baseOpacity: number,
+		currentSpan: number
+	) {
+		if (data2dFullSpan <= 0 || currentSpan <= 0) return;
+		// Linear zoom factor (fullSpan / currentSpan); clamped to a
+		// minimum of 1 so zooming OUT never goes below the base
+		// opacity. Top opacity capped at 0.85 so the points still
+		// read as a cloud, not a solid line, at extreme zoom.
+		const zoomFactor = Math.max(1, data2dFullSpan / currentSpan);
+		const op = Math.min(0.85, baseOpacity * zoomFactor);
+		void (
+			api as unknown as {
+				restyle: (e: HTMLDivElement, u: Record<string, unknown[]>, idx: number[]) => Promise<unknown>;
+			}
+		).restyle(el, { 'marker.opacity': [op] }, [0]);
+	}
+
 	/**
 	 * Per-render 2D trace-array cache. Without it, every lasso state
 	 * change in `renderAtlasChart2D` rebuilds the same 461k-point
@@ -1184,6 +1230,18 @@
 		(api as unknown as { react: (...args: unknown[]) => Promise<unknown> })
 			.react(el, traces, layout, config)
 			.then(() => {
+				// Apply zoom-aware opacity to the initial render too —
+				// if the chart starts in a focus-zoom (xRange set per
+				// last2dFocusKey change), the backdrop should already
+				// be more opaque to match the smaller window.
+				if (xRange) {
+					applyAtlasZoomOpacity(
+						api as PlotlyApi,
+						el as HTMLDivElement,
+						backdropOpacity,
+						Math.abs(xRange[1] - xRange[0])
+					);
+				}
 				if (atlas2dHandlersAttached) return;
 				atlas2dHandlersAttached = true;
 				const node = el as unknown as {
@@ -1215,6 +1273,43 @@
 					dispatch('lassoselect', { ohbm2026_ids: ohbm, neuroscape_ids: neuro });
 				});
 				node.on('plotly_deselect', () => dispatch('lassoclear'));
+				// Zoom-aware backdrop opacity: every pan/zoom emits a
+				// `plotly_relayout` with the new axis range. We restyle
+				// the backdrop trace's `marker.opacity` so points scale
+				// up as the user zooms in (and back down on zoom out).
+				// Cheap — `restyle` against trace index 0 only.
+				node.on('plotly_relayout', (e: unknown) => {
+					const ev = e as Record<string, unknown> | null;
+					if (!ev || !api) return;
+					// Plotly emits either expanded keys
+					// (`xaxis.range[0]` / `[1]`) or a single
+					// `xaxis.range` array depending on the gesture
+					// (drag-zoom vs programmatic relayout). Handle both.
+					let xMin: unknown = ev['xaxis.range[0]'];
+					let xMax: unknown = ev['xaxis.range[1]'];
+					const arr = ev['xaxis.range'] as unknown[] | undefined;
+					if (typeof xMin !== 'number' && Array.isArray(arr)) {
+						xMin = arr[0];
+						xMax = arr[1];
+					}
+					if (typeof xMin === 'number' && typeof xMax === 'number') {
+						applyAtlasZoomOpacity(
+							api as PlotlyApi,
+							el as HTMLDivElement,
+							backdropOpacity,
+							Math.abs(xMax - xMin)
+						);
+					} else if (ev['xaxis.autorange'] === true) {
+						// User double-clicked to reset axes → autorange
+						// ON → back to the base opacity (full corpus).
+						applyAtlasZoomOpacity(
+							api as PlotlyApi,
+							el as HTMLDivElement,
+							backdropOpacity,
+							data2dFullSpan
+						);
+					}
+				});
 			})
 			.catch((err: Error) => {
 				plotlyError = err.message;
