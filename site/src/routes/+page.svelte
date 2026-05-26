@@ -759,6 +759,12 @@
 	let atlasSearchQuery = '';
 	let atlasShowMap =
 		typeof window === 'undefined' ? true : window.innerWidth >= 1024;
+	// Mobile-only "🔍 Filters" toggle, mirroring OHBM's pattern: the
+	// facets sidebar is hidden by default on narrow viewports and
+	// opens above the result list when the user taps the button.
+	// On desktop (≥1024 px) OHBM's `.facet-pane { display: block
+	// !important }` rule keeps it always visible.
+	let showAtlasFacets = false;
 
 	// Mobile-viewport reactive — tracked via a resize listener so the
 	// admonition + map default re-flow if the user rotates / resizes.
@@ -1110,7 +1116,19 @@
 			<div class="controls" data-testid="atlas-root-controls">
 				<!-- Clear-selection button lives inside the UmapPanel header
 				     for atlas/neuroscape modes, mirroring how OHBM 2026
-				     does it. The top-row only holds the map toggle. -->
+				     does it. The top-row holds the map + filters toggles
+				     (filters is mobile-only — desktop facet sidebar is
+				     always visible via the .layout grid). -->
+				<button
+					type="button"
+					class="control-toggle mobile-only"
+					class:active={showAtlasFacets}
+					on:click={() => (showAtlasFacets = !showAtlasFacets)}
+					aria-pressed={showAtlasFacets}
+					data-testid="toggle-facets"
+				>
+					🔍 Filters
+				</button>
 				<button
 					type="button"
 					class="control-toggle"
@@ -1265,13 +1283,13 @@
 			{/if}
 		{/if}
 
-		<!-- 3-column layout grid — facets | list | detail. Same shape
-		     as OHBM 2026's `.layout`. Facets sidebar drives the page-
-		     level filter state which feeds the result list AND the
-		     scatter (so the two views stay in sync). -->
+		<!-- 3-column layout grid — facets | list | detail. Uses OHBM's
+		     `.layout` rules directly (no `atlas-layout` overrides):
+		     single column on mobile, 3 columns ≥1024 px, facet-pane
+		     opens via `.open` when the user taps "🔍 Filters". -->
 		{#if atlasBackdrop.length > 0}
-			<div class="layout atlas-layout">
-				<div class="facet-pane">
+			<div class="layout">
+				<div class="facet-pane" class:open={showAtlasFacets}>
 					{#if SITE_MODE === 'atlas-root'}
 						<AtlasRootFacets
 							clustersById={atlasClustersById}
@@ -1583,21 +1601,21 @@
 		border-radius: 2px;
 	}
 
-	/* UX-unification — atlas-home reuses OHBM's `.home` shape with
-	   a few overrides: the page-wide padding now lives here (since
-	   atlas-root uses a minimal-shell layout instead of OHBM's
-	   `.shell` wrapper) and `min-height: 100vh` so the LandingPage
-	   Header sticks to the top. */
+	/* UX-unification — atlas-home reuses OHBM's `.home` + `.layout` +
+	   `.facet-pane` / `.list-pane` / `.detail-pane` shape directly.
+	   The only atlas-specific overrides here are:
+	     - page-wide padding (atlas-root + neuroscape use a minimal
+	       shell, not OHBM's `.shell` wrapper that adds the OHBM
+	       header padding)
+	     - the mobile admonition banner styling
+	     - the side-by-side 2D + 3D scatter row at desktop
+	   Everything else (grid columns, .open facet pattern, detail-pane
+	   overlay on mobile, has-focus widening) is inherited from
+	   OHBM's CSS at the bottom of this stylesheet. */
 	.atlas-home {
 		min-height: 100vh;
-		padding: 0 0 1rem;
-	}
-	.atlas-home > .top-row,
-	.atlas-home > .layout,
-	.atlas-home > .atlas-drift-banner,
-	.atlas-home > .atlas-mobile-warning,
-	.atlas-home > .atlas-scatter-placeholder {
-		margin: 0 clamp(1rem, 2vw, 2rem);
+		padding: 0 clamp(1rem, 2vw, 2rem) 1rem;
+		box-sizing: border-box;
 	}
 	.atlas-mobile-warning {
 		margin-top: 0.75rem;
@@ -1624,9 +1642,6 @@
 			border-color: rgba(184, 134, 11, 0.45);
 		}
 	}
-	.atlas-home > .top-row {
-		margin-top: 1rem;
-	}
 	/* Side-by-side 2D + 3D scatter row, matching OHBM 2026's
 	   UmapPanel layout (2D + 3D side-by-side on desktop, stacked
 	   on mobile). Each pane gets equal width on desktop. */
@@ -1639,70 +1654,6 @@
 	@media (max-width: 1024px) {
 		.atlas-umap-row {
 			grid-template-columns: 1fr;
-		}
-	}
-
-	/* 3-column atlas-home layout — facets | list | detail. Matches
-	   OHBM 2026's `.layout` shape (which is also 3-column with
-	   `.facet-pane` / `.list-pane` / `.detail-pane` on wide screens).
-	   `.has-focus` widens detail; otherwise detail is hidden via CSS
-	   so list takes the spare column. */
-	.atlas-layout {
-		display: grid;
-		grid-template-columns: 14rem minmax(0, 1fr);
-		gap: 1rem;
-		width: 100%;
-	}
-	.atlas-home.has-focus .atlas-layout {
-		grid-template-columns: 14rem minmax(0, 2fr) minmax(0, 1fr);
-	}
-	@media (max-width: 720px) {
-		.atlas-layout,
-		.atlas-home.has-focus .atlas-layout {
-			grid-template-columns: minmax(0, 1fr);
-		}
-	}
-	/* Every grid cell of the atlas-layout (facets, list, detail) gets
-	   `min-width: 0` so wide children (long cluster titles, neighbour
-	   titles, etc.) don't push the cell past the column track. Plus
-	   `overflow-x: hidden` as a defensive guard — long unbroken
-	   strings still wrap via the per-component word-break rules, but
-	   if something slips through it stays inside the pane instead of
-	   pushing the viewport. */
-	.atlas-home .facet-pane,
-	.atlas-home .list-pane,
-	.atlas-home .detail-pane {
-		min-width: 0;
-		overflow-x: hidden;
-	}
-	.atlas-home .facet-pane {
-		display: block;
-	}
-	.atlas-home .detail-pane:not(.active) {
-		display: none;
-	}
-	@media (max-width: 720px) {
-		.atlas-home .facet-pane {
-			/* Facets collapse to top on mobile; the .facets max-height
-			   inside the component keeps the cluster list scrollable. */
-			max-height: 30vh;
-			overflow-y: auto;
-		}
-	}
-	/* Mobile: when a row is focused the detail panel takes over the
-	   viewport so the user has somewhere to read + a real Close
-	   button. Mirrors OHBM 2026's `.home.has-focus .list-pane {
-	   display: none }` rule. Without this both list and detail stay
-	   stacked single-column, the user has to scroll past the list to
-	   find the panel, and closing it leaves them at the bottom of
-	   the page. */
-	@media (max-width: 1023px) {
-		.atlas-home.has-focus .list-pane,
-		.atlas-home.has-focus .facet-pane {
-			display: none;
-		}
-		.atlas-home.has-focus .detail-pane {
-			display: block;
 		}
 	}
 	/* Atlas-home search input — same visual weight as OHBM's
