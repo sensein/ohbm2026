@@ -176,4 +176,83 @@ describe('loader atlas-root dispatch (T042)', () => {
 			notExpectedKeys: ['data/atlas/clusters.json', 'data/neuroscape/articles.json']
 		});
 	});
+
+	it('recovers ai_provenance from the manifest so the ✨ AI pill can display (stage 15.4 follow-up)', async () => {
+		__innerByName = {
+			manifest: [
+				{
+					manifest_json: JSON.stringify({
+						build_info: { state_key: 'ohbm12345678' },
+						enrichment_ai_provenance: {
+							claims_model_id: 'gpt-5.4-mini',
+							figures_model_id: 'gpt-5.4-mini'
+						}
+					})
+				}
+			],
+			abstracts: [{ poster_id: 201, title: 'OHBM' }],
+			authors: [{ author_id: 1, name: 'A' }],
+			enrichment_claims: [{ poster_id: 201, claim_index: 0, claim: 'c' }]
+		};
+		__outerNames = Object.keys(__innerByName);
+
+		const fakeFetch = vi.fn(async () => {
+			return new Response(new Uint8Array(8).buffer, {
+				status: 200,
+				headers: { 'content-type': 'application/octet-stream' }
+			});
+		}) as unknown as typeof fetch;
+
+		vi.stubEnv('VITE_DATA_PACKAGE_URL', 'https://example.test/data.parquet');
+
+		const { loadDataPackage, resetDataPackageCacheForTests } = await import(
+			'$lib/data_package/loader'
+		);
+		resetDataPackageCacheForTests();
+		const map = await loadDataPackage(fakeFetch);
+		expect(map).not.toBeNull();
+
+		const enrichment = map!.get('data/enrichment.json') as {
+			ai_provenance: { claims_model_id: string | null; figures_model_id: string | null };
+		};
+		expect(enrichment).toBeDefined();
+		expect(enrichment.ai_provenance.claims_model_id).toBe('gpt-5.4-mini');
+		expect(enrichment.ai_provenance.figures_model_id).toBe('gpt-5.4-mini');
+	});
+
+	it('leaves ai_provenance keys null when the manifest carries no enrichment attribution', async () => {
+		__innerByName = {
+			manifest: [
+				{
+					manifest_json: JSON.stringify({
+						build_info: { state_key: 'ohbm12345678' }
+					})
+				}
+			],
+			abstracts: [{ poster_id: 201, title: 'OHBM' }],
+			authors: [{ author_id: 1, name: 'A' }],
+			enrichment_claims: [{ poster_id: 201, claim_index: 0, claim: 'c' }]
+		};
+		__outerNames = Object.keys(__innerByName);
+
+		const fakeFetch = vi.fn(async () => {
+			return new Response(new Uint8Array(8).buffer, {
+				status: 200,
+				headers: { 'content-type': 'application/octet-stream' }
+			});
+		}) as unknown as typeof fetch;
+
+		vi.stubEnv('VITE_DATA_PACKAGE_URL', 'https://example.test/data.parquet');
+
+		const { loadDataPackage, resetDataPackageCacheForTests } = await import(
+			'$lib/data_package/loader'
+		);
+		resetDataPackageCacheForTests();
+		const map = await loadDataPackage(fakeFetch);
+		const enrichment = map!.get('data/enrichment.json') as {
+			ai_provenance: { claims_model_id: string | null; figures_model_id: string | null };
+		};
+		expect(enrichment.ai_provenance.claims_model_id).toBeNull();
+		expect(enrichment.ai_provenance.figures_model_id).toBeNull();
+	});
 });

@@ -321,6 +321,23 @@ def write(
     manifest_with_format = dict(manifest)
     manifest_with_format["format"] = "parquet-single"
     manifest_with_format["format_version"] = PARQUET_FORMAT_VERSION
+    # Lift the enrichment envelope's `ai_provenance` block into the
+    # manifest. The two flattened per-row enrichment tables
+    # (enrichment_claims, enrichment_figures) cannot carry the
+    # envelope-level model-id annotation, so the browser-side loader
+    # has no way to recover it after parquet round-trip. Embedding
+    # it in the manifest JSON is the smallest fix that keeps the
+    # `✨ AI` pill annotated with the model id that produced the
+    # rows. Missing/empty values stay `None` so the pill stays
+    # hidden — keeps the no-empty-pill contract.
+    ai_prov = enrichment_envelope.get("ai_provenance") or {}
+    if isinstance(ai_prov, Mapping) and (
+        ai_prov.get("claims_model_id") or ai_prov.get("figures_model_id")
+    ):
+        manifest_with_format["enrichment_ai_provenance"] = {
+            "claims_model_id": ai_prov.get("claims_model_id"),
+            "figures_model_id": ai_prov.get("figures_model_id"),
+        }
 
     # Stage 11.1 US2 — derive the standby_slots table once, then thread
     # the per-poster INT8 lookup map into the abstracts emitter.

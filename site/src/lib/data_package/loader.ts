@@ -558,10 +558,24 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 		const k = String(f.poster_id);
 		(records[k] ??= { claims: [], figures: [] }).figures.push(f);
 	}
+	// ai_provenance is lifted from the manifest. The envelope-level
+	// model-id annotation can't ride along with the two flattened
+	// per-row enrichment tables, so the python writer embeds it in
+	// the manifest JSON. Missing keys collapse to null so the
+	// `✨ AI` pill stays hidden when the corpus has no enrichment
+	// model attribution.
+	const aiProv = ((manifest as { enrichment_ai_provenance?: unknown } | null)
+		?.enrichment_ai_provenance ?? {}) as {
+		claims_model_id?: string | null;
+		figures_model_id?: string | null;
+	};
 	out.set('data/enrichment.json', {
 		schema_version: 'enrichment.v2',
 		build_info: buildInfo,
-		ai_provenance: {},
+		ai_provenance: {
+			claims_model_id: aiProv.claims_model_id ?? null,
+			figures_model_id: aiProv.figures_model_id ?? null
+		},
 		records
 	});
 
