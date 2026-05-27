@@ -86,7 +86,7 @@ class AtlasBuildConfig:
     ohbm_corpus: Sequence[OhbmInputRecord]
     ohbm2026_state_key: str
     output_root: Path
-    cache_root: Path
+    umap_cache_root: Path
     voyage_bundle_id: str = "voyage_stage2_published"
     decimated_backdrop_size: int = 50_000
     neighbors_k: int = 20
@@ -188,10 +188,13 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
     pmids = np.array([a.pubmed_id for a in articles], dtype=np.int64)
     clusters = neuroscape_loader.load_clusters(bundle)
 
-    # 3. UMAP fits — 3D and 2D, independent.
+    # 3. UMAP fits — 3D and 2D, independent. Both pass through the
+    # on-disk cache so a rebuild with unchanged vectors + params is
+    # transform-only (R-007 / SC-005 — "second invocation byte-
+    # identical and <60s").
     p3, p2 = _resolved_umap_params(cfg)
-    fit3d = umap_fit.fit(vectors, p3)
-    fit2d = umap_fit.fit(vectors, p2)
+    fit3d = umap_fit.fit(vectors, p3, cache_root=cfg.umap_cache_root)
+    fit2d = umap_fit.fit(vectors, p2, cache_root=cfg.umap_cache_root)
     # State key is derived from the 3D fit (the canonical orientation
     # for the rotatable scatter). The 2D fit's key would diverge by
     # design — we just want one stable identifier for the produced

@@ -45,19 +45,39 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from ohbm2026.exceptions import UmapFitError
+from ohbm2026.exceptions import UmapCacheError, UmapFitError
 
 __all__ = [
     "UmapFitParams",
     "UmapFitResult",
     "compute_state_key",
     "fit",
+    "cache_paths",
 ]
+
+# Cache layout under ``<cache_root>/<state_key>/``:
+#   - model.joblib    fitted ``umap.UMAP`` instance (includes the
+#                     internal nearest-neighbour graph + numba-baked
+#                     transform state).
+#   - embedded.npy    the (N, n_components) float32 projection.
+#   - params.json     forensic; lets a human inspect what produced
+#                     this entry without loading the joblib.
+#
+# A cache entry is "complete" only when all three files exist. A
+# partial directory (e.g. a crashed write) raises
+# ``UmapCacheError`` rather than silently re-fitting — so operators
+# notice + clean up rather than paying the 30-60 min fit cost twice.
+_CACHE_MODEL_FILE = "model.joblib"
+_CACHE_EMBEDDED_FILE = "embedded.npy"
+_CACHE_PARAMS_FILE = "params.json"
 
 
 @dataclass(frozen=True)
@@ -144,12 +164,165 @@ def _validate_input(vectors: np.ndarray) -> None:
         )
 
 
-def fit(vectors: np.ndarray, params: UmapFitParams) -> UmapFitResult:
+def cache_paths(cache_root: Path, state_key: str) -> dict[str, Path]:
+    """Return the absolute paths inside a single cache entry.
+
+    Exposed so callers (tests, future invalidation tooling) can locate
+    a cache entry by state key without re-deriving the filenames.
+    """
+
+    base = Path(cache_root) / state_key
+    return {
+        "dir": base,
+        "model": base / _CACHE_MODEL_FILE,
+        "embedded": base / _CACHE_EMBEDDED_FILE,
+        "params": base / _CACHE_PARAMS_FILE,
+    }
+
+
+def _load_cached(
+    entry: dict[str, Path],
+    params: UmapFitParams,
+) -> tuple[Any, np.ndarray]:
+    """Load a fully-formed cache entry. Raises ``UmapCacheError`` on any
+    inconsistency rather than silently falling back to a refit — the
+    operator should notice + delete the bad entry.
+    """
+
+    # Lazy import — joblib is in the umap-learn dep tree, but we don't
+    # want a stray import at module load.
+    import joblib  # type: ignore[import-untyped]
+
+    missing = [name for name in ("model", "embedded") if not entry[name].exists()]
+    if missing:
+        raise UmapCacheError(
+            f"UMAP fit cache entry at {entry['dir']!s} is incomplete "
+            f"(missing: {', '.join(missing)})",
+            path=str(entry["dir"]),
+            reason="incomplete_entry",
+        )
+
+    try:
+        model = joblib.load(entry["model"])
+    except Exception as exc:
+        raise UmapCacheError(
+            f"UMAP cached model at {entry['model']!s} is unreadable: {exc}",
+            path=str(entry["model"]),
+            reason="model_unreadable",
+        ) from exc
+
+    try:
+        # ``allow_pickle=False`` is numpy's default since 1.16.3
+        # (CVE-2019-6446); set it explicitly to document that
+        # embedded.npy is plain float data and to harden against any
+        # future numpy default flip — a tampered cache entry that
+        # smuggled a pickled object would otherwise execute arbitrary
+        # code at load time.
+        embedded = np.load(entry["embedded"], allow_pickle=False)
+    except Exception as exc:
+        raise UmapCacheError(
+            f"UMAP cached embedded array at {entry['embedded']!s} is unreadable: {exc}",
+            path=str(entry["embedded"]),
+            reason="embedded_unreadable",
+        ) from exc
+
+    if embedded.ndim != 2 or embedded.shape[1] != params.n_components:
+        raise UmapCacheError(
+            f"UMAP cached embedded shape {embedded.shape!r} does not match "
+            f"n_components={params.n_components}",
+            path=str(entry["embedded"]),
+            reason="embedded_shape_mismatch",
+        )
+
+    embedded = np.asarray(embedded, dtype=np.float32)
+    return model, embedded
+
+
+def _persist_cache(
+    entry: dict[str, Path],
+    model: Any,
+    embedded: np.ndarray,
+    params: UmapFitParams,
+    state_key: str,
+) -> None:
+    """Persist a fresh cache entry atomically.
+
+    Writes each file to a sibling tempfile then ``os.replace``s it
+    into place so an interrupted run never leaves a half-written
+    file claiming to be a valid entry.
+    """
+
+    import joblib  # type: ignore[import-untyped]
+
+    entry["dir"].mkdir(parents=True, exist_ok=True)
+
+    def _atomic_write_bytes(target: Path, payload: bytes) -> None:
+        # Close the raw fd immediately and use Path.write_bytes for the
+        # actual write. Wrapping the fd via os.fdopen would leak it if
+        # the wrapper itself raised before taking ownership (rare under
+        # memory pressure but real); the explicit close-then-write
+        # pattern has no such window.
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=f".{target.name}.", suffix=".tmp", dir=str(entry["dir"])
+        )
+        os.close(fd)
+        try:
+            Path(tmp_path).write_bytes(payload)
+            os.replace(tmp_path, target)
+        except Exception:
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
+
+    fd, tmp_model = tempfile.mkstemp(
+        prefix=f".{_CACHE_MODEL_FILE}.", suffix=".tmp", dir=str(entry["dir"])
+    )
+    os.close(fd)
+    try:
+        joblib.dump(model, tmp_model)
+        os.replace(tmp_model, entry["model"])
+    except Exception:
+        Path(tmp_model).unlink(missing_ok=True)
+        raise
+
+    # ``np.save`` appends ``.npy`` to any path that lacks the
+    # extension and writes to *that* derived name, leaving the
+    # mkstemp-allocated file empty. Force the suffix so the file we
+    # then ``os.replace`` is the one np.save actually populated.
+    np_buf = embedded.astype(np.float32, copy=False)
+    fd, tmp_emb = tempfile.mkstemp(
+        prefix=f".{_CACHE_EMBEDDED_FILE}.", suffix=".npy", dir=str(entry["dir"])
+    )
+    os.close(fd)
+    try:
+        np.save(tmp_emb, np_buf, allow_pickle=False)
+        os.replace(tmp_emb, entry["embedded"])
+    except Exception:
+        Path(tmp_emb).unlink(missing_ok=True)
+        raise
+
+    params_payload = json.dumps(
+        {"state_key": state_key, **params.as_dict()}, sort_keys=True
+    ).encode()
+    _atomic_write_bytes(entry["params"], params_payload)
+
+
+def fit(
+    vectors: np.ndarray,
+    params: UmapFitParams,
+    cache_root: Path | None = None,
+) -> UmapFitResult:
     """Fit a UMAP projection. Deterministic for the same input + params.
 
     The returned :class:`UmapFitResult` carries the fitted model
     handle so callers (the OHBM projector in particular) can
     ``transform`` out-of-sample vectors into the same space.
+
+    When ``cache_root`` is provided, a cache lookup at
+    ``<cache_root>/<state_key>/`` is performed first. On a complete
+    hit the cached model + embedded array are returned unchanged
+    (much faster than re-fitting on 461k vectors). On a miss the
+    fresh fit is persisted into the same path so a subsequent run
+    with the same inputs short-circuits.
     """
 
     _validate_input(vectors)
@@ -159,6 +332,21 @@ def fit(vectors: np.ndarray, params: UmapFitParams) -> UmapFitResult:
     import umap  # type: ignore[import-untyped]
 
     state_key = compute_state_key(vectors, params)
+
+    if cache_root is not None:
+        entry = cache_paths(cache_root, state_key)
+        # An entry is a hit only if BOTH critical files exist. An
+        # entry with only one or the other is treated as corrupt
+        # (raised loudly via _load_cached) so operators clean it up.
+        if entry["model"].exists() or entry["embedded"].exists():
+            model_cached, embedded_cached = _load_cached(entry, params)
+            return UmapFitResult(
+                params=params,
+                state_key=state_key,
+                embedded=embedded_cached,
+                model=model_cached,
+            )
+
     model = umap.UMAP(
         n_components=params.n_components,
         n_neighbors=params.n_neighbors,
@@ -178,6 +366,11 @@ def fit(vectors: np.ndarray, params: UmapFitParams) -> UmapFitResult:
             n_vectors=int(vectors.shape[0]),
         ) from exc
     embedded = np.asarray(embedded, dtype=np.float32)
+
+    if cache_root is not None:
+        entry = cache_paths(cache_root, state_key)
+        _persist_cache(entry, model, embedded, params, state_key)
+
     return UmapFitResult(
         params=params,
         state_key=state_key,
