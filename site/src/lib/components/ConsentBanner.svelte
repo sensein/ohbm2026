@@ -124,10 +124,6 @@
 	}
 	.consent-text {
 		margin: 0;
-		color: var(--text);
-	}
-	.consent-text strong {
-		color: var(--text);
 	}
 	.consent-actions {
 		display: flex;
