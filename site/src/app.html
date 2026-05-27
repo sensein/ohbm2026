@@ -58,7 +58,7 @@
 				var state = 'no-analytics';
 				try {
 					var p = window.location.pathname || '';
-					if (/^\/pr-\d+\//.test(p)) {
+					if (/^\/pr-\d+(\/|$)/.test(p)) {
 						window.__ohbmAnalyticsConsent = 'pr-preview';
 						return;
 					}
