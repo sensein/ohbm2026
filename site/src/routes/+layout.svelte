@@ -13,6 +13,7 @@
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import Tour from '$lib/components/Tour.svelte';
 	import CartDrawer from '$lib/components/CartDrawer.svelte';
+	import ConsentBanner from '$lib/components/ConsentBanner.svelte';
 	import { cartDrawerOpen } from '$lib/stores/cart_ui';
 	import { tourStore, tourFlags } from '$lib/stores/tour';
 	// SITE_MODE is a build-time constant (Vite substitutes
@@ -215,6 +216,12 @@
 	     without title) — visible only if the user opens the drawer
 	     from a page that hasn't loaded any corpus data yet. -->
 	<CartDrawer bind:open={$cartDrawerOpen} />
+
+	<!-- Analytics consent banner. Self-gates: renders only when the
+	     boot script in app.html set window.__ohbmAnalyticsConsent
+	     to 'pending'. DNT / GPC users + already-decided visitors
+	     never see it. -->
+	<ConsentBanner />
 
 	<BuildInfoFooter deployBuildInfo={envBuildInfo} {dataBuildInfo} />
 </div>
