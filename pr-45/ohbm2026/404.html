@@ -30,52 +30,102 @@
 			})();
 		</script>
 		<!-- Google tag (gtag.js) — measurement id G-5LQ42EDHPF.
-		     Gated to skip PR-preview deployments so we don't pollute the
-		     production analytics with bot + reviewer traffic. PR previews
-		     live under /pr-<N>/ on the same gh-pages host; production is
-		     the bare-root + /ohbm2026/ + /neuroscape/ subpaths. -->
+		     Boot decision tree, evaluated synchronously here so the
+		     banner that depends on this state doesn't flash and gtag
+		     itself is initialised before any pageview is recorded:
+
+		       1. PR-preview path (/pr-<N>/) → skip entirely. We do not
+		          want reviewer + bot traffic on preview deployments
+		          polluting the production analytics property.
+		       2. DNT (`navigator.doNotTrack === '1'` / `'yes'`) OR GPC
+		          (`navigator.globalPrivacyControl === true`) → skip
+		          entirely. The user has signalled non-consent at the
+		          browser level; we respect that without asking.
+		       3. Saved consent in localStorage → use it: load gtag with
+		          analytics_storage 'granted' on accept, 'denied' on
+		          decline (declined users keep gtag loaded so a future
+		          consent-update can re-enable it without a page reload).
+		       4. No saved choice → 'pending'. Load gtag with consent
+		          defaulted to denied; the ConsentBanner Svelte component
+		          will mount on hydration and call gtag('consent',
+		          'update', …) once the user picks.
+
+		     `window.__ohbmAnalyticsConsent` is the shared variable the
+		     banner reads to decide whether to render. -->
 		<script>
 			(function () {
+				var STORAGE_KEY = 'ohbm2026.analytics.consent.v1';
+				var state = 'no-analytics';
 				try {
 					var p = window.location.pathname || '';
-					if (/^\/pr-\d+\//.test(p)) return;
+					if (/^\/pr-\d+(\/|$)/.test(p)) {
+						window.__ohbmAnalyticsConsent = 'pr-preview';
+						return;
+					}
+					var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+					if (dnt === '1' || dnt === 'yes' || dnt === 1) {
+						window.__ohbmAnalyticsConsent = 'blocked-dnt';
+						return;
+					}
+					if (navigator.globalPrivacyControl === true) {
+						window.__ohbmAnalyticsConsent = 'blocked-gpc';
+						return;
+					}
+					var saved = null;
+					try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+					if (saved === 'granted') state = 'granted';
+					else if (saved === 'denied') state = 'denied';
+					else state = 'pending';
 				} catch (e) {
+					window.__ohbmAnalyticsConsent = 'blocked-error';
 					return;
 				}
+				window.__ohbmAnalyticsConsent = state;
+
+				window.dataLayer = window.dataLayer || [];
+				function gtag() { window.dataLayer.push(arguments); }
+				window.gtag = gtag;
+				// Google Consent Mode v2 default — set BEFORE the
+				// library loads so the initial pageview respects it.
+				gtag('consent', 'default', {
+					analytics_storage: state === 'granted' ? 'granted' : 'denied',
+					ad_storage: 'denied',
+					ad_user_data: 'denied',
+					ad_personalization: 'denied',
+					wait_for_update: 500
+				});
+				gtag('js', new Date());
+				gtag('config', 'G-5LQ42EDHPF', { anonymize_ip: true });
+
 				var s = document.createElement('script');
 				s.async = true;
 				s.src = 'https://www.googletagmanager.com/gtag/js?id=G-5LQ42EDHPF';
 				document.head.appendChild(s);
-				window.dataLayer = window.dataLayer || [];
-				function gtag() { window.dataLayer.push(arguments); }
-				window.gtag = gtag;
-				gtag('js', new Date());
-				gtag('config', 'G-5LQ42EDHPF');
 			})();
 		</script>
-		<link href="/pr-45/ohbm2026/_app/immutable/entry/start.B7l3pl4D.js" rel="modulepreload">
-		<link href="/pr-45/ohbm2026/_app/immutable/chunks/DUMBaAxl.js" rel="modulepreload">
+		<link href="/pr-45/ohbm2026/_app/immutable/entry/start.CinvWRGf.js" rel="modulepreload">
+		<link href="/pr-45/ohbm2026/_app/immutable/chunks/BVC_NdTF.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/B1nrzDZt.js" rel="modulepreload">
-		<link href="/pr-45/ohbm2026/_app/immutable/chunks/Bncu9upV.js" rel="modulepreload">
-		<link href="/pr-45/ohbm2026/_app/immutable/entry/app.YauQJUgR.js" rel="modulepreload">
+		<link href="/pr-45/ohbm2026/_app/immutable/chunks/BHIOQOpq.js" rel="modulepreload">
+		<link href="/pr-45/ohbm2026/_app/immutable/entry/app.DRJ8cEPF.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/BcOfMrCR.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/B_zOW6w2.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/BmZDk6VL.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/BN2SbDcR.js" rel="modulepreload">
-		<link href="/pr-45/ohbm2026/_app/immutable/nodes/0.B6Q2kNs8.js" rel="modulepreload">
+		<link href="/pr-45/ohbm2026/_app/immutable/nodes/0.B6l60lUm.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/Y5f5Gvaa.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/BlBQ8KBy.js" rel="modulepreload">
-		<link href="/pr-45/ohbm2026/_app/immutable/chunks/rlxi2XEE.js" rel="modulepreload">
-		<link href="/pr-45/ohbm2026/_app/immutable/chunks/CskuTx5k.js" rel="modulepreload">
+		<link href="/pr-45/ohbm2026/_app/immutable/chunks/C2c_rGYb.js" rel="modulepreload">
+		<link href="/pr-45/ohbm2026/_app/immutable/chunks/vCBahGgN.js" rel="modulepreload">
 		<link href="/pr-45/ohbm2026/_app/immutable/chunks/DPXedgNA.js" rel="modulepreload">
 		
-		<link href="/pr-45/ohbm2026/_app/immutable/assets/0.CYWQR7h5.css" rel="stylesheet">
+		<link href="/pr-45/ohbm2026/_app/immutable/assets/0.MUBLMZUN.css" rel="stylesheet">
 	</head>
 	<body data-sveltekit-preload-data="hover">
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_hswdis = {
+					__sveltekit_yvf3i3 = {
 						base: "/pr-45/ohbm2026",
 						assets: "/pr-45/ohbm2026"
 					};
@@ -83,8 +133,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/pr-45/ohbm2026/_app/immutable/entry/start.B7l3pl4D.js"),
-						import("/pr-45/ohbm2026/_app/immutable/entry/app.YauQJUgR.js")
+						import("/pr-45/ohbm2026/_app/immutable/entry/start.CinvWRGf.js"),
+						import("/pr-45/ohbm2026/_app/immutable/entry/app.DRJ8cEPF.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});

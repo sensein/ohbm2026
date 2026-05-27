@@ -30,51 +30,101 @@
 			})();
 		</script>
 		<!-- Google tag (gtag.js) — measurement id G-5LQ42EDHPF.
-		     Gated to skip PR-preview deployments so we don't pollute the
-		     production analytics with bot + reviewer traffic. PR previews
-		     live under /pr-<N>/ on the same gh-pages host; production is
-		     the bare-root + /ohbm2026/ + /neuroscape/ subpaths. -->
+		     Boot decision tree, evaluated synchronously here so the
+		     banner that depends on this state doesn't flash and gtag
+		     itself is initialised before any pageview is recorded:
+
+		       1. PR-preview path (/pr-<N>/) → skip entirely. We do not
+		          want reviewer + bot traffic on preview deployments
+		          polluting the production analytics property.
+		       2. DNT (`navigator.doNotTrack === '1'` / `'yes'`) OR GPC
+		          (`navigator.globalPrivacyControl === true`) → skip
+		          entirely. The user has signalled non-consent at the
+		          browser level; we respect that without asking.
+		       3. Saved consent in localStorage → use it: load gtag with
+		          analytics_storage 'granted' on accept, 'denied' on
+		          decline (declined users keep gtag loaded so a future
+		          consent-update can re-enable it without a page reload).
+		       4. No saved choice → 'pending'. Load gtag with consent
+		          defaulted to denied; the ConsentBanner Svelte component
+		          will mount on hydration and call gtag('consent',
+		          'update', …) once the user picks.
+
+		     `window.__ohbmAnalyticsConsent` is the shared variable the
+		     banner reads to decide whether to render. -->
 		<script>
 			(function () {
+				var STORAGE_KEY = 'ohbm2026.analytics.consent.v1';
+				var state = 'no-analytics';
 				try {
 					var p = window.location.pathname || '';
-					if (/^\/pr-\d+\//.test(p)) return;
+					if (/^\/pr-\d+(\/|$)/.test(p)) {
+						window.__ohbmAnalyticsConsent = 'pr-preview';
+						return;
+					}
+					var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+					if (dnt === '1' || dnt === 'yes' || dnt === 1) {
+						window.__ohbmAnalyticsConsent = 'blocked-dnt';
+						return;
+					}
+					if (navigator.globalPrivacyControl === true) {
+						window.__ohbmAnalyticsConsent = 'blocked-gpc';
+						return;
+					}
+					var saved = null;
+					try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+					if (saved === 'granted') state = 'granted';
+					else if (saved === 'denied') state = 'denied';
+					else state = 'pending';
 				} catch (e) {
+					window.__ohbmAnalyticsConsent = 'blocked-error';
 					return;
 				}
+				window.__ohbmAnalyticsConsent = state;
+
+				window.dataLayer = window.dataLayer || [];
+				function gtag() { window.dataLayer.push(arguments); }
+				window.gtag = gtag;
+				// Google Consent Mode v2 default — set BEFORE the
+				// library loads so the initial pageview respects it.
+				gtag('consent', 'default', {
+					analytics_storage: state === 'granted' ? 'granted' : 'denied',
+					ad_storage: 'denied',
+					ad_user_data: 'denied',
+					ad_personalization: 'denied',
+					wait_for_update: 500
+				});
+				gtag('js', new Date());
+				gtag('config', 'G-5LQ42EDHPF', { anonymize_ip: true });
+
 				var s = document.createElement('script');
 				s.async = true;
 				s.src = 'https://www.googletagmanager.com/gtag/js?id=G-5LQ42EDHPF';
 				document.head.appendChild(s);
-				window.dataLayer = window.dataLayer || [];
-				function gtag() { window.dataLayer.push(arguments); }
-				window.gtag = gtag;
-				gtag('js', new Date());
-				gtag('config', 'G-5LQ42EDHPF');
 			})();
 		</script>
-		<link href="/pr-45/neuroscape/_app/immutable/entry/start.CiYyYVQr.js" rel="modulepreload">
-		<link href="/pr-45/neuroscape/_app/immutable/chunks/QkEtalNV.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/entry/start.wBwXTMbu.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/chunks/DTH0bUtI.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/B1nrzDZt.js" rel="modulepreload">
-		<link href="/pr-45/neuroscape/_app/immutable/chunks/CrpdYXBq.js" rel="modulepreload">
-		<link href="/pr-45/neuroscape/_app/immutable/entry/app.D7dypWHp.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/chunks/BvFy4Jqv.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/entry/app.C-Kn53tb.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/BGNIRW2a.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/B_zOW6w2.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/BmZDk6VL.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/BN2SbDcR.js" rel="modulepreload">
-		<link href="/pr-45/neuroscape/_app/immutable/nodes/0.De5Vw9si.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/nodes/0.BA6ahqOp.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/BNvtD8eR.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/BlBQ8KBy.js" rel="modulepreload">
-		<link href="/pr-45/neuroscape/_app/immutable/chunks/BHUkj11o.js" rel="modulepreload">
-		<link href="/pr-45/neuroscape/_app/immutable/chunks/BzIZD9oI.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/chunks/wSXm7tHs.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/chunks/16GsdmcP.js" rel="modulepreload">
 		<link href="/pr-45/neuroscape/_app/immutable/chunks/DPXedgNA.js" rel="modulepreload">
-		<link href="/pr-45/neuroscape/_app/immutable/nodes/3.DRii2B30.js" rel="modulepreload">
+		<link href="/pr-45/neuroscape/_app/immutable/nodes/3.6Ua7oZIy.js" rel="modulepreload">
 		<!--12qhfyh--><!--[1--><!--]--><!----><!--cwls5q--><!--[1--><!--]--><!----><title>About · NeuroScape PubMed Atlas</title>
-		<link href="/pr-45/neuroscape/_app/immutable/assets/0.Ox8fqGvw.css" rel="stylesheet">
+		<link href="/pr-45/neuroscape/_app/immutable/assets/0.N3ehhmQO.css" rel="stylesheet">
 		<link href="/pr-45/neuroscape/_app/immutable/assets/3.DGBuUKd2.css" rel="stylesheet">
 	</head>
 	<body data-sveltekit-preload-data="hover">
-		<div style="display: contents"><!--[--><!--[0--><!--[--><div class="shell svelte-12qhfyh"><header data-testid="site-header" data-mode="neuroscape" class="svelte-a8kxe2"><div class="header-row svelte-a8kxe2"><div class="header-text svelte-a8kxe2"><h1 class="svelte-a8kxe2"><!--[0--><a class="home-link svelte-a8kxe2" href="/pr-45" rel="external" title="Abstract Atlas — cross-conference landing" aria-label="Abstract Atlas — cross-conference landing" data-testid="header-home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5L12 2l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg></a><!--]--> <span class="title-text svelte-a8kxe2">NeuroScape PubMed Atlas</span> <span class="beta-tag svelte-a8kxe2">beta</span></h1> <p class="subtitle svelte-a8kxe2">Browse, search, and explore the NeuroScape PubMed 1999–2023 corpus</p></div> <div class="header-controls svelte-a8kxe2"><button type="button" class="header-link header-tour svelte-a8kxe2" title="Take the guided tour" data-testid="header-tour-button">Tour</button> <a class="header-link svelte-a8kxe2" href="/pr-45/neuroscape/about/" data-testid="header-about-link">About</a> <button type="button" class="header-cart svelte-a8kxe2" aria-label="Open saved list (0 items)" title="Your saved list is empty — click any 🛒 to save an item" data-testid="header-cart">🛒 0</button> <a class="header-feedback svelte-a8kxe2" target="_blank" rel="noopener noreferrer" title="Report a bug or request a feature" aria-label="Report a bug or request a feature on GitHub" data-testid="header-feedback" href="https://github.com/sensein/ohbm2026/issues/new?labels=feedback&amp;title=%5Bfeedback%5D+&amp;body=%3C%21--+Replace+this+template+with+your+bug+report+or+feature+request.+--%3E%0A%0A%23%23+What+were+you+doing%3F%0A%0A%23%23+What+happened%3F%0A%0A%23%23+What+did+you+expect%3F%0A%0A---%0A%0A%23%23+Context+%28auto-filled%3B+please+leave+intact%29%0A%0A-+**page**%3A+http%3A%2F%2Fsveltekit-prerender%2Fpr-45%2Fneuroscape%2Fabout%2F%0A-+**user-agent**%3A+%0A%0A%23%23%23+deploy+build_info%0A-+code_revision_short%3A+%6098f5d46%60%0A-+code_revision%3A+%6098f5d46028e1f57a11d3694021bb160d666a4f3a%60%0A-+built_at%3A+2026-05-27T04%3A49%3A31Z"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></a> <button type="button" class="theme-toggle svelte-1cmi4dh" aria-label="Theme: auto (currently light)" title="Theme: auto (currently light)" data-testid="theme-toggle" data-theme-choice="auto"><span class="icon svelte-1cmi4dh" aria-hidden="true">◐</span> <span class="label-text svelte-1cmi4dh">auto</span></button><!----></div></div></header><!----> <!--[-1--><!--]--> <main class="svelte-12qhfyh"><!--[--><!--[--><div class="about-page svelte-cwls5q"><nav class="back svelte-cwls5q"><a href="/pr-45/neuroscape/" class="svelte-cwls5q">← back to atlas</a></nav> <header class="svelte-cwls5q"><!--[1--><h1 class="svelte-cwls5q">About the NeuroScape PubMed Atlas</h1><!--]--> <p class="lead svelte-cwls5q">A search-and-browse interface for every accepted OHBM 2026 abstract. Each abstract
+		<div style="display: contents"><!--[--><!--[0--><!--[--><div class="shell svelte-12qhfyh"><header data-testid="site-header" data-mode="neuroscape" class="svelte-a8kxe2"><div class="header-row svelte-a8kxe2"><div class="header-text svelte-a8kxe2"><h1 class="svelte-a8kxe2"><!--[0--><a class="home-link svelte-a8kxe2" href="/pr-45" rel="external" title="Abstract Atlas — cross-conference landing" aria-label="Abstract Atlas — cross-conference landing" data-testid="header-home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5L12 2l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg></a><!--]--> <span class="title-text svelte-a8kxe2">NeuroScape PubMed Atlas</span> <span class="beta-tag svelte-a8kxe2">beta</span></h1> <p class="subtitle svelte-a8kxe2">Browse, search, and explore the NeuroScape PubMed 1999–2023 corpus</p></div> <div class="header-controls svelte-a8kxe2"><button type="button" class="header-link header-tour svelte-a8kxe2" title="Take the guided tour" data-testid="header-tour-button">Tour</button> <a class="header-link svelte-a8kxe2" href="/pr-45/neuroscape/about/" data-testid="header-about-link">About</a> <button type="button" class="header-cart svelte-a8kxe2" aria-label="Open saved list (0 items)" title="Your saved list is empty — click any 🛒 to save an item" data-testid="header-cart">🛒 0</button> <a class="header-feedback svelte-a8kxe2" target="_blank" rel="noopener noreferrer" title="Report a bug or request a feature" aria-label="Report a bug or request a feature on GitHub" data-testid="header-feedback" href="https://github.com/sensein/ohbm2026/issues/new?labels=feedback&amp;title=%5Bfeedback%5D+&amp;body=%3C%21--+Replace+this+template+with+your+bug+report+or+feature+request.+--%3E%0A%0A%23%23+What+were+you+doing%3F%0A%0A%23%23+What+happened%3F%0A%0A%23%23+What+did+you+expect%3F%0A%0A---%0A%0A%23%23+Context+%28auto-filled%3B+please+leave+intact%29%0A%0A-+**page**%3A+http%3A%2F%2Fsveltekit-prerender%2Fpr-45%2Fneuroscape%2Fabout%2F%0A-+**user-agent**%3A+%0A%0A%23%23%23+deploy+build_info%0A-+code_revision_short%3A+%60cd478b3%60%0A-+code_revision%3A+%60cd478b34e17cfc410957c167b53df717142a15cb%60%0A-+built_at%3A+2026-05-27T04%3A54%3A56Z"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></a> <button type="button" class="theme-toggle svelte-1cmi4dh" aria-label="Theme: auto (currently light)" title="Theme: auto (currently light)" data-testid="theme-toggle" data-theme-choice="auto"><span class="icon svelte-1cmi4dh" aria-hidden="true">◐</span> <span class="label-text svelte-1cmi4dh">auto</span></button><!----></div></div></header><!----> <!--[-1--><!--]--> <main class="svelte-12qhfyh"><!--[--><!--[--><div class="about-page svelte-cwls5q"><nav class="back svelte-cwls5q"><a href="/pr-45/neuroscape/" class="svelte-cwls5q">← back to atlas</a></nav> <header class="svelte-cwls5q"><!--[1--><h1 class="svelte-cwls5q">About the NeuroScape PubMed Atlas</h1><!--]--> <p class="lead svelte-cwls5q">A search-and-browse interface for every accepted OHBM 2026 abstract. Each abstract
 			is the submitter's own text; everything else on the site — clusters, related-abstract
 			suggestions, figure interpretations, claim extractions — is computed from those
 			abstracts by an automated pipeline. The pipeline is open-source and reproducible.</p></header> <section class="overview svelte-cwls5q"><!--[1--><p class="svelte-cwls5q">A reduced-functionality browse of the NeuroScape PubMed 1999–2023
@@ -92,11 +142,11 @@
 			sibling subsite, with the same UMAP and clusters but no OHBM overlay. All
 			three subsites — Abstract Atlas (root), OHBM 2026 (this site), and
 			NeuroScape PubMed — are independently rebuildable; the Abstract Atlas
-			landing is the only hub that knows about all of them.</p></section> <!--[--><section class="stage svelte-cwls5q" data-testid="about-stage-fetch"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 1 — Fetch &amp; normalise (Oxford Abstracts → JSON)</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-enrich"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 2 — AI enrichment (figures + claims + references)</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-embed"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 3 — Embeddings (5 models × per-section)</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-analyse"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 4 — Communities + clusters + UMAP</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-ui"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 6 — This site</span></button> <!--[-1--><!--]--></section><!--]--></div><!--]--><!--]--></main> <!----> <!--[-1--><!--]--><!----> <footer class="build-info svelte-b4k9dg" data-testid="build-info-footer"><!--[0--><button type="button" aria-expanded="false" aria-controls="build-info-detail" class="summary svelte-b4k9dg"><span class="label svelte-b4k9dg">build</span> <code data-testid="build-info-short-sha" class="svelte-b4k9dg">98f5d46</code> <!--[0--><span class="sep svelte-b4k9dg">·</span> <time datetime="2026-05-27T04:49:31Z">2026-05-27T04:49:31Z</time><!--]--> <!--[-1--><!--]--> <!--[-1--><!--]--></button> <!--[-1--><!--]--><!--]--></footer><!----></div><!--]--><!--]--> <!--[-1--><!--]--><!--]-->
+			landing is the only hub that knows about all of them.</p></section> <!--[--><section class="stage svelte-cwls5q" data-testid="about-stage-fetch"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 1 — Fetch &amp; normalise (Oxford Abstracts → JSON)</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-enrich"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 2 — AI enrichment (figures + claims + references)</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-embed"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 3 — Embeddings (5 models × per-section)</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-analyse"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 4 — Communities + clusters + UMAP</span></button> <!--[-1--><!--]--></section><section class="stage svelte-cwls5q" data-testid="about-stage-ui"><button type="button" class="stage-header svelte-cwls5q" aria-expanded="false"><span class="caret svelte-cwls5q">▸</span> <span class="stage-label svelte-cwls5q">Stage 6 — This site</span></button> <!--[-1--><!--]--></section><!--]--></div><!--]--><!--]--></main> <!----> <!--[-1--><!--]--><!----> <!--[-1--><!--]--><!----> <footer class="build-info svelte-b4k9dg" data-testid="build-info-footer"><!--[0--><button type="button" aria-expanded="false" aria-controls="build-info-detail" class="summary svelte-b4k9dg"><span class="label svelte-b4k9dg">build</span> <code data-testid="build-info-short-sha" class="svelte-b4k9dg">cd478b3</code> <!--[0--><span class="sep svelte-b4k9dg">·</span> <time datetime="2026-05-27T04:54:56Z">2026-05-27T04:54:56Z</time><!--]--> <!--[-1--><!--]--> <!--[-1--><!--]--></button> <!--[-1--><!--]--><!--]--></footer><!----></div><!--]--><!--]--> <!--[-1--><!--]--><!--]-->
 			
 			<script>
 				{
-					__sveltekit_2aypay = {
+					__sveltekit_1m2u4db = {
 						base: "/pr-45/neuroscape",
 						assets: "/pr-45/neuroscape"
 					};
@@ -104,8 +154,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/pr-45/neuroscape/_app/immutable/entry/start.CiYyYVQr.js"),
-						import("/pr-45/neuroscape/_app/immutable/entry/app.D7dypWHp.js")
+						import("/pr-45/neuroscape/_app/immutable/entry/start.wBwXTMbu.js"),
+						import("/pr-45/neuroscape/_app/immutable/entry/app.C-Kn53tb.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element, {
 							node_ids: [0, 3],
