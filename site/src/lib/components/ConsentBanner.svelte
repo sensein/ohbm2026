@@ -91,6 +91,11 @@
 {/if}
 
 <style>
+	/* Use the project's actual theme variables (defined in
+	   site/src/app.css for both [data-theme="light"] and dark): the
+	   prior fallback names (--bg-card) were undefined, so the
+	   hardcoded #fff fallback fired on every theme and produced an
+	   unreadable light-on-light banner in dark mode. */
 	.consent-banner {
 		position: fixed;
 		left: 1rem;
@@ -105,10 +110,10 @@
 		flex-wrap: wrap;
 		padding: 0.85rem 1rem;
 		border-radius: 8px;
-		background: var(--bg-card, #fff);
-		color: var(--text, #111);
-		border: 1px solid var(--border, #d0d0d0);
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+		background: var(--bg-elevated);
+		color: var(--text);
+		border: 1px solid var(--border-strong);
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 		z-index: 1200;
 		font-size: 0.9rem;
 		line-height: 1.4;
@@ -135,21 +140,22 @@
 		border: 1px solid transparent;
 	}
 	.consent-btn.decline {
-		color: var(--text-muted, #555);
-		border-color: var(--border, #d0d0d0);
+		color: var(--text);
+		border-color: var(--border-strong);
+		background: transparent;
 	}
 	.consent-btn.decline:hover {
-		background: var(--bg-subtle, #f3f3f3);
+		background: var(--bg-subtle);
 	}
 	.consent-btn.accept {
-		background: var(--accent, #2563eb);
-		color: var(--accent-text, #fff);
+		background: var(--accent);
+		color: var(--accent-text);
 	}
 	.consent-btn.accept:hover {
-		filter: brightness(1.05);
+		filter: brightness(1.08);
 	}
 	.consent-btn:focus-visible {
-		outline: 2px solid var(--accent, #2563eb);
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 </style>
