@@ -22,11 +22,25 @@
  */
 import { test, expect } from '@playwright/test';
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:4173';
+// PLAYWRIGHT_BASE_URL points at the `/ohbm2026/` home (per
+// site/playwright.config.ts). The /neuroscape/ subsite is a sibling
+// under the same per-deploy prefix; derive its URL by swapping the
+// trailing `/ohbm2026/` segment for `/neuroscape/`. Fallback to a
+// local-preview default when no env var is set.
+function neuroscapeUrl(): string {
+	const raw = process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4173/ohbm2026/';
+	const base = raw.endsWith('/') ? raw : `${raw}/`;
+	return base.replace(/\/ohbm2026\/$/, '/neuroscape/');
+}
 
 test.describe('US1: /neuroscape/ semantic search', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto(`${BASE}/neuroscape/`, { waitUntil: 'networkidle' });
+		// `networkidle` is unreliable on the 461k-article corpus (the
+		// parquet streams continue past the visible-ready point);
+		// `domcontentloaded` + an explicit wait for the SearchBar
+		// gets us to a deterministic ready state without timing out.
+		await page.goto(neuroscapeUrl(), { waitUntil: 'domcontentloaded' });
+		await page.getByTestId('search-input').waitFor({ state: 'visible', timeout: 30_000 });
 	});
 
 	test('shared SearchBar is mounted on /neuroscape/ (FR-025)', async ({ page }) => {
