@@ -35,12 +35,28 @@ function neuroscapeUrl(): string {
 
 test.describe('US1: /neuroscape/ semantic search', () => {
 	test.beforeEach(async ({ page }) => {
+		// CI's runner has slow network; the 461k-article parquet load
+		// can take 60+s. Default test timeout is 30s — extend per-test
+		// in the suite so the streaming load + filter recomputation
+		// both fit.
+		test.setTimeout(180_000);
 		// `networkidle` is unreliable on the 461k-article corpus (the
 		// parquet streams continue past the visible-ready point);
 		// `domcontentloaded` + an explicit wait for the SearchBar
 		// gets us to a deterministic ready state without timing out.
 		await page.goto(neuroscapeUrl(), { waitUntil: 'domcontentloaded' });
 		await page.getByTestId('search-input').waitFor({ state: 'visible', timeout: 30_000 });
+		// Wait for the result list to populate from the streaming
+		// parquet BEFORE the per-test interactions start. Default
+		// no-query state shows ALL articles (sorted by year), paginated
+		// to ~100 visible rows. If the parquet hasn't loaded, count
+		// stays at 0 — that's the precondition we're checking.
+		await expect
+			.poll(() => page.getByTestId('neuroscape-result-row').count(), {
+				timeout: 120_000,
+				intervals: [1_000, 2_000, 3_000]
+			})
+			.toBeGreaterThan(0);
 	});
 
 	test('shared SearchBar is mounted on /neuroscape/ (FR-025)', async ({ page }) => {
