@@ -46,3 +46,7 @@ Object.defineProperty(window, 'sessionStorage', {
 	writable: true,
 	configurable: true
 });
+
+// @testing-library/jest-dom matchers — `toBeInTheDocument`, `toHaveAttribute`,
+// etc. Pulled in via setup so individual test files don't repeat the import.
+import '@testing-library/jest-dom/vitest';

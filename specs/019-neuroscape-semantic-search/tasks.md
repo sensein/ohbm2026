@@ -28,9 +28,9 @@ Single-project layout per plan.md §Structure Decision. Python under `src/ohbm20
 
 **Purpose**: Verify dev env + new cache root before any code lands.
 
-- [ ] T001 Verify `.venv/bin/python` exists + the `embeddings` extra is installed: `uv pip install --python .venv/bin/python ".[embeddings]"` (sentence-transformers comes with this extra; no new top-level dep)
-- [ ] T002 [P] Add the new cache root `data/cache/atlas-vectors/` to the existing `data/` gitignore rule — confirm `data/` already covers it via `git check-ignore data/cache/atlas-vectors/` (no .gitignore edit expected; CA-005 enforcement)
-- [ ] T003 [P] Confirm `site/` has no new browser deps: `pnpm --dir site install` succeeds without lock-file changes (the Xenova transformers + hyparquet libs already used by /ohbm2026/ are sufficient)
+- [X] T001 Verify `.venv/bin/python` exists + the `embeddings` extra is installed: `uv pip install --python .venv/bin/python ".[embeddings]"` (sentence-transformers comes with this extra; no new top-level dep) — DONE: sentence-transformers 5.2.3 + joblib 1.5.3 present
+- [X] T002 [P] Add the new cache root `data/cache/atlas-vectors/` to the existing `data/` gitignore rule — confirm `data/` already covers it via `git check-ignore data/cache/atlas-vectors/` (no .gitignore edit expected; CA-005 enforcement) — DONE: top-level `data/` rule covers it
+- [X] T003 [P] Confirm `site/` has no new browser deps: `pnpm --dir site install` succeeds without lock-file changes (the Xenova transformers + hyparquet libs already used by /ohbm2026/ are sufficient) — DONE: pnpm install clean
 
 ---
 
@@ -40,11 +40,11 @@ Single-project layout per plan.md §Structure Decision. Python under `src/ohbm20
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T004 [P] Add `Stage19SemanticError` base + `EmbeddingComputeError` + `VectorsParquetWriteError` + `VectorsManifestDriftError` subclasses to `src/ohbm2026/exceptions.py` (mirror the Stage15Error subtree pattern; extend Stage15Error so existing Stage-15 catchers see Stage-19 errors too)
-- [ ] T005 [P] Add typed-exception unit test in `tests/test_atlas_exceptions.py`: every new Stage19SemanticError subclass surfaces (path, reason) kwargs identically to UmapCacheError. Test MUST run + pass after T004.
-- [ ] T006 Parameterise `site/src/lib/components/SearchBar.svelte` so the `id:` autocomplete data source + the placeholder text are corpus-driven props (default values preserve existing `/ohbm2026/` behaviour byte-identically — FR-016 / SC-007 gate)
-- [ ] T007 [P] Vitest unit test in `site/src/tests/unit/searchbar_corpus_prop.test.ts`: SearchBar mounted with `corpus="ohbm2026"` produces identical DOM + behaviour to the un-parameterised version (regression gate)
-- [ ] T008 [P] Add `ParsedQuery` type export in `site/src/lib/filter.ts` (alias for the existing parser's return shape) so the ranker contracts at `contracts/search-ranking-pipeline.md` can import it without a fresh type
+- [X] T004 [P] Add `Stage19SemanticError` base + `EmbeddingComputeError` + `VectorsParquetWriteError` + `VectorsManifestDriftError` subclasses to `src/ohbm2026/exceptions.py` (mirror the Stage15Error subtree pattern; extend Stage15Error so existing Stage-15 catchers see Stage-19 errors too)
+- [X] T005 [P] Add typed-exception unit test in `tests/test_atlas_exceptions.py`: every new Stage19SemanticError subclass surfaces (path, reason) kwargs identically to UmapCacheError. Test MUST run + pass after T004. — DONE: 13 tests pass (was 10)
+- [X] T006 Parameterise `site/src/lib/components/SearchBar.svelte` so the `id:` autocomplete data source + the placeholder text are corpus-driven props (default values preserve existing `/ohbm2026/` behaviour byte-identically — FR-016 / SC-007 gate) — DONE: corpus + placeholderOverride props added with defaults that preserve OHBM behaviour
+- [X] T007 [P] Vitest unit test in `site/src/tests/unit/searchbar_corpus_prop.test.ts`: SearchBar mounted with `corpus="ohbm2026"` produces identical DOM + behaviour to the un-parameterised version (regression gate) — DONE: 6 tests pass (source-string default check + corpus-agnostic filterSuggestions exercise)
+- [X] T008 [P] Add `ParsedQuery` type export in `site/src/lib/filter.ts` (alias for the existing parser's return shape) so the ranker contracts at `contracts/search-ranking-pipeline.md` can import it without a fresh type — DONE: `ParsedQuery` already exported at filter.ts:179; contract typo `FilterResult` → `LexicalResult` corrected
 
 **Checkpoint**: Foundation ready — user-story phases can now proceed.
 

@@ -53,7 +53,7 @@ export interface RankerHooks {
  *  OR groups, id: terms) needed to filter the semantic candidate
  *  set after the worker returns. Same shape on every surface per
  *  FR-025. */
-import type { ParsedQuery, FilterResult } from '$lib/filter';
+import type { ParsedQuery, LexicalResult } from '$lib/filter';
 
 /** NeuroScape semantic search (called from /neuroscape/'s
  *  NeuroscapeBrowsePanel.svelte). Returns up to `topK` hits ranked
