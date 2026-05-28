@@ -41,9 +41,12 @@ from ohbm2026.exceptions import (
     AtlasLinkCheckError,
     AtlasProvenanceError,
     CrossParquetDriftError,
+    EmbeddingComputeError,
     NeuroScapeInputError,
     OhbmProjectionError,
     UmapFitError,
+    VectorsManifestDriftError,
+    VectorsParquetWriteError,
 )
 
 from .orchestrator import (
@@ -164,6 +167,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-link-check",
         action="store_true",
         help="Skip the build-time link check. DEV ONLY — refused under CI=true.",
+    )
+    # Spec 019 — semantic-index flags.
+    p.add_argument(
+        "--semantic-index",
+        dest="semantic_index",
+        action="store_true",
+        default=True,
+        help="Compute corpus vectors + write neuroscape_vectors.parquet + cluster_centroids table (default ON; spec 019 / contracts/cli-build-atlas-package.md §1).",
+    )
+    p.add_argument(
+        "--no-semantic-index",
+        dest="semantic_index",
+        action="store_false",
+        help="Skip the semantic-index step. neuroscape.parquet is still written but without the cluster_centroids table; neuroscape_vectors.parquet is NOT written.",
+    )
+    p.add_argument(
+        "--semantic-cache-root",
+        type=Path,
+        default=Path("data/cache/atlas-vectors"),
+        help="Per-cluster intermediate cache root (mirrors --umap-cache-root pattern).",
+    )
+    p.add_argument(
+        "--semantic-model-id",
+        default="Xenova/all-MiniLM-L6-v2",
+        help="Embedding model id (production MUST use the default to preserve the matched-pair invariant with the existing /ohbm2026/ semantic worker).",
     )
     return p
 
@@ -360,6 +388,11 @@ _EXIT_CODES: dict[type[BaseException], int] = {
     CrossParquetDriftError: 5,
     AtlasProvenanceError: 6,
     AtlasLinkCheckError: 7,
+    # Spec 019 — semantic-search exit codes per
+    # contracts/cli-build-atlas-package.md §2.
+    EmbeddingComputeError: 8,
+    VectorsParquetWriteError: 9,
+    VectorsManifestDriftError: 10,
 }
 
 
@@ -430,6 +463,9 @@ def main(argv: list[str] | None = None) -> int:
             ohbm2026_state_key=ohbm2026_state_key,
             output_root=args.output_root,
             umap_cache_root=args.umap_cache_root,
+            semantic_index_enabled=args.semantic_index,
+            semantic_cache_root=args.semantic_cache_root,
+            semantic_model_id=args.semantic_model_id,
             voyage_bundle_id=args.voyage_bundle,
             decimated_backdrop_size=args.decimated_backdrop_size,
             neighbors_k=args.neighbors_k,

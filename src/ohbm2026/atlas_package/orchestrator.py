@@ -109,6 +109,12 @@ class AtlasBuildConfig:
     # The provenance JSON always records wall-clock timestamps
     # separately so the audit trail is complete regardless of pin.
     pinned_built_at: str | None = None
+    # Spec 019 — semantic-search index step. Default False to preserve
+    # existing Stage-15 test surface; the CLI defaults to True (per
+    # contracts/cli-build-atlas-package.md §1) when run by operators.
+    semantic_index_enabled: bool = False
+    semantic_cache_root: Path | None = None
+    semantic_model_id: str = "Xenova/all-MiniLM-L6-v2"
 
 
 def _state_key(parts: Sequence[str]) -> str:
@@ -269,12 +275,97 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
     out_root.mkdir(parents=True, exist_ok=True)
     neuroscape_path = out_root / "neuroscape.parquet"
     atlas_path = out_root / "atlas.parquet"
+    vectors_path = out_root / "neuroscape_vectors.parquet"
 
     # Use the pinned timestamp (test path) OR wall clock (production)
     # in the parquet manifests so byte-identity holds across rebuilds
     # when the caller pins.
     manifest_started = cfg.pinned_built_at or started
     manifest_finished = cfg.pinned_built_at or _utcnow()
+
+    # Spec 019 — semantic-index step (optional; default-off in the
+    # AtlasBuildConfig dataclass so existing Stage-15 tests are
+    # unaffected). When enabled, computes corpus MiniLM vectors,
+    # cluster centroids, and emits neuroscape_vectors.parquet
+    # alongside neuroscape.parquet. The semantic_index_provenance
+    # block is folded into the final provenance JSON below (T022).
+    semantic_index_provenance: dict[str, Any] | None = None
+    cluster_centroids: dict[int, np.ndarray] = {}
+    if cfg.semantic_index_enabled:
+        from . import semantic_index, vectors_compute
+
+        sk = vectors_compute.compute_state_key(
+            article_set_hash=neuroscape_state_key,
+            model_id=cfg.semantic_model_id,
+        )
+        cache_root = cfg.semantic_cache_root or (Path("data") / "cache" / "atlas-vectors")
+        vectors_result = vectors_compute.compute_cluster_vectors(
+            article_titles=[a.title for a in articles],
+            pubmed_ids=[a.pubmed_id for a in articles],
+            cluster_ids=[a.cluster_id for a in articles],
+            state_key=sk,
+            cache_root=cache_root,
+            model_id=cfg.semantic_model_id,
+        )
+        # Compute cluster centroids from dequantised INT8 vectors so
+        # the float32 centroids in neuroscape.parquet are derivable
+        # from the bytes in neuroscape_vectors.parquet (INV-001 +
+        # data-model.md §1 build-side invariant).
+        for cv in vectors_result.clusters:
+            deq = cv.vectors_int8.astype(np.float32) / max(vectors_result.scale, 1e-12)
+            mean = deq.mean(axis=0)
+            n = float(np.linalg.norm(mean))
+            cluster_centroids[cv.cluster_id] = (mean / (n if n != 0.0 else 1.0)).astype(np.float32)
+        # Flatten the per-cluster vectors back to a single corpus-wide
+        # arrangement for the semantic-index parquet writer.
+        all_cluster_ids = np.concatenate(
+            [np.full(cv.pubmed_ids.shape[0], cv.cluster_id, dtype=np.int16) for cv in vectors_result.clusters]
+        )
+        all_pubmed_ids = np.concatenate([cv.pubmed_ids for cv in vectors_result.clusters])
+        all_vectors = np.concatenate([cv.vectors_int8 for cv in vectors_result.clusters], axis=0)
+        vectors_manifest = {
+            "schema_version": "semantic_vectors.v1",
+            "corpus": "neuroscape",
+            "state_key": sk,
+            "parent_state_key": neuroscape_state_key,
+            "code_revision": cfg.code_revision,
+            "command_line": cfg.command_line,
+            "seed": cfg.seed,
+            "model_id": cfg.semantic_model_id,
+            "model_sha256": vectors_result.model_sha256,
+            "vector_dim": vectors_compute.VECTOR_DIM,
+            "quantization": "int8-global-scale",
+            "scale": vectors_result.scale,
+            "max_abs_original": vectors_result.max_abs_original,
+            "n_vectors": int(all_pubmed_ids.shape[0]),
+            "cluster_count": len(vectors_result.clusters),
+            "row_group_size": semantic_index.ROW_GROUP_SIZE,
+            "build_started_utc": manifest_started,
+            "build_finished_utc": manifest_finished,
+        }
+        semantic_index.write_neuroscape_vectors_parquet(
+            out_path=vectors_path,
+            cluster_ids=all_cluster_ids,
+            pubmed_ids=all_pubmed_ids,
+            vectors=all_vectors,
+            expected_pubmed_id_set=[a.pubmed_id for a in articles],
+            manifest=vectors_manifest,
+        )
+        semantic_index_provenance = {
+            "enabled": True,
+            "state_key": sk,
+            "model_id": cfg.semantic_model_id,
+            "model_sha256": vectors_result.model_sha256,
+            "vector_dim": vectors_compute.VECTOR_DIM,
+            "quantization": "int8-global-scale",
+            "scale": vectors_result.scale,
+            "max_abs_original": vectors_result.max_abs_original,
+            "n_neuroscape_vectors": int(all_pubmed_ids.shape[0]),
+            "n_ohbm_vectors": 0,  # populated when US4 lands
+            "cluster_count": len(vectors_result.clusters),
+            "cache_hits": vectors_result.cache_hits,
+            "cache_misses": vectors_result.cache_misses,
+        }
 
     neuroscape_build_info = {
         "state_key": neuroscape_state_key,
@@ -304,6 +395,7 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
         knn=knn,
         titles_index_bin=cfg.titles_index_bin,
         titles_index_meta=titles_meta,
+        cluster_centroids=cluster_centroids if cluster_centroids else None,
     )
 
     atlas_build_info = {
@@ -404,5 +496,10 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
             "ohbm2026_state_key": cfg.ohbm2026_state_key,
         },
         "link_check": link_report,
+        # Spec 019 — semantic-index provenance. Populated only when
+        # cfg.semantic_index_enabled is True; absent (None) means the
+        # builder ran with --no-semantic-index and no vectors parquet
+        # was written.
+        "semantic_index": semantic_index_provenance,
     }
     return provenance

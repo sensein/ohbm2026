@@ -163,5 +163,93 @@ class OrchestratorEndToEndTests(unittest.TestCase):
         )
 
 
+# Spec 019 / T012 — semantic-index orchestrator integration --------------
+
+
+class OrchestratorWithSemanticIndexTests(unittest.TestCase):
+    """Verifies cfg.semantic_index_enabled=True produces (a) the new
+    sibling parquet, (b) the cluster_centroids table inside
+    neuroscape.parquet, and (c) the semantic_index provenance block.
+    Mocks the encoder so the test doesn't download the real model."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp_root = Path(self._tmp.name)
+        self.ns_root = write_v101_fixture(self.tmp_root)
+
+    def _synthetic_encoder(self):
+        # Deterministic-by-title float32 encoder; mirrors
+        # tests/test_atlas_vectors_compute.py::_make_encoder.
+        import numpy as np
+
+        def _encode(texts):
+            v = np.empty((len(texts), 384), dtype=np.float32)
+            for i, t in enumerate(texts):
+                rng = np.random.default_rng(seed=hash((7, t)) % (2**32))
+                row = rng.standard_normal(384).astype(np.float32)
+                n = float(np.linalg.norm(row))
+                v[i] = row / (n if n != 0.0 else 1.0)
+            return v
+
+        return _encode
+
+    def test_semantic_index_enabled_emits_sibling_parquet_and_provenance(self) -> None:
+        out = self.tmp_root / "out_sem"
+        cache = self.tmp_root / "cache_sem"
+        cfg = _build_config(self.ns_root, out, cache)
+        # Toggle the new flag; point at a fresh cache root.
+        from dataclasses import replace
+
+        cfg = replace(
+            cfg,
+            semantic_index_enabled=True,
+            semantic_cache_root=self.tmp_root / "atlas-vectors-cache",
+        )
+        # Monkeypatch the vectors_compute encoder to avoid downloading
+        # the real MiniLM model in this test (the synthetic encoder
+        # matches the production shape).
+        from ohbm2026.atlas_package import vectors_compute
+
+        real_compute = vectors_compute.compute_cluster_vectors
+        encoder = self._synthetic_encoder()
+
+        def patched(*args, **kwargs):
+            kwargs["encoder"] = encoder
+            return real_compute(*args, **kwargs)
+
+        vectors_compute.compute_cluster_vectors = patched  # type: ignore[assignment]
+        try:
+            prov = orchestrator.build_atlas_package(cfg)
+        finally:
+            vectors_compute.compute_cluster_vectors = real_compute  # type: ignore[assignment]
+
+        # (a) sibling parquet exists
+        self.assertTrue((out / "neuroscape_vectors.parquet").exists())
+        # (b) cluster_centroids table embedded in neuroscape.parquet
+        import pyarrow.parquet as pq
+
+        ns_table = pq.read_table(out / "neuroscape.parquet")
+        names = ns_table.column("table_name").to_pylist()
+        self.assertIn("cluster_centroids", names)
+        # (c) provenance carries the semantic_index block
+        self.assertIsNotNone(prov.get("semantic_index"))
+        si = prov["semantic_index"]
+        self.assertTrue(si["enabled"])
+        self.assertEqual(si["vector_dim"], 384)
+        self.assertEqual(si["quantization"], "int8-global-scale")
+        self.assertGreater(si["n_neuroscape_vectors"], 0)
+        self.assertGreater(si["cluster_count"], 0)
+
+    def test_semantic_index_disabled_omits_sibling_parquet_and_provenance(self) -> None:
+        out = self.tmp_root / "out_nosem"
+        cache = self.tmp_root / "cache_nosem"
+        cfg = _build_config(self.ns_root, out, cache)
+        # The default-off case preserves the Stage-15 surface.
+        prov = orchestrator.build_atlas_package(cfg)
+        self.assertFalse((out / "neuroscape_vectors.parquet").exists())
+        self.assertIsNone(prov.get("semantic_index"))
+
+
 if __name__ == "__main__":
     unittest.main()
