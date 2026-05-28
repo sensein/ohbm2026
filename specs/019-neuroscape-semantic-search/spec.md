@@ -5,6 +5,18 @@
 **Status**: Draft
 **Input**: User description: "let's do semantic search"
 
+## Clarifications
+
+### Session 2026-05-27
+
+- Q: Should this spec add a cross-conference search surface on atlas-root (`/`) spanning OHBM 2026 + NeuroScape? → A: Yes, as a P2 user story. Result rows reuse the existing OHBM-vs-NeuroScape source identification already shipped in atlas-root's cross-pointers + scatter colouring — no new badge UI is needed. Existing facet filters on atlas-root do NOT change. Semantic search contributes ONLY a distance-based re-ordering of results.
+
+- Q: What ranking strategy should the semantic ranker use, given the cluster + k=20 KNN graph already in `neuroscape.parquet`? → A: **Cluster-routed seeding + KNN-graph expansion** for the NeuroScape corpus, to handle the "query falls between clusters" case that pure cluster routing misses. The pipeline is: (1) embed query, (2) score query against the ~50 cluster centroids and pick the **single closest centroid**, (3) brute-force cosine within that cluster only → **top-3 matches**, (4) walk the existing k=20 KNN graph outward from those top-3 to collect candidates spanning adjacent clusters, (5) re-rank the full candidate set by cosine to query. For the small OHBM 2026 corpus (~3.2k abstracts), brute-force cosine is trivially fast and cluster routing is skipped. Atlas-root cross-conference search runs both pipelines in parallel and merges by cosine score.
+
+- Q: Where do the per-article NeuroScape vectors live, and how does the browser fetch only the rows for a given cluster? → A: **Sibling `neuroscape_vectors.parquet`** loaded lazily via hyparquet's `asyncBufferFromUrl` + HTTP range requests. The file is sorted by `cluster_id` (already a column on the main parquet's articles table), so parquet row-group min/max statistics let the browser predicate-pushdown to `cluster_id == X` and fetch only the byte ranges containing that cluster's rows. NO per-cluster sidecar shard files; NO refactor of the existing eager-load of `neuroscape.parquet`. The vectors parquet carries two columns: `pubmed_id INT64`, `minilm_vector FIXED_LEN_BYTE_ARRAY(384)` (INT8 quantised).
+
+- Q: Should the spec drop per-article vectors entirely and use centroids + KNN only? → A: **No, keep per-article vectors.** The size win (~50 MB → ~80 KB) was tempting, but the no-lexical-overlap case is exactly the use case US1 motivates ("find articles by meaning, not keyword"). Centroids + KNN alone degrade ranking quality precisely on the queries semantic search is meant to help. Per-article vectors stay (delivered via the sibling parquet decided above).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Find neuroscience articles by meaning, not keyword (Priority: P1)
@@ -60,11 +72,14 @@ badge. Toggle off → the result list reverts to the lexical-only set.
 
 ### User Story 2 - Visual feedback while the semantic index loads (Priority: P2)
 
-The semantic index for the full 461k-article corpus is a non-trivial download
-the first time a user enables `✨ Semantic`. The OHBM 2026 corpus's semantic
-sidecar is ~1 MB (3,240 abstracts); NeuroScape's is ~140× that. A first-time
-toggle must give the user a clear "loading semantic search…" affordance so
-the toggle does not appear broken or frozen.
+With the cluster-routed pipeline + sibling-parquet predicate pushdown
+(FR-021), the first FULL semantic query against the 461k-article corpus
+issues 1-3 HTTP range requests for cluster-bounded vector row groups
+(typically ~5–20 MB cold-cache total). That's a non-trivial wait on
+slower connections, and the user MUST get a clear "loading semantic
+search…" affordance so the toggle / submitted query does not appear
+broken or frozen. The OHBM 2026 corpus's semantic index is small
+(~1 MB, ~3.2k abstracts brute-force) and incurs no comparable wait.
 
 **Why this priority**: Without it, the feature feels broken on first use —
 the user enables the toggle, nothing visibly changes for several seconds, and
@@ -97,39 +112,99 @@ the user is allowed to expect semantic hits in the result list.
 
 ---
 
-### User Story 3 - Search-bar continuity with the rest of the site (Priority: P3)
+### User Story 3 - Search-bar continuity across all three surfaces (Priority: P3)
 
 The OHBM 2026 `<SearchBar>` already supports a rich syntax (operators like
 `au:`, `kw:`, `id:`, semantic toggle, `-foo` exclude clauses). The
 `/neuroscape/` subsite currently has a slimmer, cluster-and-year-scoped
-search input only. As semantic ranks land, the search experience between the
-two subsites becomes inconsistent.
+search input; atlas-root has none (US4 adds one). As semantic ranking lands
+on `/neuroscape/` and atlas-root, the cross-surface experience risks
+inconsistency.
 
 **Why this priority**: Stage 15 already committed to slim-by-design for the
 NeuroScape search (the corpus is 100× larger and the field set is
 "title-only"), and the operator syntax wouldn't add value where the only
-indexed field is `title`. So this story is about **shared UX patterns** (`✨`
-toggle visual, badge styling, ranking-tie-break behaviour) rather than full
-search-bar parity. Worth doing because it removes the "this subsite feels
-different" friction visitors report when they cross-navigate via atlas-root
-links.
+indexed field is `title`. Atlas-root cross-conference search inherits the
+same slim model. So this story is about **shared UX patterns** (`✨` toggle
+visual, badge styling, ranking-tie-break behaviour) across all three
+surfaces — `/ohbm2026/`, `/neuroscape/`, and atlas-root — not full
+search-bar parity.
 
-**Independent Test**: Cross-navigate `/ohbm2026/` → `/neuroscape/`, observe
-that the `✨ Semantic` toggle has the same visual position, the same
+**Independent Test**: Cross-navigate `/ohbm2026/` → `/neuroscape/` → atlas-root,
+observe that the `✨ Semantic` toggle has the same visual position, the same
 loading-state pattern, and the same `✨` badge styling on semantic-only
-result rows. Then cross-navigate back to `/ohbm2026/` and confirm nothing in
-that experience changed.
+result rows on every surface that has it. Then cross-navigate back to
+`/ohbm2026/` and confirm nothing in that experience changed.
 
 **Acceptance Scenarios**:
 
 1. **Given** a user familiar with the OHBM 2026 search toggle, **When** they
-   land on `/neuroscape/`, **Then** the `✨ Semantic` toggle is visually and
-   behaviourally consistent: same position relative to the input, same
-   loading affordance, same disabled-while-loading semantics.
+   land on `/neuroscape/` OR atlas-root, **Then** the `✨ Semantic` toggle
+   is visually and behaviourally consistent: same position relative to the
+   input, same loading affordance, same disabled-while-loading semantics.
 
-2. **Given** the user has both subsites open in tabs, **When** they enable
-   semantic search on one, **Then** enabling it on the other does not require
-   re-learning the toggle — the affordance is recognisably the same control.
+2. **Given** the user has all three surfaces open in tabs, **When** they
+   enable semantic search on one, **Then** enabling it on the others does
+   not require re-learning the toggle — the affordance is recognisably the
+   same control.
+
+---
+
+### User Story 4 - Cross-conference search on atlas-root (Priority: P2)
+
+The atlas-root subsite (`abstractatlas.brainkb.org/`) today ships a scatter
+visualisation plus toggle-able OHBM 2026 overlay but has NO search surface.
+A visitor who lands there and wants to find "all articles about
+hippocampal sharp-wave ripples" cannot do so without first navigating into
+one of the two child subsites.
+
+Add a search bar on atlas-root that ranks across BOTH corpora (~3.2k OHBM
+2026 abstracts + ~461k NeuroScape articles) and merges them into a single
+ranked result list. The corpus-source identifier (OHBM vs NeuroScape) is
+already carried by atlas-root's existing `cross_pointers` rows + scatter
+colouring — no new per-row badge UX is added by this story. Existing
+atlas-root facets (the OHBM overlay toggle) MUST NOT change; they remain
+the only filter affordance on this surface. Semantic search contributes
+ONLY a distance-based re-ordering of the merged result list — no new
+result-set scoping logic.
+
+**Why this priority**: Equal-priority with US2 (loading UX) — atlas-root
+search depends on the same underlying ranking machinery as US1's
+NeuroScape search, so shipping it in the same cycle adds proportionally
+little incremental work. Bumping it to P1 would risk crowding US1's
+NeuroScape-specific testing; demoting to P3 would invite a third spec
+cycle just to enable cross-conference discovery.
+
+**Independent Test**: Open atlas-root, type a query that has lexical
+matches in BOTH the OHBM 2026 corpus AND the NeuroScape corpus, observe
+a single merged ranked result list with rows from both corpora identified
+by the existing source pill/colouring. Enable `✨ Semantic` → semantically
+related rows from EITHER corpus appear in the merged list. Click any row
+→ navigates to the correct per-subsite permalink via the existing
+cross-pointer path.
+
+**Acceptance Scenarios**:
+
+1. **Given** the user is on atlas-root and types a query, **When** the
+   query has lexical title matches in both corpora, **Then** the result
+   list shows hits from both, ranked together, each row identified by the
+   already-shipped OHBM-or-NeuroScape source indicator.
+
+2. **Given** semantic search is enabled and the query has zero lexical
+   matches in EITHER corpus, **When** semantic ranking runs, **Then** the
+   result list shows the closest semantically related rows from across
+   BOTH corpora, ranked by distance — without invoking any new facet UI.
+
+3. **Given** the user clicks a result row, **When** the click is on an
+   OHBM 2026 row vs. a NeuroScape row, **Then** the navigation lands on
+   the correct per-subsite permalink (`/ohbm2026/abstract/<poster_id>/`
+   or `/neuroscape/abstract/<pubmed_id>/`) using the existing cross-
+   pointers table on atlas-root.
+
+4. **Given** the existing atlas-root overlay toggle (Show OHBM 2026
+   overlay) is in some state, **When** the user types in the search bar,
+   **Then** that toggle's state does NOT change and the toggle remains
+   the only filter affordance — the result list is not scoped by it.
 
 ---
 
@@ -164,6 +239,23 @@ that experience changed.
 - **First-load on a metered connection**: the semantic index download MUST
   be entirely user-initiated (only triggered when the user enables `✨
   Semantic`) so visitors who never use the feature never pay the bytes.
+- **KNN expansion spans many clusters**: a top-3 article's k=20 KNN
+  neighbours may belong to several different clusters whose vectors
+  haven't been range-fetched yet. Per FR-024 the loader caps the
+  per-session cluster-bounded range-fetch count (default 4) and
+  surfaces a one-time "expand search depth?" affordance so the user
+  opts in to additional cluster fetches rather than silently paying
+  the bytes. Capped queries still return results — they're scored
+  using the cluster vectors already in memory, with neighbours from
+  un-loaded clusters ranked by their precomputed KNN distance to the
+  seed article instead of by direct cosine to the query.
+- **OHBM corpus alone yields no candidates**: a query that hits no
+  lexical matches in either corpus AND whose closest cluster centroid
+  is exclusively NeuroScape MUST NOT silently drop OHBM rows from the
+  cross-conference result list — atlas-root MUST still include
+  brute-force OHBM scoring (FR-022) as a parallel lane, so any
+  semantically relevant OHBM abstract surfaces alongside the
+  NeuroScape candidates.
 
 ## Requirements *(mandatory)*
 
@@ -243,28 +335,121 @@ that experience changed.
   thread (in a Web Worker). The result list MUST remain scroll-responsive
   while a semantic ranking is in flight.
 
-- **FR-016**: The `/ohbm2026/` semantic search behaviour, the OHBM
-  parquet, and the atlas-root build MUST be byte-identical before and
-  after this change. This feature MUST add a sibling artefact to the
-  NeuroScape side without modifying any OHBM 2026 surface.
+- **FR-016**: The existing `/ohbm2026/` semantic search behaviour and
+  the OHBM 2026 parquet bytes MUST be byte-identical before and after
+  this change. The atlas-root build gains a search bar (FR-017–FR-020)
+  + may grow new sidecar bytes, but the OHBM 2026 site is strictly
+  unaltered.
+
+- **FR-017**: The atlas-root subsite (`abstractatlas.brainkb.org/`)
+  MUST add a search bar that ranks across BOTH corpora (OHBM 2026
+  abstracts + NeuroScape articles) and merges hits into a single
+  ranked result list.
+
+- **FR-018**: Atlas-root result rows MUST identify the source corpus
+  using the existing OHBM-vs-NeuroScape indicators already shipped on
+  atlas-root (cross-pointers rows + scatter colour palette). NO new
+  per-row badge UX is introduced for source identification by this
+  spec.
+
+- **FR-019**: Atlas-root search MUST NOT change or extend the existing
+  atlas-root facet affordances (the Show OHBM 2026 overlay toggle).
+  Semantic search contributes ONLY a distance-based re-ordering of
+  the merged result list — no new result-set scoping logic, no new
+  filter UI.
+
+- **FR-020**: Clicking an atlas-root search result row MUST navigate
+  to the corresponding per-subsite permalink
+  (`/ohbm2026/abstract/<poster_id>/` for OHBM rows,
+  `/neuroscape/abstract/<pubmed_id>/` for NeuroScape rows) via the
+  existing cross_pointers table on atlas-root.
+
+- **FR-021**: NeuroScape semantic ranking MUST use the cluster-routed
+  + KNN-expansion pipeline (no brute-force over all 461k vectors per
+  query):
+
+  1. Embed the query client-side.
+  2. Score the query vector against the ~50 cluster-centroid vectors
+     (already loaded with `neuroscape.parquet` on page load) and
+     pick the **single closest centroid**.
+  3. Range-fetch the rows where `cluster_id == <closest>` from
+     `neuroscape_vectors.parquet` via hyparquet's
+     `asyncBufferFromUrl` (parquet row-group min/max predicate
+     pushdown drives the HTTP range request); brute-force cosine
+     within those rows; take **top-3 matches**.
+  4. Walk the existing k=20 KNN graph (already in
+     `neuroscape.parquet`) outward from those top-3 to expand the
+     candidate set across adjacent clusters.
+  5. Re-rank the full candidate set by cosine to query. KNN
+     neighbours whose `cluster_id` is NOT yet in memory trigger
+     additional cluster-bounded range requests against
+     `neuroscape_vectors.parquet` on demand.
+
+- **FR-022**: OHBM 2026 semantic ranking (used on atlas-root for the
+  OHBM half of the cross-conference search) MUST use brute-force
+  cosine over the full OHBM index. Cluster routing is NOT applied —
+  the corpus is small enough (~3.2k vectors) that brute force is
+  faster than the routing overhead.
+
+- **FR-023**: Atlas-root cross-conference ranking MUST run BOTH
+  pipelines in parallel (NeuroScape cluster-routed + OHBM
+  brute-force) and merge the two ranked lists by cosine score. No
+  source-bias weighting is applied — the closest match across
+  EITHER corpus wins position 1.
+
+- **FR-024**: When the cumulative number of distinct clusters whose
+  vectors have been range-fetched in a single browser session exceeds
+  a configurable threshold (default 4), the loader MUST cap further
+  cluster-bounded range fetches and surface a one-time "expand search
+  depth?" affordance — protecting metered-connection visitors from
+  accidental large downloads via repeated multi-cluster queries.
 
 ### Key Entities
 
-- **NeuroScape semantic index**: a per-article vector keyed by `pubmed_id`,
-  produced once per `neuroscape.parquet` rebuild, carrying enough numerical
-  precision for relative-rank cosine similarity but quantised aggressively
-  enough that the full corpus stays a manageable download. Co-versioned
-  with the articles table via a shared state-key.
+- **NeuroScape cluster-centroid table**: ~50 cluster-centroid vectors
+  (one per `cluster_id` already on the articles table), shipped INSIDE
+  `neuroscape.parquet` as a new small table (~50 × 384 floats ≈ 80 KB).
+  Loaded with the main parquet on page load. The browser scores the
+  embedded query against these centroids to pick the routing cluster
+  (Step 2 of the ranking pipeline) before fetching any per-article
+  vectors.
 
-- **Semantic-index manifest**: a small companion JSON document that
-  declares the state-key, model identifier, vector dimension, quantisation
-  strategy, vector count, byte-count, and build provenance. The browser
-  fetches this first to decide whether its cached index is still fresh.
+- **NeuroScape vectors parquet (sibling file `neuroscape_vectors.parquet`)**:
+  a single dedicated parquet file carrying the per-article semantic
+  vectors. Two columns: `pubmed_id INT64`, `minilm_vector
+  FIXED_LEN_BYTE_ARRAY(384)` (INT8 quantised). Rows are **sorted by
+  cluster_id** so parquet row-group min/max statistics let the browser
+  predicate-pushdown to `cluster_id == X` and the underlying HTTP range
+  request fetches only the byte ranges containing that cluster's
+  vectors. NO per-cluster sidecar files. NO refactor of the existing
+  eager full-file load of `neuroscape.parquet`. Co-versioned with the
+  articles table via a shared state-key.
+
+- **OHBM 2026 semantic index**: a single brute-force vector file keyed by
+  `poster_id`. The OHBM corpus is ~3.2k abstracts, so cluster routing
+  would add overhead without benefit; brute-force cosine over the whole
+  set runs in ~1 ms and the artefact is tiny (~1 MB INT8). Used by
+  atlas-root cross-conference search (US4) AND, when the project later
+  decides to enable `/ohbm2026/`-only semantic search, by that surface
+  too — but that's NOT in this spec's scope.
+
+- **Semantic-index manifest**: a small companion JSON document
+  declaring the state-key, model identifier, vector dimension,
+  quantisation strategy, vectors-parquet path + byte size, cluster
+  centroid row count, and build provenance. The browser checks this
+  first to decide whether its cached vectors parquet is still fresh
+  before issuing any range request.
 
 - **Query embedder**: the in-browser pathway from the user's typed string
   to a vector in the same space as the corpus index. Runs entirely client-
   side so no per-query network call is made. The embedder model MUST match
   the corpus embedder model (else cosine similarity is meaningless).
+
+- **Candidate set (transient)**: the per-query in-memory union of
+  (a) the closest cluster's top-3 brute-force matches and (b) those
+  top-3's k=20 KNN neighbours from the existing
+  `neuroscape.parquet` neighbour table. Re-ranked by cosine to query
+  before being merged with the lexical-hit list. Never persisted.
 
 ### Constitution Alignment *(mandatory)*
 
@@ -328,15 +513,20 @@ that experience changed.
   hit in the result list within 3 seconds of the last keystroke (after
   the semantic index is loaded).
 
-- **SC-002**: First-time semantic-toggle activation MUST reach a stable
-  "ready" state — semantic hits visible for the current query — within
-  10 seconds on a typical home broadband connection (≥10 Mbps). Slower
-  connections see a proportional wait but never a frozen UI.
+- **SC-002**: Enabling the `✨ Semantic` toggle MUST be instant
+  (toggle reaches its "on" state within 100 ms) — the centroid
+  table is already in `neuroscape.parquet` so no new bytes are
+  required to ARM the lane. The first ACTUAL query then triggers
+  the cluster-bounded range-fetch from `neuroscape_vectors.parquet`;
+  semantic hits MUST appear in the result list within 10 seconds on
+  a typical home broadband connection (≥10 Mbps). Slower connections
+  see a proportional wait but never a frozen UI.
 
-- **SC-003**: Subsequent semantic-toggle activations in a returning
-  session (same browser, same site state-key, valid cache) MUST reach
-  the "ready" state in under 2 seconds. The browser MUST NOT re-download
-  the index when its cached copy matches the current sidecar manifest.
+- **SC-003**: A subsequent semantic query that touches the SAME
+  cluster as a prior query in this session MUST return semantic
+  hits in under 2 seconds. The browser MUST NOT re-fetch the
+  cluster vectors already in memory or in the Cache API when the
+  vectors parquet's state-key matches.
 
 - **SC-004**: A second `build-atlas-package` run with unchanged
   NeuroScape inputs + pinned timestamps MUST produce a byte-identical
@@ -364,9 +554,10 @@ that experience changed.
   the NeuroScape side.
 
 - **SC-008**: The `✨ Semantic` toggle MUST be visually identical
-  (position, label, loading-spinner pattern, badge styling) between
-  the two subsites — verified by a side-by-side screenshot diff in
-  the e2e suite that already gates each deploy.
+  (position, label, loading-spinner pattern, badge styling) across
+  all three surfaces that ship it (`/ohbm2026/`, `/neuroscape/`,
+  atlas-root) — verified by a multi-surface screenshot diff in the
+  e2e suite that already gates each deploy.
 
 ## Assumptions
 
@@ -392,13 +583,18 @@ that experience changed.
   on a biomedical corpus) — but the FAMILY is fixed.
 
 - **Quantisation**: INT8 quantisation is the planning-phase default,
-  consistent with the OHBM 2026 site. If the planning phase finds that
-  INT8 yields a sidecar above ~80 MB (the largest cost we are willing
-  to put behind a user-initiated toggle), the plan may select a more
-  aggressive scheme (PCA pre-quantisation, product quantisation, or a
-  smaller-dim model). This trade-off is OUT OF SCOPE for this spec —
-  the SCOPE is "ship semantic search", not "ship MiniLM-INT8
-  specifically".
+  consistent with the OHBM 2026 site. With the sibling-parquet layout
+  the per-query payload on a cold cache is the sum of (~50 × 384 ×
+  1 B ≈ 80 KB centroids, ALREADY loaded with `neuroscape.parquet`) +
+  (the cluster's row-group from `neuroscape_vectors.parquet`,
+  typically ~10k articles × 384 × 1 B ≈ 4 MB, range-fetched on
+  demand) + (occasional 1–3 additional cluster-bounded range
+  fetches when KNN neighbours cross cluster boundaries). The
+  cold-cache first-query budget is therefore ~5–20 MB, not the
+  ~50–177 MB a monolithic full-file fetch would impose. Aggressive
+  schemes (PCA, product quantisation, smaller-dim model) remain
+  available to `/speckit-plan` if a real measurement at full corpus
+  scale exceeds the per-cluster budget.
 
 - **Distribution**: The semantic sidecar ships alongside
   `neuroscape.parquet` on the same gh-pages-served path that the
@@ -414,11 +610,11 @@ that experience changed.
   OHBM 2026 semantic worker already requires). Older browsers see the
   "feature unavailable" path from FR-006.
 
-- **Cross-conference search**: A user typing on `/ohbm2026/` does NOT
-  see NeuroScape articles in their results, and vice-versa. Each
-  subsite's search remains scoped to its own corpus. Cross-conference
-  semantic search across both corpuses is a separate, future scope and
-  intentionally NOT in this spec.
+- **Cross-conference search surface = atlas-root only**: A user typing
+  on `/ohbm2026/` does NOT see NeuroScape articles in their results, and
+  vice-versa. Each per-subsite search remains scoped to its own corpus.
+  Cross-conference ranking lives EXCLUSIVELY on atlas-root (US4 / FR-017
+  – FR-020). The per-subsite stories (US1, US2, US3) are unchanged.
 
 - **Permalink behaviour unchanged**: Clicking a semantic-only result
   row opens the same `/neuroscape/abstract/<pubmed_id>/` permalink that
@@ -426,8 +622,14 @@ that experience changed.
   layered on the existing detail-panel path; nothing about
   per-article detail loads or permalinks changes.
 
-- **Stage-15 byte-identity invariants survive**: Adding this feature
-  must NOT change `atlas.parquet` or `ohbm2026.parquet` bytes. Only
-  `neuroscape.parquet` may grow (if the planning phase elects to embed
-  the sidecar inside it) and a new sidecar file may appear. The
-  existing CI byte-identity gate is the enforcement mechanism.
+- **Stage-15 byte-identity invariants survive (narrowed)**: Adding
+  this feature MUST NOT change `ohbm2026.parquet` bytes — that
+  parquet remains the existing CI byte-identity gate's primary
+  target. `neuroscape.parquet` MAY grow by ~80 KB (the new
+  cluster-centroid table). A NEW sibling file
+  `neuroscape_vectors.parquet` appears on disk (~50 MB INT8,
+  sorted by cluster_id). `atlas.parquet` MAY grow because this
+  spec adds the small OHBM 2026 vector index alongside it for
+  the cross-conference search. The CI gate is updated to assert
+  byte-identity only on `ohbm2026.parquet`; the other parquet
+  diffs are reviewed in PR.
