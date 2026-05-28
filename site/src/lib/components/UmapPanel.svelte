@@ -2031,9 +2031,15 @@
 			{#if mode === 'ohbm'}
 				<h3>UMAP — cell <code>{cellKey}</code></h3>
 				<p class="hint">
-					Points are coloured + shaped by <em>cluster</em> (community detected for this
-					cell, Tol-bright palette × 5 symbols, colour-vision-friendly). Lasso on 2D
-					filters the result list; click any point to open its detail panel.
+					A UMAP projection of every abstract's embedding into 2D + 3D:
+					points that sit close together are semantically similar under this
+					<em>(model × input)</em> lens. Points are coloured + shaped by
+					<em>cluster</em> (community-detected for this cell, Tol-bright palette
+					× 5 symbols, colour-vision-friendly). Switch the lens to recolour and
+					re-cluster the same abstracts. Lasso on the 2D pane to filter the
+					result list, facets, and 3D pane to that region; click any point to
+					open its detail panel; the focused abstract gets a halo. The 3D pane
+					can be orbited and paused.
 				</p>
 			{:else}
 				<h3>
@@ -2042,11 +2048,18 @@
 						: 'NeuroScape PubMed atlas'}
 				</h3>
 				<p class="hint">
+					A UMAP projection of the corpus into 2D + 3D: points that sit close
+					together are semantically similar under the NeuroScape Stage-2
+					embedding.
+					{#if mode === 'atlas'}The NeuroScape PubMed corpus forms the backdrop and the
+						OHBM 2026 abstracts are projected into the same space on top, so you can
+						read where the conference sits inside the broader literature.{/if}
 					Points are coloured by NeuroScape cluster
 					{#if useAtlasShapes}+ shaped by cluster (≤7 clusters){:else}(colour only — {atlasClusters.length}
 						clusters){/if}.
-					Lasso on the 2D pane filters the result list; click any point to open
-					its detail panel.
+					Lasso on the 2D pane to filter the result list and facet counts to that
+					region; click any point to open its detail panel; the 3D pane can be
+					orbited and paused.
 				</p>
 			{/if}
 		</div>

@@ -58,6 +58,113 @@
 			url: 'https://github.com/sensein/ohbm2026'
 		}
 	};
+
+	const repoBase = 'https://github.com/sensein/ohbm2026';
+	const pr = (n: number) => `${repoBase}/pull/${n}`;
+	const commit = (sha: string) => `${repoBase}/commit/${sha}`;
+
+	// CHANGES — reverse-chronological log of major user-visible changes.
+	// MAINTENANCE: prepend a new entry here in the SAME PR that ships the
+	// change. `refs` link to the PR (or a specific commit when there's no
+	// PR). Keep summaries one or two sentences and user-facing — this is a
+	// public changelog, not a commit dump.
+	const changes: Array<{
+		date: string;
+		title: string;
+		summary: string;
+		refs: Array<{ label: string; url: string }>;
+	}> = [
+		{
+			date: '2026-05',
+			title: 'Cross-conference semantic search',
+			summary:
+				'Semantic search ✨ now runs on the NeuroScape PubMed atlas and the cross-conference root, not just OHBM 2026 — reusing the same in-browser MiniLM model. Search gained Damerau-Levenshtein typo tolerance and a debounced input so typing stays smooth on the 461k-article corpus.',
+			refs: [{ label: 'PR #47', url: pr(47) }]
+		},
+		{
+			date: '2026-05',
+			title: 'Privacy-respecting analytics',
+			summary:
+				'Added Google Analytics gated behind a consent banner that honours Do-Not-Track and Global-Privacy-Control signals; theme variables were fixed so the banner reads correctly in dark mode.',
+			refs: [
+				{ label: 'PR #45', url: pr(45) },
+				{ label: 'PR #46', url: pr(46) }
+			]
+		},
+		{
+			date: '2026-04',
+			title: 'Atlas rebuild + provenance speed-ups',
+			summary:
+				'The UMAP fit is now cached so atlas rebuilds complete in under a minute, and per-abstract AI provenance is plumbed through the parquet manifest.',
+			refs: [
+				{ label: 'PR #43', url: pr(43) },
+				{ label: 'PR #44', url: pr(44) }
+			]
+		},
+		{
+			date: '2026-04',
+			title: 'Large-corpus performance + mobile WebGL',
+			summary:
+				'Performance wins for the 461k-point scatter, a graceful 2D-only fallback when a browser exposes no WebGL, and a bulk "Add N to cart" action on the root + NeuroScape sites.',
+			refs: [
+				{ label: 'PR #40', url: pr(40) },
+				{ label: 'PR #41', url: pr(41) },
+				{ label: 'PR #42', url: pr(42) }
+			]
+		},
+		{
+			date: '2026-03',
+			title: 'Cross-conference atlas + NeuroScape subsite',
+			summary:
+				'Introduced the three-site hub-and-spoke layout: a cross-conference Abstract Atlas landing page, a standalone NeuroScape PubMed atlas (~461k articles, 175 clusters), and the existing OHBM 2026 site — built from one codebase via three site modes, with deep links routed correctly across subsites.',
+			refs: [
+				{ label: 'PR #36', url: pr(36) },
+				{ label: 'PR #37', url: pr(37) },
+				{ label: 'PR #38', url: pr(38) },
+				{ label: 'PR #39', url: pr(39) }
+			]
+		},
+		{
+			date: '2026-02',
+			title: 'Poster-id search navigator',
+			summary:
+				'The search bar gained an id: operator with an autocomplete dropdown to jump straight to a poster by its program id.',
+			refs: [{ label: 'PR #35', url: pr(35) }]
+		},
+		{
+			date: '2026-02',
+			title: 'Book of abstracts (PDF)',
+			summary:
+				'A deterministic book-of-abstracts PDF generator, layout polish, an acknowledgments section, and authoritative standby times wired into the UI with deep links.',
+			refs: [
+				{ label: 'PR #26', url: pr(26) },
+				{ label: 'PR #31', url: pr(31) },
+				{ label: 'PR #34', url: pr(34) }
+			]
+		},
+		{
+			date: '2026-01',
+			title: 'Conference subpaths + single-file data export',
+			summary:
+				'Moved every OHBM 2026 surface under /ohbm2026/ to make room for sibling conferences, and redesigned the data package as a single-file Parquet with a tight schema and a poster-id as the sole user-facing identifier.',
+			refs: [
+				{ label: 'PR #19', url: pr(19) },
+				{ label: 'PR #20', url: pr(20) }
+			]
+		},
+		{
+			date: '2025-12',
+			title: 'Static atlas launch',
+			summary:
+				'First public release: a static SvelteKit site with typo-tolerant lexical + semantic search, a 2D + 3D UMAP with lasso selection, a saved-list cart with email export, a guided tour, and this About page with link-checked references.',
+			refs: [{ label: 'PRs #9–#18', url: `${repoBase}/pulls?q=is%3Apr+is%3Amerged` }]
+		}
+	];
+
+	const sections = [
+		{ id: 'pipeline', label: 'How it works' },
+		{ id: 'changes', label: 'Changes' }
+	];
 </script>
 
 <svelte:head>
@@ -73,6 +180,17 @@
 <div class="about-page">
 	<nav class="back"><a href={`${base}/`}>← back to atlas</a></nav>
 
+	<div class="about-layout">
+		<aside class="about-toc" aria-label="On this page">
+			<p class="toc-label">On this page</p>
+			<nav>
+				{#each sections as s (s.id)}
+					<a href={`#${s.id}`}>{s.label}</a>
+				{/each}
+			</nav>
+		</aside>
+
+		<div class="about-content">
 	<header>
 		{#if SITE_MODE === 'atlas-root'}
 			<h1>About Abstract Atlas</h1>
@@ -89,6 +207,7 @@
 		</p>
 	</header>
 
+	<section id="pipeline" class="pipeline-section">
 	<section class="overview">
 		{#if SITE_MODE === 'atlas-root'}
 			<p>
@@ -712,11 +831,38 @@
 			{/if}
 		</section>
 	{/each}
+	</section>
+
+	<section id="changes" class="changes-section">
+		<h2 class="changes-heading">Changes</h2>
+		<p class="changes-intro">
+			Major user-visible updates, newest first. Each entry links to the pull
+			request (or commit) that shipped it.
+		</p>
+		<ol class="changelog">
+			{#each changes as c (c.title + c.date)}
+				<li class="changelog-entry">
+					<div class="changelog-meta">
+						<time>{c.date}</time>
+						<span class="changelog-refs">
+							{#each c.refs as r (r.url)}
+								<a href={r.url} target="_blank" rel="noopener noreferrer">{r.label}</a>
+							{/each}
+						</span>
+					</div>
+					<h3 class="changelog-title">{c.title}</h3>
+					<p class="changelog-summary">{c.summary}</p>
+				</li>
+			{/each}
+		</ol>
+	</section>
+		</div>
+	</div>
 </div>
 
 <style>
 	.about-page {
-		max-width: 56rem;
+		max-width: 70rem;
 		margin: 0 auto;
 		display: flex;
 		flex-direction: column;
@@ -735,6 +881,142 @@
 		color: var(--accent);
 		text-decoration: none;
 		font-size: 0.9rem;
+	}
+	.about-layout {
+		display: grid;
+		grid-template-columns: 12rem minmax(0, 1fr);
+		gap: 1.5rem;
+		align-items: start;
+	}
+	.about-content {
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.about-toc {
+		position: sticky;
+		top: 1rem;
+		align-self: start;
+	}
+	.about-toc .toc-label {
+		margin: 0 0 0.4rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+	.about-toc nav {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		border-left: 2px solid var(--border);
+	}
+	.about-toc nav a {
+		color: var(--text);
+		text-decoration: none;
+		font-size: 0.88rem;
+		padding: 0.25rem 0.6rem;
+		border-left: 2px solid transparent;
+		margin-left: -2px;
+	}
+	.about-toc nav a:hover {
+		color: var(--accent);
+		border-left-color: var(--accent);
+	}
+	#pipeline,
+	#changes {
+		scroll-margin-top: 1rem;
+	}
+	.pipeline-section {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	@media (max-width: 48rem) {
+		.about-layout {
+			grid-template-columns: 1fr;
+			gap: 0.75rem;
+		}
+		.about-toc {
+			position: static;
+		}
+		.about-toc nav {
+			flex-direction: row;
+			border-left: none;
+			border-bottom: 1px solid var(--border);
+			padding-bottom: 0.4rem;
+		}
+		.about-toc nav a {
+			border-left: none;
+			margin-left: 0;
+		}
+	}
+	.changes-section {
+		border-top: 1px solid var(--border);
+		padding-top: 0.75rem;
+	}
+	.changes-heading {
+		margin: 0 0 0.3rem;
+		font-size: 1.15rem;
+		color: var(--text);
+	}
+	.changes-intro {
+		margin: 0 0 0.85rem;
+		font-size: 0.9rem;
+		line-height: 1.55;
+		color: var(--text-muted);
+	}
+	.changelog {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.changelog-entry {
+		border-left: 3px solid var(--accent);
+		padding: 0.1rem 0 0.1rem 0.85rem;
+	}
+	.changelog-meta {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+	.changelog-meta time {
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		letter-spacing: 0.03em;
+	}
+	.changelog-refs {
+		display: inline-flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.changelog-refs a {
+		font-size: 0.78rem;
+		color: var(--accent);
+		text-decoration: none;
+		white-space: nowrap;
+	}
+	.changelog-refs a:hover {
+		text-decoration: underline;
+	}
+	.changelog-title {
+		margin: 0.2rem 0 0.25rem;
+		font-size: 0.98rem;
+		color: var(--text);
+	}
+	.changelog-summary {
+		margin: 0;
+		font-size: 0.9rem;
+		line-height: 1.6;
+		color: var(--text);
 	}
 	.back a:hover {
 		text-decoration: underline;

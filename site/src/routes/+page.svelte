@@ -71,6 +71,7 @@
 	// external consumer; tree-shaken from this bundle if unused.
 	import {
 		loadDataPackage,
+		getDataPackageUrl,
 		verifyAtlasSiblingDrift,
 		type AtlasDriftEntry
 	} from '$lib/data_package/loader';
@@ -883,10 +884,16 @@
 				}
 			);
 			if (!pkg) {
-				atlasError =
-					SITE_MODE === 'atlas-root'
-						? 'Atlas data package URL not configured.'
-						: 'NeuroScape data package URL not configured.';
+				// `pkg === null` has two distinct causes: the data-package
+				// URL genuinely isn't configured (build-time env missing),
+				// or the fetch failed (network / a 429 from the data host
+				// rate-limiting rapid requests). Distinguish them so the
+				// visitor sees an actionable message instead of a wrong
+				// "not configured" one.
+				const label = SITE_MODE === 'atlas-root' ? 'Atlas' : 'NeuroScape';
+				atlasError = getDataPackageUrl()
+					? `Couldn't load the ${label} data package — the data host may be temporarily rate-limiting requests. Refresh to retry.`
+					: `${label} data package URL not configured.`;
 				return;
 			}
 			if (SITE_MODE === 'atlas-root') {
