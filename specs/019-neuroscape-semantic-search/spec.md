@@ -17,6 +17,8 @@
 
 - Q: Should the spec drop per-article vectors entirely and use centroids + KNN only? → A: **No, keep per-article vectors.** The size win (~50 MB → ~80 KB) was tempting, but the no-lexical-overlap case is exactly the use case US1 motivates ("find articles by meaning, not keyword"). Centroids + KNN alone degrade ranking quality precisely on the queries semantic search is meant to help. Per-article vectors stay (delivered via the sibling parquet decided above).
 
+- Q: Should the search syntax + UX be unified across all three surfaces, reversing the prior "slim-by-design" stance for `/neuroscape/` + atlas-root? → A: **Yes.** All three surfaces (`/ohbm2026/`, `/neuroscape/`, atlas-root) reuse the OHBM `SearchBar` operator set verbatim: implicit-AND multi-word, `"exact phrase"`, `-foo` / `-"exact phrase"` negation, `word OR word` alternation, and the `id:N` operator. The `id:N` operator on atlas-root matches **both** corpora's id columns in parallel — bare `id:` queries either `poster_id` (OHBM) or `pubmed_id` (NeuroScape); the result list disambiguates via the existing source pill (no new badge UX, no new operator names like `pmid:` / `poster:`). Each surface's `SearchBar` help dropdown lists the same operator set.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Find neuroscience articles by meaning, not keyword (Priority: P1)
@@ -112,41 +114,57 @@ the user is allowed to expect semantic hits in the result list.
 
 ---
 
-### User Story 3 - Search-bar continuity across all three surfaces (Priority: P3)
+### User Story 3 - Search-bar parity across all three surfaces (Priority: P3)
 
-The OHBM 2026 `<SearchBar>` already supports a rich syntax (operators like
-`au:`, `kw:`, `id:`, semantic toggle, `-foo` exclude clauses). The
-`/neuroscape/` subsite currently has a slimmer, cluster-and-year-scoped
-search input; atlas-root has none (US4 adds one). As semantic ranking lands
-on `/neuroscape/` and atlas-root, the cross-surface experience risks
-inconsistency.
+The existing OHBM 2026 `<SearchBar>` supports a compact syntax:
+implicit-AND multi-word, `"exact phrase"`, `-foo` / `-"exact phrase"`
+negation, `word OR word` alternation, and the `id:N` operator (Stage 14).
+All three surfaces — `/ohbm2026/`, `/neuroscape/`, atlas-root — MUST
+reuse this syntax verbatim. The semantic `✨` toggle joins the same
+SearchBar component. Per spec Clarifications session 2026-05-27 Q5, this
+reverses the earlier "slim-by-design" stance for `/neuroscape/`; users
+learn one syntax + one operator set + one toggle position regardless of
+which subsite they're on.
 
-**Why this priority**: Stage 15 already committed to slim-by-design for the
-NeuroScape search (the corpus is 100× larger and the field set is
-"title-only"), and the operator syntax wouldn't add value where the only
-indexed field is `title`. Atlas-root cross-conference search inherits the
-same slim model. So this story is about **shared UX patterns** (`✨` toggle
-visual, badge styling, ranking-tie-break behaviour) across all three
-surfaces — `/ohbm2026/`, `/neuroscape/`, and atlas-root — not full
-search-bar parity.
+**Why this priority**: Once US1 + US4 ship the same ranking machinery on
+two new surfaces, syntax divergence between subsites becomes the dominant
+remaining source of "this feels different" friction. Promoting parity to
+its own story makes the SearchBar component re-use explicit (one
+component, mounted three times with corpus-specific data) instead of
+silently forking.
 
-**Independent Test**: Cross-navigate `/ohbm2026/` → `/neuroscape/` → atlas-root,
-observe that the `✨ Semantic` toggle has the same visual position, the same
-loading-state pattern, and the same `✨` badge styling on semantic-only
-result rows on every surface that has it. Then cross-navigate back to
-`/ohbm2026/` and confirm nothing in that experience changed.
+**Independent Test**: Cross-navigate `/ohbm2026/` → `/neuroscape/` →
+atlas-root. On each surface, type the same query containing each of
+`"exact phrase"`, `-foo`, `word OR word`, and `id:N` (substituting a
+valid id for the surface — poster_id on OHBM, pubmed_id on NeuroScape,
+either on atlas-root). Observe that each operator behaves identically
+(same parser, same negation semantics, same id-autocomplete affordance).
+Cross-navigate back to `/ohbm2026/` and confirm nothing in that
+experience changed (same SearchBar bytes — FR-016 / SC-007).
 
 **Acceptance Scenarios**:
 
-1. **Given** a user familiar with the OHBM 2026 search toggle, **When** they
-   land on `/neuroscape/` OR atlas-root, **Then** the `✨ Semantic` toggle
-   is visually and behaviourally consistent: same position relative to the
-   input, same loading affordance, same disabled-while-loading semantics.
+1. **Given** a user familiar with the OHBM 2026 SearchBar, **When** they
+   land on `/neuroscape/` OR atlas-root, **Then** the SearchBar is the
+   SAME component (same syntax, same operator set, same help dropdown,
+   same `✨ Semantic` toggle position) — only the placeholder text +
+   the `id:` autocomplete corpus differ.
 
-2. **Given** the user has all three surfaces open in tabs, **When** they
-   enable semantic search on one, **Then** enabling it on the others does
-   not require re-learning the toggle — the affordance is recognisably the
-   same control.
+2. **Given** the user types `-fmri` on `/neuroscape/`, **When** the
+   query runs, **Then** articles whose titles contain "fmri" are
+   excluded — identical to `/ohbm2026/`'s existing negation semantics.
+
+3. **Given** the user types `id:1234` on atlas-root, **When** the query
+   runs, **Then** ANY article whose id matches `1234` is surfaced — be
+   it OHBM `poster_id=1234` or NeuroScape `pubmed_id=1234` (or both).
+   The result list's existing source pill identifies which corpus each
+   matched row came from. No new operator names (no `pmid:` / `poster:`)
+   are introduced.
+
+4. **Given** the user has all three surfaces open in tabs, **When**
+   they enable semantic search on one, **Then** enabling it on the
+   others does not require re-learning the toggle — the affordance is
+   recognisably the same control because it IS the same control.
 
 ---
 
@@ -403,6 +421,27 @@ cross-pointer path.
   cluster-bounded range fetches and surface a one-time "expand search
   depth?" affordance — protecting metered-connection visitors from
   accidental large downloads via repeated multi-cluster queries.
+
+- **FR-025**: All three surfaces (`/ohbm2026/`, `/neuroscape/`,
+  atlas-root) MUST reuse the existing OHBM `<SearchBar>` component
+  verbatim — same parser, same operator set, same help-dropdown
+  copy, same `✨ Semantic` toggle position. The supported operators
+  are: implicit-AND multi-word, `"exact phrase"` quoted-phrase,
+  `-foo` and `-"exact phrase"` negation, `word OR word` alternation,
+  and `id:N` lookup. Per-surface differences are limited to: (a)
+  placeholder text describing the corpus, (b) the `id:`
+  autocomplete data source (`poster_id` index on OHBM, `pubmed_id`
+  index on NeuroScape, the union on atlas-root). No surface-
+  specific operators are introduced.
+
+- **FR-026**: The `id:N` operator on atlas-root MUST match BOTH
+  corpora's id columns in parallel — a query `id:1234` surfaces
+  rows where `poster_id == 1234` (OHBM lane) OR `pubmed_id == 1234`
+  (NeuroScape lane). When both match (rare given the typical OHBM
+  4-digit / PubMed 7-8-digit ranges), BOTH rows MUST appear. The
+  existing source pill on each result row identifies which corpus
+  the match came from; no new `pmid:` / `poster:` operator names
+  are introduced.
 
 ### Key Entities
 
