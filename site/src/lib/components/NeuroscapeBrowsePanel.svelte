@@ -9,7 +9,13 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import { base } from '$app/paths';
-	import { normalize, parseQuery, type ParsedClause } from '$lib/filter';
+	import {
+		damerauLevenshtein,
+		normalize,
+		parseQuery,
+		tokenizeForIndex,
+		type ParsedClause
+	} from '$lib/filter';
 	import { parseIdOperator } from '$lib/goto_poster';
 	import { cartStore, cartNeuroPubmedIds } from '$lib/stores/cart';
 	import CartIconButton from '$lib/components/CartIconButton.svelte';
@@ -44,16 +50,38 @@
 	//   - -foo / -"phrase" exclude any title containing the term
 	//   - word OR word: union of two AND-groups
 	//   - id:N → exact pubmed_id lookup
-	// Substring semantics over normalised text (NFD-fold + lowercase).
-	function clauseMatches(haystack: string, clause: ParsedClause): boolean {
+	// Word clauses are TYPO-TOLERANT via Damerau-Levenshtein on the
+	// title's tokens (matches OHBM 2026's `lexicalSearch` semantics):
+	// distance ≤ 2 for tokens ≥7 chars, ≤1 for ≥4 chars, exact for
+	// shorter — same threshold ladder the existing /ohbm2026/ search
+	// uses (`filter.ts:lexicalSearch`).
+	function typoMatch(token: string, needle: string): boolean {
+		if (token === needle) return true;
+		// Containment counts (e.g. typing "memry" → "memory"): allow
+		// prefix substring to catch typo-then-extra-suffix shapes.
+		if (needle.length >= 4 && token.includes(needle)) return true;
+		// Length-aware DL budget.
+		const budget = needle.length >= 7 ? 2 : needle.length >= 4 ? 1 : 0;
+		if (budget === 0) return false;
+		// damerauLevenshtein early-exits when distance exceeds budget.
+		return damerauLevenshtein(token, needle, budget) <= budget;
+	}
+	function clauseMatches(
+		haystack: string,
+		haystackTokens: string[],
+		clause: ParsedClause
+	): boolean {
 		if (clause.kind === 'word') {
-			return haystack.includes(clause.word);
+			// Token-level typo-tolerant match.
+			for (const t of haystackTokens) {
+				if (typoMatch(t, clause.word)) return true;
+			}
+			return false;
 		}
-		// kind === 'phrase' — match all phrase words as a contiguous
-		// substring (joined by single spaces). Mirrors how the OHBM
-		// 2026 SearchBar phrase clause is treated at the lexical layer.
-		const needle = clause.words.join(' ');
-		return haystack.includes(needle);
+		// kind === 'phrase' — exact contiguous-substring match
+		// (phrases are deliberately exact per the OHBM 2026
+		// SearchBar contract — no per-phrase typo budget).
+		return haystack.includes(clause.words.join(' '));
 	}
 	$: filtered = (() => {
 		const trimmed = (query ?? '').trim();
@@ -74,14 +102,16 @@
 		const scored: Array<{ a: Article; score: number }> = [];
 		for (const a of articles) {
 			const hay = normalize(a.title);
+			const hayTokens = tokenizeForIndex(a.title);
 			// Group semantics: OR between groups; AND between clauses
 			// within a group. A negate clause excludes any row whose
-			// title contains the term.
+			// title contains the term (typo-tolerantly for words,
+			// exactly for phrases).
 			let groupMatch = false;
 			for (const group of parsed.groups) {
 				let allClausesPass = true;
 				for (const clause of group.clauses) {
-					const hit = clauseMatches(hay, clause);
+					const hit = clauseMatches(hay, hayTokens, clause);
 					if (clause.negate ? hit : !hit) {
 						allClausesPass = false;
 						break;

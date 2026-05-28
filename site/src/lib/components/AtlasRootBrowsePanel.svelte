@@ -14,7 +14,13 @@
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import { normalize, parseQuery, type ParsedClause } from '$lib/filter';
+	import {
+		damerauLevenshtein,
+		normalize,
+		parseQuery,
+		tokenizeForIndex,
+		type ParsedClause
+	} from '$lib/filter';
 	import { cartStore, cartOhbmPosterIds, cartNeuroPubmedIds } from '$lib/stores/cart';
 	import CartIconButton from '$lib/components/CartIconButton.svelte';
 
@@ -59,23 +65,41 @@
 				subline: string;
 		  };
 
-	// Spec 019 / FR-025 / FR-026 — operator-aware cross-conference filter:
+	// Spec 019 / FR-025 / FR-026 — operator-aware cross-conference filter
+	// with Damerau-Levenshtein typo tolerance on word clauses:
 	//   - implicit-AND multi-word over titles in BOTH corpora
 	//   - "exact phrase" + -negation + word OR word work across both
 	//   - id:N matches `poster_id` (OHBM) OR `pubmed_id` (NeuroScape) —
 	//     parallel lookup; both matching rows surface if both exist
-	function clauseMatches(haystack: string, clause: ParsedClause): boolean {
-		if (clause.kind === 'word') return haystack.includes(clause.word);
+	// Typo budget matches NeuroscapeBrowsePanel + lexicalSearch:
+	// DL ≤ 2 for words ≥7 chars, ≤ 1 for ≥4, exact for shorter.
+	function typoMatch(token: string, needle: string): boolean {
+		if (token === needle) return true;
+		if (needle.length >= 4 && token.includes(needle)) return true;
+		const budget = needle.length >= 7 ? 2 : needle.length >= 4 ? 1 : 0;
+		if (budget === 0) return false;
+		return damerauLevenshtein(token, needle, budget) <= budget;
+	}
+	function clauseMatches(
+		haystack: string,
+		haystackTokens: string[],
+		clause: ParsedClause
+	): boolean {
+		if (clause.kind === 'word') {
+			for (const t of haystackTokens) if (typoMatch(t, clause.word)) return true;
+			return false;
+		}
 		return haystack.includes(clause.words.join(' '));
 	}
 	function passesParsedQuery(
 		haystack: string,
+		haystackTokens: string[],
 		parsed: { groups: { clauses: ParsedClause[] }[] }
 	): boolean {
 		for (const group of parsed.groups) {
 			let allPass = true;
 			for (const clause of group.clauses) {
-				const hit = clauseMatches(haystack, clause);
+				const hit = clauseMatches(haystack, haystackTokens, clause);
 				if (clause.negate ? hit : !hit) {
 					allPass = false;
 					break;
@@ -160,7 +184,8 @@
 				continue;
 			}
 			const hay = normalize(o.title);
-			if (!passesParsedQuery(hay, parsed)) continue;
+			const hayTokens = tokenizeForIndex(o.title);
+			if (!passesParsedQuery(hay, hayTokens, parsed)) continue;
 			out.push({ row, score: bestPositiveHitIndex(hay, parsed), tie: -o.poster_id });
 		}
 
@@ -177,7 +202,8 @@
 				continue;
 			}
 			const hay = normalize(a.title);
-			if (!passesParsedQuery(hay, parsed)) continue;
+			const hayTokens = tokenizeForIndex(a.title);
+			if (!passesParsedQuery(hay, hayTokens, parsed)) continue;
 			out.push({ row, score: bestPositiveHitIndex(hay, parsed), tie: -a.year });
 		}
 

@@ -14,7 +14,7 @@
 		type Manifest,
 		type TopicShard
 	} from '$lib/shards';
-	import { activeFilters, authorChips, cartOnly, focusedAbstract, lassoSelection, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
+	import { activeFilters, authorChips, cartOnly, debouncedSearchQuery, focusedAbstract, lassoSelection, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
 	import { lexicalSearch, parseQuery, queryForSemantic } from '$lib/filter';
 	import { filterByFacets, recomputeFacets, type FacetCellContext } from '$lib/facets';
 	import { normaliseQuery, parseIdOperator } from '$lib/goto_poster';
@@ -1146,6 +1146,27 @@
 				     does it. The top-row holds the map + filters toggles
 				     (filters is mobile-only — desktop facet sidebar is
 				     always visible via the .layout grid). -->
+				<!-- Spec 019 / FR-001 — ✨ Semantic toggle on atlas-root +
+				     /neuroscape/, parity with the same control on
+				     /ohbm2026/ (lines 1449+ below in the OHBM branch).
+				     Click flips the shared `semanticEnabled` store; the
+				     ranker invocation (searchNeuroscape) wires in a
+				     follow-up slice — for now the toggle is a visible
+				     parity marker + state hookup so the next PR can wire
+				     the ranker without touching the toggle component. -->
+				<button
+					type="button"
+					class="control-toggle"
+					class:active={$semanticEnabled}
+					on:click={() => semanticEnabled.toggle()}
+					aria-pressed={$semanticEnabled}
+					title={$semanticEnabled
+						? 'Semantic search is ON (cluster-routed ranker wiring lands in follow-up; toggle preserved for cross-surface parity)'
+						: 'Semantic search is OFF — click to enable'}
+					data-testid="toggle-semantic"
+				>
+					✨ Semantic
+				</button>
 				<button
 					type="button"
 					class="control-toggle mobile-only"
@@ -1348,7 +1369,7 @@
 						<NeuroscapeBrowsePanel
 							articles={filteredBackdrop}
 							clustersById={atlasClustersById}
-							query={$searchQuery}
+							query={$debouncedSearchQuery}
 							on:focus={(ev) => {
 								// Update the URL so deep-link restore + back-button work,
 								// THEN open the detail panel so the inline third pane
@@ -1370,7 +1391,7 @@
 							overlayPoints={filteredOverlay}
 							clustersById={atlasClustersById}
 							permalinkFor={atlasPermalink}
-							query={$searchQuery}
+							query={$debouncedSearchQuery}
 							on:select={(ev) => {
 								onAtlasPointClick(
 									new CustomEvent('pointclick', { detail: ev.detail })
