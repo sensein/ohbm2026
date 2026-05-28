@@ -104,6 +104,39 @@ While `RANKING`, the result list shows a small inline spinner. The
 scatter behind it does not change (the toggle from FR-019 stays
 unchanged).
 
+### Loading indicator specifics (FR-005)
+
+While the ranker is in any non-terminal state
+(`loading-model | embedding | routing | fetching-vectors |
+brute-force | knn-expand | re-rank`):
+
+- A small inline spinner (CSS-only `border: 2px solid transparent;
+  border-top-color: var(--accent); animation: spin 0.8s linear
+  infinite`) renders to the LEFT of the `✨ Semantic` toggle label
+  inside the existing button — same approach as `/ohbm2026/`'s
+  SearchBar; no new component.
+- The result list container carries `aria-busy="true"` for screen
+  readers; the live region announces "Ranking…" when entering this
+  state and the result count when entering `ready`.
+- The toggle button is NOT disabled while loading — a user can
+  cancel by clicking the toggle off (transitions ranker to `idle`,
+  drops the in-flight pipeline, removes the spinner).
+
+### Cap-exceeded banner specifics (FR-024)
+
+When the ranker emits `onCapExceeded(clustersLoaded)`:
+
+- A non-blocking inline banner appears ABOVE the result list (NOT a
+  modal) with this exact copy: *"You've searched across X clusters
+  this session. Loading another cluster needs ~4 MB. Continue?"*
+- Two buttons: "Continue" (calls `expandSearchDepth()` + re-fires
+  the deferred query) and "Stay capped" (dismisses the banner; the
+  current query returns capped results — ranked by KNN distance
+  for un-loaded clusters per FR-024).
+- The banner shows AT MOST ONCE per session (per spec FR-024
+  "one-time"); subsequent cap-exceeded events are silent — the
+  ranker just returns capped results until the user reloads.
+
 ---
 
 ## 3. Cross-spec cross-component invariants

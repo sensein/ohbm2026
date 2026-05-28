@@ -281,6 +281,10 @@ cross-pointer path.
 
 - **FR-001**: The `/neuroscape/` subsite MUST add a `✨ Semantic` toggle to
   its search affordance, visually consistent with the OHBM 2026 toggle.
+  (FR-001 is the user-facing functional claim; FR-025 is the
+  implementation-mechanism claim that the toggle is rendered by the SAME
+  `SearchBar.svelte` component bytes — the two requirements overlap by
+  design.)
 
 - **FR-002**: When semantic search is enabled and the query is non-empty,
   the result list MUST be a MERGE of (a) the existing lexical typo-tolerant

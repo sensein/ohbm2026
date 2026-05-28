@@ -145,19 +145,24 @@ site/src/
 │   └── components/
 │       ├── SearchBar.svelte                # MODIFIED — corpus-parameterised id: autocomplete data source so the same component drives all three surfaces (FR-025)
 │       ├── NeuroscapeBrowsePanel.svelte    # MODIFIED — mount the SHARED SearchBar (replaces the slim cluster-and-year-scoped input)
-│       └── AtlasRootSearchBar.svelte       # NEW — thin wrapper around the shared SearchBar with cross-conference id: autocomplete + placeholder copy
+│       ├── AtlasRootSearchBar.svelte       # NEW — thin wrapper around the shared SearchBar with cross-conference id: autocomplete + placeholder copy
+│       └── AtlasRootResultList.svelte      # NEW — atlas-root merged result list (reuses existing OHBM-vs-NeuroScape source pill; no new badge UX)
 ├── routes/
 │   └── +page.svelte                # MODIFIED on atlas-root mode only — mount the new search bar
 └── tests/
     ├── unit/
-    │   └── neuroscape_ranker.test.ts   # NEW — vitest, mocks the worker + buffer; tests the 5-step pipeline
+    │   ├── neuroscape_ranker.test.ts       # NEW — vitest, mocks the worker + buffer; tests the 5-step pipeline + LRU cap + drift
+    │   └── searchbar_corpus_prop.test.ts   # NEW — vitest, regression gate that the SearchBar corpus prop preserves OHBM bytes (FR-016)
     └── e2e/
-        └── semantic.spec.ts            # MODIFIED — extend existing /ohbm2026/ semantic suite with /neuroscape/ + atlas-root cases
+        ├── semantic.spec.ts                # MODIFIED — extend existing /ohbm2026/ semantic suite with /neuroscape/ + atlas-root cases
+        └── searchbar_parity.spec.ts        # NEW — Playwright multi-surface parity (operator semantics + screenshot diff per SC-008)
 
 tests/
 ├── test_atlas_semantic_index.py        # NEW — unittest for semantic_index.py (sorted by cluster_id, row-group predicate pushdown, byte-identity rebuild test)
 ├── test_atlas_vectors_compute.py       # NEW — unittest for vectors_compute.py (deterministic embedding, per-cluster cache hit/miss, INT8 round-trip)
-└── test_atlas_orchestrator.py          # MODIFIED — extend existing e2e to assert semantic-index artifacts produced under skip=False
+├── test_atlas_orchestrator.py          # MODIFIED — extend existing e2e to assert semantic-index artifacts produced under skip=False
+├── test_atlas_exceptions.py            # MODIFIED — add Stage19SemanticError subclass kwargs tests
+└── test_semantic_eval.py               # NEW — SC-006 recall gate against the curated 20-query evaluation set
 ```
 
 **Structure Decision**: Single-project layout — there is no monorepo; `src/ohbm2026/` is one Python package, `site/` is one SvelteKit project. The feature spans both because the Python side produces the vectors-parquet artifact and the browser side consumes it. No new top-level directories are added; new modules slot into the existing `atlas_package`, `lib/search`, `lib/workers`, and `tests/` trees that Stage 15 already established.
