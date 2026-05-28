@@ -43,9 +43,15 @@ file is browser-cached).
 ## R-002 Corpus-side embedding compute path
 
 **Decision**: Add a new `src/ohbm2026/atlas_package/vectors_compute.py`
-that loads the same `Xenova/all-MiniLM-L6-v2` weights via
-`sentence-transformers` (already an optional extra in `pyproject.toml`),
-runs inference over the NeuroScape article titles in batches, and emits
+that loads `sentence-transformers/all-MiniLM-L6-v2` via
+`sentence-transformers` (already an optional extra in `pyproject.toml`)
+— the PyTorch origin of the browser's `Xenova/all-MiniLM-L6-v2` ONNX
+export. The Xenova repo ships ONNX-only weights that
+`sentence-transformers` cannot load; both share one checkpoint, so the
+embedding spaces match. This mirrors the proven `/ohbm2026/` matched
+pair (corpus vectors from PyTorch `all-MiniLM-L6-v2` via `embed-matrix`,
+in-browser query from the Xenova ONNX export). It runs inference over
+the NeuroScape article titles in batches, and emits
 INT8-quantised float32 vectors using the **same single-global-scale
 scheme** as the OHBM 2026 vectors writer
 (`src/ohbm2026/ui_data/vectors.py:107-110` — `scale = 127.0 /
@@ -296,15 +302,26 @@ so operators learn one cache contract.
 
 ## R-010 Constitution-VII matched-pair invariant
 
-**Decision**: Hard-pin the MiniLM model id (`Xenova/all-MiniLM-L6-v2`)
-+ model file sha256 in BOTH (a) the build step (`vectors_compute.py`
-runs sentence-transformers with this exact model name; the matched
-file's sha256 is recorded in the vectors-parquet manifest) AND (b) the
-browser worker (`semantic.worker.ts` loads the same model name from
-the HuggingFace CDN; the cached model file's sha256 is computed at
-worker init time and compared to the manifest value). A mismatch
-raises a precise `VectorsManifestDriftError` and the toggle
-returns to its off state with a user-visible message.
+**Decision**: Hard-pin the MiniLM checkpoint across both halves of the
+matched pair. The browser worker (`semantic.worker.ts`) loads
+`Xenova/all-MiniLM-L6-v2` (the Transformers.js ONNX export) from the
+HuggingFace CDN; the build step (`vectors_compute.py`) loads its PyTorch
+origin `sentence-transformers/all-MiniLM-L6-v2` via sentence-transformers
+(the Xenova repo is ONNX-only and not loadable by sentence-transformers).
+Both ids name one checkpoint, so the corpus + query embedding spaces
+match — identical to the existing `/ohbm2026/` pipeline. The corpus-side
+model id + model-file sha256 are recorded in the vectors-parquet manifest
+for provenance.
+
+**Implementation status**: the corpus-side provenance (model id +
+sha256 in the manifest) ships in this stage. The browser-side init
+handshake that recomputes the loaded model's sha256 and raises
+`VectorsManifestDriftError` on mismatch is **deferred** — a runtime
+ONNX-byte handshake is non-trivial (Transformers.js loads a quantised
+ONNX variant, not the PyTorch weights), so it is currently only a unit-
+test mock (`neuroscape_ranker.test.ts`). Until it lands, the matched
+pair rests on the shared-checkpoint guarantee above, exactly as the
+existing `/ohbm2026/` search already does.
 
 **Rationale**: Cosine similarity across corpus + query embeddings is
 only meaningful when both halves used the same model weights. Pinning

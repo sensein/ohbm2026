@@ -114,7 +114,7 @@ class AtlasBuildConfig:
     # contracts/cli-build-atlas-package.md §1) when run by operators.
     semantic_index_enabled: bool = False
     semantic_cache_root: Path | None = None
-    semantic_model_id: str = "Xenova/all-MiniLM-L6-v2"
+    semantic_model_id: str = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def _state_key(parts: Sequence[str]) -> str:

@@ -190,8 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--semantic-model-id",
-        default="Xenova/all-MiniLM-L6-v2",
-        help="Embedding model id (production MUST use the default to preserve the matched-pair invariant with the existing /ohbm2026/ semantic worker).",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+        help="Corpus-side embedding model id. Production MUST use the default: it is the PyTorch origin of the browser worker's Xenova/all-MiniLM-L6-v2 ONNX export, preserving the matched-pair invariant with the existing /ohbm2026/ semantic worker.",
     )
     return p
 

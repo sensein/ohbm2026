@@ -3,8 +3,8 @@
 Spec: ``specs/019-neuroscape-semantic-search/research.md#R-002`` +
 ``#R-009`` (build-step caching).
 
-Loads the pinned model (``Xenova/all-MiniLM-L6-v2``) via
-sentence-transformers, runs inference over article titles batch-by-batch,
+Loads the corpus-side MiniLM model (``sentence-transformers/all-MiniLM-L6-v2``)
+via sentence-transformers, runs inference over article titles batch-by-batch,
 quantises with the single-global-scale scheme that matches
 ``src/ohbm2026/ui_data/vectors.py`` (so the browser dequantisation path
 in ``site/src/lib/workers/semantic.worker.ts`` works unchanged), and
@@ -12,10 +12,17 @@ persists per-cluster intermediates under
 ``<cache_root>/<state_key>/cluster_<id>.npy`` so a rebuild with
 unchanged inputs short-circuits.
 
-The matched-pair invariant (R-010) is enforced by recording the model
-file's sha256 in the manifest output of this module — the browser's
-worker init handshake cross-checks that against the locally-loaded
-model file's sha256.
+Matched-pair note (R-010): the browser worker
+(``site/src/lib/workers/semantic.worker.ts``) embeds queries with
+``Xenova/all-MiniLM-L6-v2`` — Xenova's ONNX export of this same
+``sentence-transformers/all-MiniLM-L6-v2`` checkpoint. The Xenova repo
+ships ONLY ONNX weights, so it is not loadable by sentence-transformers;
+we load its PyTorch origin here instead. This is exactly the matched
+pair the existing ``/ohbm2026/`` semantic search already relies on
+(corpus vectors from PyTorch ``all-MiniLM-L6-v2`` via ``embed-matrix``,
+in-browser query from the Xenova ONNX export). This module records the
+corpus-side model id + file sha256 in the vectors-parquet manifest for
+provenance.
 """
 
 from __future__ import annotations
@@ -41,7 +48,11 @@ __all__ = [
     "VectorsComputeResult",
 ]
 
-DEFAULT_MODEL_ID = "Xenova/all-MiniLM-L6-v2"
+# Corpus-side encoder. Xenova/all-MiniLM-L6-v2 (the browser's
+# Transformers.js model) is an ONNX-only export with no PyTorch /
+# safetensors weights, so sentence-transformers cannot load it; we load
+# its PyTorch origin, which produces the same embedding space.
+DEFAULT_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 VECTOR_DIM = 384
 VECTORS_CACHE_STATE_KEY_LEN = 12
 
