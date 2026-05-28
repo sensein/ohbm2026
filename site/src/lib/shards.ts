@@ -361,6 +361,39 @@ export async function loadMinilmVectors(): Promise<{
 	return { sidecar, bytes };
 }
 
+/**
+ * Spec 019 / T025 — NeuroScape cluster centroids (FP32). Drives Step 2
+ * of the cluster-routed ranking pipeline (query→closest centroid).
+ * Returns `null` when the parquet was built with `--no-semantic-index`
+ * (the `cluster_centroids` table is absent and semantic search is
+ * unavailable on `/neuroscape/`).
+ *
+ * Each row's `centroid_vector` arrives as a JS array of FLOAT32 values
+ * (parquet's `LIST<FLOAT32, 384>` → row['centroid_vector']: number[]).
+ * The ranker (`$lib/search/neuroscape_ranker`) converts to Float32Array
+ * during `routeToCluster`.
+ */
+export async function loadClusterCentroids(): Promise<
+	Array<{ cluster_id: number; centroid_vector: Float32Array; member_count: number }> | null
+> {
+	const shard = await getFromPackage<{
+		rows?: Array<{
+			cluster_id: number | bigint;
+			centroid_vector: number[] | Float32Array;
+			member_count: number | bigint;
+		}>;
+	}>('data/neuroscape/cluster_centroids.json');
+	if (!shard?.rows || shard.rows.length === 0) return null;
+	return shard.rows.map((r) => ({
+		cluster_id: Number(r.cluster_id),
+		centroid_vector:
+			r.centroid_vector instanceof Float32Array
+				? r.centroid_vector
+				: new Float32Array(r.centroid_vector),
+		member_count: Number(r.member_count)
+	}));
+}
+
 export function resetCachesForTests(): void {
 	// Caches now live on the data_package module; reset there.
 }

@@ -427,6 +427,18 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 				});
 				continue;
 			}
+			if (name === 'cluster_centroids') {
+				// Spec 019 / T025 — drive Step 2 of the cluster-routed
+				// pipeline (route query to closest centroid). Rows shape:
+				// `{cluster_id: int16, centroid_vector: FLOAT32[384],
+				// member_count: int32}`.
+				out.set('data/neuroscape/cluster_centroids.json', {
+					schema_version: 'neuroscape.cluster_centroids.v1',
+					build_info: buildInfo,
+					rows
+				});
+				continue;
+			}
 			// Unknown neuroscape.v1 outer row — ignore (forwards
 			// compatible, same rationale as the atlas branch).
 			continue;
