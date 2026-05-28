@@ -25,6 +25,9 @@
 		title: string;
 		year: number;
 		cluster_id: number;
+		// Spec 015: KNN graph attached per article by loader.ts.
+		nearest_pubmed_ids?: number[];
+		nearest_distances?: number[];
 	};
 	type Cluster = {
 		cluster_id: number;
@@ -36,6 +39,14 @@
 	export let articles: Article[] = [];
 	export let clustersById: Map<number, Cluster> = new Map();
 	export let query: string = '';
+	/** Spec 019 / FR-002 — when set + non-empty, the panel renders
+	 *  these as additional `✨ Semantic` rows below the lexical hits.
+	 *  Each entry maps a pubmed_id to its KNN distance from the
+	 *  closest lexical seed (lower = better; surfaced as `d=N.NNN` on
+	 *  the badge). Computed by the parent (+page.svelte) by walking
+	 *  the per-article `nearest_pubmed_ids` graph from the current
+	 *  lexical hit set. */
+	export let semanticHits: Map<number, number> = new Map();
 
 	const dispatch = createEventDispatcher<{
 		focus: { pubmed_id: number; cluster_id: number };
@@ -139,8 +150,28 @@
 			scored.push({ a, score: firstHitIdx });
 		}
 		scored.sort((x, y) => x.score - y.score || y.a.year - x.a.year);
-		return scored.map((s) => s.a);
+		const lexicalHits = scored.map((s) => s.a);
+		// Spec 019 / FR-002 — augment with KNN-expanded semantic
+		// candidates. semanticHits maps pubmed_id → KNN distance from
+		// nearest lexical seed; we filter to articles NOT already in
+		// the lexical set (semantic-only, gets the ✨ badge in the
+		// row template) and append them in graph-distance order.
+		if (semanticHits.size === 0) return lexicalHits;
+		const lexicalSet = new Set(lexicalHits.map((a) => a.pubmed_id));
+		const semanticRows: Array<{ a: Article; d: number }> = [];
+		const articleById = new Map(articles.map((a) => [a.pubmed_id, a]));
+		for (const [pmid, d] of semanticHits) {
+			if (lexicalSet.has(pmid)) continue;
+			const a = articleById.get(pmid);
+			if (!a) continue;
+			semanticRows.push({ a, d });
+		}
+		semanticRows.sort((x, y) => x.d - y.d);
+		return [...lexicalHits, ...semanticRows.map((s) => s.a)];
 	})();
+	// Lookup for the row template to know which rows are semantic-only
+	// + what distance to show on the badge.
+	$: semanticHitMap = semanticHits;
 
 	$: visible = filtered.slice(0, limit);
 
@@ -238,6 +269,14 @@
 					<div class="ns-row-head">
 						<span class="ns-pmid">PMID {a.pubmed_id}</span>
 						<span class="ns-year">{a.year}</span>
+						{#if semanticHitMap.has(a.pubmed_id)}
+							{@const d = semanticHitMap.get(a.pubmed_id) ?? 0}
+							<span
+								class="ns-semantic-badge"
+								title={`Semantic-only hit — KNN distance ${d.toFixed(3)} from nearest lexical match`}
+								data-testid="semantic-only-badge"
+							>✨ d={d.toFixed(3)}</span>
+						{/if}
 						{#if cluster}
 							<span class="ns-cluster">
 								<span
@@ -362,6 +401,18 @@
 	}
 	.ns-pmid {
 		font-variant-numeric: tabular-nums;
+	}
+	.ns-semantic-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.4rem;
+		font-size: 0.72rem;
+		font-variant-numeric: tabular-nums;
+		border-radius: 9999px;
+		background: var(--accent-soft-bg);
+		color: var(--accent-soft-text);
+		border: 1px solid var(--accent);
 	}
 	.ns-cluster {
 		display: inline-flex;

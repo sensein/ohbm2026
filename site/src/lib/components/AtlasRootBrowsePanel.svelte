@@ -48,6 +48,14 @@
 	export let clustersById: Map<number, Cluster> = new Map();
 	export let permalinkFor: (kind: 'ohbm2026' | 'neuroscape', id: number) => string;
 	export let query: string = '';
+	/** Spec 019 / FR-002 — KNN-expanded semantic hits for the
+	 *  NeuroScape lane (computed in +page.svelte by walking the per-
+	 *  article nearest_pubmed_ids graph from the lexical seed set).
+	 *  Map<pubmed_id, knn_distance>. OHBM side has no semantic hits
+	 *  yet — that lane requires the production atlas.parquet to gain
+	 *  the ohbm_vectors table, which is a separate spec-019 build
+	 *  step still pending deploy. */
+	export let semanticHits: Map<number, number> = new Map();
 
 	const dispatch = createEventDispatcher<{
 		select: { kind: 'ohbm2026' | 'neuroscape'; id: number };
@@ -208,8 +216,35 @@
 		}
 
 		out.sort((x, y) => x.score - y.score || x.tie - y.tie);
-		return out.map((s) => s.row);
+		const lexicalRows = out.map((s) => s.row);
+		// Spec 019 / FR-002 — augment with NeuroScape-side semantic-only
+		// rows (KNN-expansion). OHBM-side semantic awaits the production
+		// ohbm_vectors table; for now atlas-root semantic hits are the
+		// NeuroScape lane only — same mechanism as NeuroscapeBrowsePanel.
+		if (semanticHits.size === 0) return lexicalRows;
+		const lexicalIds = new Set(lexicalRows.map((r) => `${r.kind}:${r.id}`));
+		const semanticRows: Array<{ row: Row; d: number }> = [];
+		const backdropById = new Map(backdropPoints.map((b) => [b.pubmed_id, b]));
+		for (const [pmid, d] of semanticHits) {
+			const key = `neuroscape:${pmid}`;
+			if (lexicalIds.has(key)) continue;
+			const a = backdropById.get(pmid);
+			if (!a) continue;
+			semanticRows.push({
+				row: {
+					kind: 'neuroscape',
+					id: a.pubmed_id,
+					title: a.title,
+					cluster_id: a.cluster_id,
+					subline: `NeuroScape · PMID ${a.pubmed_id} · ${a.year}`
+				},
+				d
+			});
+		}
+		semanticRows.sort((x, y) => x.d - y.d);
+		return [...lexicalRows, ...semanticRows.map((s) => s.row)];
 	})();
+	$: semanticHitMap = semanticHits;
 
 	$: visible = filtered.slice(0, limit);
 	$: totalCount = filtered.length;

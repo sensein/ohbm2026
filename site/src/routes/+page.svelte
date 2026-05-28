@@ -539,6 +539,65 @@
 		if (!anyLassoActive) return scatterBackdrop;
 		return scatterBackdrop.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
 	})();
+	// Spec 019 / FR-002 — KNN-expansion semantic search on /neuroscape/
+	// + atlas-root. When `$semanticEnabled` is on AND the debounced
+	// query is non-empty, take the top-N articles whose titles loosely
+	// match the query as semantic SEEDS, walk the k=20 nearest-neighbour
+	// graph already attached to each article, aggregate the
+	// (pubmed_id, min-distance) pairs that don't already appear in the
+	// lexical hit set, and pass them to the NeuroscapeBrowsePanel as
+	// the `semanticHits` prop.
+	//
+	// Note: this is the KNN-only branch of the broader cluster-routed
+	// pipeline (research.md §R-007). Without the production
+	// neuroscape_vectors.parquet (a separate spec-019 build artefact
+	// still pending deploy), we can't run the full embed→route→
+	// cosine-rerank steps. The KNN graph alone gives a useful
+	// "semantically related to your lexical hits" signal; the full
+	// ranker drops in via the existing $lib/search/neuroscape_ranker
+	// scaffolding when the production parquet ships.
+	const SEMANTIC_SEED_LIMIT = 25;
+	const SEMANTIC_TOP_N = 60;
+	$: neuroscapeSemanticHits = (() => {
+		if (!$semanticEnabled) return new Map<number, number>();
+		const q = ($debouncedSearchQuery ?? '').trim().toLowerCase();
+		if (q.length < 3) return new Map<number, number>();
+		if (SITE_MODE !== 'neuroscape' && SITE_MODE !== 'atlas-root') {
+			return new Map<number, number>();
+		}
+		// Lightweight seed selection — pick the first SEMANTIC_SEED_LIMIT
+		// articles whose normalised title CONTAINS the query (any token).
+		// The BrowsePanel's full operator + typo path is more accurate
+		// but iterating it twice is wasteful for the seed step; this
+		// loose substring seed is plenty to drive KNN expansion.
+		const seedIds: number[] = [];
+		for (const a of filteredBackdrop) {
+			if (seedIds.length >= SEMANTIC_SEED_LIMIT) break;
+			if ((a.title ?? '').toLowerCase().includes(q)) seedIds.push(a.pubmed_id);
+		}
+		if (seedIds.length === 0) return new Map<number, number>();
+		// Walk the KNN graph from each seed. The graph is attached to
+		// each article as `nearest_pubmed_ids` + `nearest_distances`
+		// (loader.ts:545 join). For each neighbour, record the minimum
+		// distance across all seeds.
+		const seedSet = new Set(seedIds);
+		const semanticOnly = new Map<number, number>();
+		const articleById = new Map(filteredBackdrop.map((a) => [a.pubmed_id, a]));
+		for (const seed of seedIds) {
+			const a = articleById.get(seed);
+			if (!a?.nearest_pubmed_ids || !a?.nearest_distances) continue;
+			for (let i = 0; i < a.nearest_pubmed_ids.length; i++) {
+				const nb = a.nearest_pubmed_ids[i];
+				if (seedSet.has(nb)) continue;
+				const d = a.nearest_distances[i];
+				const prev = semanticOnly.get(nb);
+				if (prev === undefined || d < prev) semanticOnly.set(nb, d);
+			}
+		}
+		// Trim to top-N by ascending distance.
+		const sorted = Array.from(semanticOnly.entries()).sort((x, y) => x[1] - y[1]);
+		return new Map(sorted.slice(0, SEMANTIC_TOP_N));
+	})();
 	$: filteredOverlay = (() => {
 		if (!anyLassoActive) return scatterOverlay;
 		return scatterOverlay.filter((p) => atlasLassoOhbmSet.has(p.poster_id));
@@ -1370,6 +1429,7 @@
 							articles={filteredBackdrop}
 							clustersById={atlasClustersById}
 							query={$debouncedSearchQuery}
+							semanticHits={neuroscapeSemanticHits}
 							on:focus={(ev) => {
 								// Update the URL so deep-link restore + back-button work,
 								// THEN open the detail panel so the inline third pane
@@ -1392,6 +1452,7 @@
 							clustersById={atlasClustersById}
 							permalinkFor={atlasPermalink}
 							query={$debouncedSearchQuery}
+							semanticHits={neuroscapeSemanticHits}
 							on:select={(ev) => {
 								onAtlasPointClick(
 									new CustomEvent('pointclick', { detail: ev.detail })

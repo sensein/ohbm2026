@@ -37,7 +37,9 @@ const clusterPubmedIds: Map<number, BigInt64Array> = new Map();
 
 type InitOhbmMsg = {
 	type: 'init';
-	corpus: 'ohbm2026';
+	// Optional for backward compat with the existing OHBM 2026 caller
+	// in `$lib/search/semantic.ts` which sends no `corpus` field.
+	corpus?: 'ohbm2026';
 	vectors: ArrayBuffer;
 	dim: number;
 	scale: number;
@@ -102,8 +104,15 @@ self.addEventListener('message', async (e: MessageEvent<InMsg>) => {
 			case 'init': {
 				dim = msg.dim;
 				invScale = msg.scale > 0 ? 1 / msg.scale : 1;
-				if (msg.corpus === 'ohbm2026') {
-					corpus = new Int8Array(msg.vectors);
+				// Backward-compat: the existing OHBM 2026 caller
+				// (`$lib/search/semantic.ts`) sends an init message
+				// WITHOUT a `corpus` field; treat that as the legacy
+				// OHBM 2026 mode so my spec-019 worker extensions don't
+				// break the pre-existing /ohbm2026/ semantic search.
+				const corpusKind = (msg as { corpus?: 'ohbm2026' | 'neuroscape' }).corpus ?? 'ohbm2026';
+				if (corpusKind === 'ohbm2026') {
+					const ohbmMsg = msg as InitOhbmMsg;
+					corpus = new Int8Array(ohbmMsg.vectors);
 				} else {
 					clusterVectors.clear();
 					clusterPubmedIds.clear();
