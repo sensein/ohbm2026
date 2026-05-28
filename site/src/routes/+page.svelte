@@ -764,7 +764,11 @@
 	// scatter3d hammers SwiftShader CPU rendering). Visitors flip
 	// it on with the same toggle after reading the admonition near
 	// the top of the page.
-	let atlasSearchQuery = '';
+	// Spec 019 / T028 — the atlas-root + /neuroscape/ search surface
+	// now reuses the shared `$searchQuery` store via <SearchBar>
+	// (FR-025). The previously-local `atlasSearchQuery` declaration is
+	// removed; downstream readers use `$searchQuery` directly. The
+	// store is auto-cleared by SearchBar's own clear-button affordance.
 	let atlasShowMap =
 		typeof window === 'undefined' ? true : window.innerWidth >= 1024;
 	// Mobile-only "🔍 Filters" toggle, mirroring OHBM's pattern: the
@@ -1121,28 +1125,20 @@
 		     panel if needed). -->
 		<div class="top-row">
 			<div class="search-row">
-				<label class="atlas-search" data-testid="atlas-search-label">
-					<span class="visually-hidden">Search</span>
-					<input
-						type="search"
-						bind:value={atlasSearchQuery}
-						placeholder={SITE_MODE === 'atlas-root'
-							? 'Search OHBM 2026 + NeuroScape titles or ids…'
-							: 'Search 461,316 NeuroScape titles…'}
-						data-testid={SITE_MODE === 'atlas-root'
-							? 'atlas-root-search-input'
-							: 'neuroscape-search-input'}
-					/>
-					{#if atlasSearchQuery}
-						<button
-							type="button"
-							class="atlas-search-clear"
-							on:click={() => (atlasSearchQuery = '')}
-							aria-label="Clear search"
-							data-testid="atlas-search-clear"
-						>×</button>
-					{/if}
-				</label>
+				<!-- Spec 019 / T028 / FR-025 — replace the slim local-state
+				     <input> with the shared <SearchBar> so atlas-root and
+				     /neuroscape/ inherit OHBM 2026's operator syntax
+				     verbatim (phrase, negation, OR, id:N). The corpus prop
+				     drives the `id:` autocomplete data source + the
+				     placeholder copy; the value binds via the same
+				     `$searchQuery` store /ohbm2026/ uses. -->
+				<SearchBar
+					corpus={SITE_MODE === 'atlas-root' ? 'atlas-root' : 'neuroscape'}
+					placeholderOverride={SITE_MODE === 'atlas-root'
+						? 'Search OHBM 2026 + NeuroScape titles or ids…'
+						: 'Search 461,316 NeuroScape titles…'}
+					abstractsByPosterId={new Map()}
+				/>
 			</div>
 			<div class="controls" data-testid="atlas-root-controls">
 				<!-- Clear-selection button lives inside the UmapPanel header
@@ -1352,7 +1348,7 @@
 						<NeuroscapeBrowsePanel
 							articles={filteredBackdrop}
 							clustersById={atlasClustersById}
-							bind:query={atlasSearchQuery}
+							query={$searchQuery}
 							on:focus={(ev) => {
 								// Update the URL so deep-link restore + back-button work,
 								// THEN open the detail panel so the inline third pane
@@ -1374,7 +1370,7 @@
 							overlayPoints={filteredOverlay}
 							clustersById={atlasClustersById}
 							permalinkFor={atlasPermalink}
-							bind:query={atlasSearchQuery}
+							query={$searchQuery}
 							on:select={(ev) => {
 								onAtlasPointClick(
 									new CustomEvent('pointclick', { detail: ev.detail })
