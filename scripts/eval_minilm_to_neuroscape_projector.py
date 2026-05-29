@@ -63,6 +63,24 @@ def _l2norm(x: np.ndarray) -> np.ndarray:
     return (x / n).astype(np.float32)
 
 
+def build_relrep(x: np.ndarray, anchors: np.ndarray, batch: int = 50000) -> np.ndarray:
+    """Relative-representation featurisation (Moschella et al., ICLR 2023).
+
+    Re-express each (L2-normed) row of ``x`` as its cosine similarities to a
+    fixed set of ``anchors`` (also L2-normed), then L2-norm the resulting
+    K-vector. Because every coordinate is an inner product between unit
+    vectors, the representation is invariant to any rotation/reflection of the
+    source space — the survey's biggest-bang lever for aligning two
+    independently-trained embedding spaces before a projector even sees them.
+
+    Batched over rows to keep the [N,K] matmul off a single huge allocation."""
+    out = np.empty((x.shape[0], anchors.shape[0]), dtype=np.float32)
+    for s in range(0, x.shape[0], batch):
+        e = min(s + batch, x.shape[0])
+        out[s:e] = x[s:e] @ anchors.T
+    return _l2norm(out)
+
+
 # ── data assembly ────────────────────────────────────────────────────
 
 
@@ -490,6 +508,19 @@ def main() -> int:
         choices=["cosine", "geodesic"],
         help="InfoNCE anchor metric: chordal 1-cos or Riemannian arccos^2 on S^63",
     )
+    ap.add_argument(
+        "--features",
+        default="raw",
+        choices=["raw", "relrep"],
+        help="projector input: raw MiniLM-384 or relative-representation "
+        "cosine-sims to --n-anchors fixed training anchors",
+    )
+    ap.add_argument(
+        "--n-anchors",
+        type=int,
+        default=512,
+        help="number of fixed training anchors for --features relrep",
+    )
     ap.add_argument("--recall-k", type=int, default=20)
     ap.add_argument("--recall-test", type=int, default=5000, help="sampled test probes for recall@k")
     ap.add_argument("--recall-ref", type=int, default=100000, help="sampled reference corpus size")
@@ -530,6 +561,16 @@ def main() -> int:
     va = year == VAL_YEAR
     te = year > VAL_YEAR
     _log(f"split: train={int(tr.sum())} val={int(va.sum())} test={int(te.sum())}")
+
+    if args.features == "relrep":
+        # Anchors are a fixed random subset of TRAIN rows (no val/test leakage).
+        anchor_rng = np.random.default_rng(0)
+        tr_pool = np.flatnonzero(tr)
+        n_anchors = min(args.n_anchors, tr_pool.size)
+        anchor_idx = anchor_rng.choice(tr_pool, size=n_anchors, replace=False)
+        anchors = x[anchor_idx]
+        x = build_relrep(x, anchors)
+        _log(f"relrep: featurised x -> {x.shape[1]}-d (cosine-sims to {n_anchors} train anchors)")
 
     # Sanity ceiling: how well does the TRUE 64-d land on its own cluster?
     ceil_top1, ceil_top3 = centroid_agreement(y[te], cluster[te], cluster_ids, centroids)
