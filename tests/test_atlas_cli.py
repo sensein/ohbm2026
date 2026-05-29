@@ -33,8 +33,9 @@ class BuildParserTests(unittest.TestCase):
             "ohbm2026_parquet",
             "output_root",
             "umap_cache_root",
+            "knn_cache_root",
             "projection_cache_root",
-            "decimated_backdrop_size",
+            "lod_resolutions",
             "neighbors_k",
             "link_check_rate",
             "ncbi_api_key_env",
@@ -56,13 +57,14 @@ class BuildParserTests(unittest.TestCase):
             ]
         )
         self.assertEqual(args.voyage_bundle, "voyage_stage2_published")
-        self.assertEqual(args.decimated_backdrop_size, 50_000)
+        self.assertEqual(args.lod_resolutions, "24,48,96,192,384")
         self.assertEqual(args.neighbors_k, 20)
         self.assertAlmostEqual(args.link_check_rate, 3.0)
         self.assertEqual(args.ncbi_api_key_env, "NCBI_API_KEY")
         self.assertFalse(args.no_link_check)
         self.assertIsNone(args.force_rebuild)
         self.assertEqual(args.umap_cache_root, Path("data/cache/atlas-umap"))
+        self.assertEqual(args.knn_cache_root, Path("data/cache/atlas-knn"))
         self.assertEqual(
             args.projection_cache_root, Path("data/cache/atlas-projection")
         )

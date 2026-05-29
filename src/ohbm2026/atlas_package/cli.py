@@ -54,8 +54,28 @@ from .orchestrator import (
     OhbmInputRecord,
     build_atlas_package,
 )
-from . import umap_fit
+from . import lod, umap_fit
 from .provenance import normalise_path
+
+
+def _parse_lod_resolutions(raw: str) -> tuple[int, ...]:
+    """Parse the ``--lod-resolutions`` comma-separated list into a tuple
+    of strictly-positive ints (coarse → fine). Raises ``ValueError`` on
+    a malformed / empty / non-positive entry — no silent fallback (VI)."""
+
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        raise ValueError("--lod-resolutions must list at least one resolution")
+    out: list[int] = []
+    for p in parts:
+        try:
+            v = int(p)
+        except ValueError as exc:
+            raise ValueError(f"--lod-resolutions entry {p!r} is not an integer") from exc
+        if v <= 0:
+            raise ValueError(f"--lod-resolutions entry {v} must be > 0")
+        out.append(v)
+    return tuple(out)
 
 
 __all__ = [
@@ -129,16 +149,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="UMAP fit cache root.",
     )
     p.add_argument(
+        "--knn-cache-root",
+        type=Path,
+        default=Path("data/cache/atlas-knn"),
+        help=(
+            "k-NN neighbour-index cache root. A rebuild with unchanged "
+            "vectors skips the brute-force O(n²) cosine search."
+        ),
+    )
+    p.add_argument(
         "--projection-cache-root",
         type=Path,
         default=Path("data/cache/atlas-projection"),
         help="Per-OHBM-2026-abstract projection cache root.",
     )
     p.add_argument(
-        "--decimated-backdrop-size",
-        type=int,
-        default=50_000,
-        help="Target row count for the decimated backdrop in atlas.parquet (R-011).",
+        "--lod-resolutions",
+        type=str,
+        default=",".join(str(r) for r in lod.DEFAULT_RESOLUTIONS),
+        help=(
+            "Comma-separated quadtree grid resolutions (coarse → fine) for "
+            "the progressive landing backdrop. One self-contained "
+            "backdrop_lod{k} tier is emitted per resolution; everything else "
+            "falls to the rest tier (kept only in coords). Default tuned for "
+            "the ~461k NeuroScape corpus."
+        ),
     )
     p.add_argument(
         "--neighbors-k",
@@ -463,11 +498,12 @@ def main(argv: list[str] | None = None) -> int:
             ohbm2026_state_key=ohbm2026_state_key,
             output_root=args.output_root,
             umap_cache_root=args.umap_cache_root,
+            knn_cache_root=args.knn_cache_root,
             semantic_index_enabled=args.semantic_index,
             semantic_cache_root=args.semantic_cache_root,
             semantic_model_id=args.semantic_model_id,
             voyage_bundle_id=args.voyage_bundle,
-            decimated_backdrop_size=args.decimated_backdrop_size,
+            lod_resolutions=_parse_lod_resolutions(args.lod_resolutions),
             neighbors_k=args.neighbors_k,
             link_check_rate=args.link_check_rate,
             skip_link_check=args.no_link_check,

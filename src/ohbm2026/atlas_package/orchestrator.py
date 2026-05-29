@@ -16,7 +16,7 @@ The orchestrator is the single function the
 5. Builds the k=20 neighbour index over the NeuroScape Stage-2
    vectors.
 6. Assigns the deterministic cluster palette.
-7. Per-cluster stratified decimation of the backdrop.
+7. Quadtree blue-noise LOD of the backdrop (progressive tiers).
 8. Writes ``neuroscape.parquet`` + ``atlas.parquet`` + asserts the
    cluster-table cross-parquet invariant.
 9. HEAD-checks the small fixed set of non-PubMed-record URLs.
@@ -44,8 +44,8 @@ from ohbm2026.exceptions import NeuroScapeInputError
 
 from . import (
     cluster_palette as palette_mod,
-    decimation,
     link_check as link_check_mod,
+    lod,
     neighbour_index,
     neuroscape_loader,
     ohbm_projector,
@@ -87,8 +87,18 @@ class AtlasBuildConfig:
     ohbm2026_state_key: str
     output_root: Path
     umap_cache_root: Path
+    # On-disk cache for the brute-force k-NN neighbour index, keyed by
+    # sha256(pmids‖vectors‖k). None ⇒ no cache (recompute every run).
+    # The CLI defaults it to data/cache/atlas-knn so rebuilds with
+    # unchanged inputs skip the ~20-30 min O(n²) search (constitution III).
+    knn_cache_root: Path | None = None
     voyage_bundle_id: str = "voyage_stage2_published"
-    decimated_backdrop_size: int = 50_000
+    # Quadtree LOD resolutions (coarse → fine) for the progressive
+    # landing backdrop. One self-contained ``backdrop_lod{k}`` tier is
+    # emitted per resolution; everything not selected as a tier
+    # representative falls to the rest tier (full corpus, kept only in
+    # ``coords``). See ``lod.assign_lod_levels``.
+    lod_resolutions: tuple[int, ...] = lod.DEFAULT_RESOLUTIONS
     neighbors_k: int = 20
     umap_params_3d: umap_fit.UmapFitParams | None = None
     umap_params_2d: umap_fit.UmapFitParams | None = None
@@ -222,19 +232,28 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
     else:
         ohbm_2d = np.empty((0, 2), dtype=np.float32)
 
-    # 5. Neighbour index.
-    knn = neighbour_index.build_knn(pmids, vectors, k=cfg.neighbors_k)
+    # 5. Neighbour index. Cached on disk (like the UMAP fit) so a rebuild
+    # with unchanged vectors skips the brute-force k-NN entirely.
+    knn = neighbour_index.build_knn(
+        pmids, vectors, k=cfg.neighbors_k, cache_root=cfg.knn_cache_root
+    )
 
     # 6. Palette.
     from collections import Counter
     cluster_counts: dict[int, int] = dict(Counter(a.cluster_id for a in articles))
     palette = palette_mod.assign_palette(cluster_counts, primary_size=cfg.primary_palette_size)
 
-    # 7. Decimation.
-    cluster_id_arr = np.array([a.cluster_id for a in articles], dtype=np.int16)
-    decimated_indices = decimation.stratified_sample(
-        cluster_id_arr, target_size=cfg.decimated_backdrop_size, seed=cfg.seed
+    # 7. Quadtree blue-noise LOD over the 2D embedding. Tiebreak by
+    # pubmed_id so the assignment is order-independent + reproducible.
+    # Each cumulative prefix is a blue-noise cover → the backdrop can be
+    # painted coarse-first and refined; the rest tier holds the full-
+    # corpus remainder (kept only in ``coords``).
+    lod_levels = lod.assign_lod_levels(
+        fit2d.embedded,
+        resolutions=cfg.lod_resolutions,
+        tiebreak_keys=pmids,
     )
+    n_backdrop_levels = len(cfg.lod_resolutions)
 
     # 8. Per-OHBM-record nearest-cluster assignment (in UMAP space).
     # For each projected OHBM record, find the nearest backdrop point
@@ -408,7 +427,8 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
         palette=palette,
         embedded_3d=fit3d.embedded,
         embedded_2d=fit2d.embedded,
-        decimated_indices=decimated_indices,
+        lod_levels=lod_levels,
+        n_backdrop_levels=n_backdrop_levels,
         knn=knn,
         titles_index_bin=cfg.titles_index_bin,
         titles_index_meta=titles_meta,
@@ -511,6 +531,24 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
             "ohbm2026_state_key": cfg.ohbm2026_state_key,
         },
         "link_check": link_report,
+        # Spec 019 follow-up — progressive LOD backdrop. `coverage[k]`
+        # is the fraction of the full corpus's occupied cells (at the
+        # finest reference resolution) already covered by tiers ≤ k —
+        # the quantitative "overall shape maintained" check (VIII).
+        "lod": {
+            "resolutions": list(cfg.lod_resolutions),
+            "n_backdrop_levels": n_backdrop_levels,
+            "backdrop_lod_sizes": [
+                int((lod_levels == k).sum()) for k in range(n_backdrop_levels)
+            ],
+            "rest_tier_size": int((lod_levels >= n_backdrop_levels).sum()),
+            "coverage_reference_resolution": lod.COVERAGE_REFERENCE_RESOLUTION,
+            "coverage": lod.lod_coverage(
+                fit2d.embedded,
+                lod_levels,
+                reference_resolution=lod.COVERAGE_REFERENCE_RESOLUTION,
+            ),
+        },
         # Spec 019 — semantic-index provenance. Populated only when
         # cfg.semantic_index_enabled is True; absent (None) means the
         # builder ran with --no-semantic-index and no vectors parquet

@@ -150,8 +150,13 @@ describe('loader atlas-root dispatch (T042)', () => {
 					}
 				],
 				articles: [{ pubmed_id: 100, title: 'T', year: 2020, cluster_id: 0 }],
-				coords: [{ pubmed_id: 100, cluster_id: 0, umap_2d: [1, 2], umap_3d: [1, 2, 3] }],
-				backdrop_decimated: [
+				coords: [
+					{ pubmed_id: 100, cluster_id: 0, umap_2d: [1, 2], umap_3d: [1, 2, 3], lod_level: 0 }
+				],
+				// Spec 019 follow-up — progressive backdrop tiers are
+				// range-fetched on demand by atlas-root, never emitted as a
+				// full-GET shard. The full-GET dispatch must SKIP them.
+				backdrop_lod0: [
 					{ pubmed_id: 100, cluster_id: 0, umap_2d: [1, 2], umap_3d: [1, 2, 3], title: 'T', year: 2020 }
 				],
 				clusters: [{ cluster_id: 0, title: 'C0' }],
@@ -161,11 +166,15 @@ describe('loader atlas-root dispatch (T042)', () => {
 				'data/manifest.json',
 				'data/neuroscape/articles.json',
 				'data/neuroscape/coords.json',
-				'data/neuroscape/backdrop_decimated.json',
 				'data/neuroscape/clusters.json',
 				'data/neuroscape/neighbors.json'
 			],
-			notExpectedKeys: ['data/abstracts.json', 'data/enrichment.json']
+			notExpectedKeys: [
+				'data/abstracts.json',
+				'data/enrichment.json',
+				'data/neuroscape/backdrop_decimated.json',
+				'data/neuroscape/backdrop_lod0.json'
+			]
 		});
 	});
 
@@ -181,7 +190,9 @@ describe('loader atlas-root dispatch (T042)', () => {
 				}
 			],
 			articles: [{ pubmed_id: 100, title: 'T', year: 2020, cluster_id: 0 }],
-			coords: [{ pubmed_id: 100, cluster_id: 0, umap_2d: [1.5, 2.5], umap_3d: [1, 2, 3] }]
+			coords: [
+				{ pubmed_id: 100, cluster_id: 0, umap_2d: [1.5, 2.5], umap_3d: [1, 2, 3], lod_level: 2 }
+			]
 		};
 		__outerNames = Object.keys(__innerByName);
 
@@ -202,10 +213,18 @@ describe('loader atlas-root dispatch (T042)', () => {
 		const map = await loadDataPackage(fakeFetch);
 		expect(map).not.toBeNull();
 		const articlesShard = map!.get('data/neuroscape/articles.json') as {
-			articles: Array<{ pubmed_id: number; umap_2d?: number[]; umap_3d?: number[] }>;
+			articles: Array<{
+				pubmed_id: number;
+				umap_2d?: number[];
+				umap_3d?: number[];
+				lod_level?: number;
+			}>;
 		};
 		expect(articlesShard.articles[0].umap_2d).toEqual([1.5, 2.5]);
 		expect(articlesShard.articles[0].umap_3d).toEqual([1, 2, 3]);
+		// Spec 019 follow-up — lod_level folds onto the article so the
+		// /neuroscape/ scatter can cap to the blue-noise sample.
+		expect(articlesShard.articles[0].lod_level).toEqual(2);
 	});
 
 	it('still emits the OHBM 2026 envelope when manifest has no schema_version (legacy abstracts.v2 path)', async () => {

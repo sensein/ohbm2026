@@ -145,6 +145,7 @@ def _coords_table(
     articles: Sequence[ArticleHeader],
     embedded_2d: np.ndarray,
     embedded_3d: np.ndarray,
+    lod_levels: np.ndarray,
 ) -> pa.Table:
     """Build the standalone scatter-coordinate table.
 
@@ -152,6 +153,12 @@ def _coords_table(
     landing scatter can colour every point from this single table — no
     join against ``articles`` needed to render. Titles/years stay out
     (fetched from ``articles`` only when a tooltip/result row needs them).
+
+    ``lod_level`` annotates every point with its quadtree level-of-detail
+    tier (spec 019 follow-up). ``/neuroscape/`` loads the full corpus for
+    search anyway, so it caps the scatter with ``lod_level <= cap`` at
+    render time — no extra fetch. atlas-root instead range-fetches the
+    per-tier ``backdrop_lod*`` tables.
     """
 
     n = len(articles)
@@ -159,6 +166,8 @@ def _coords_table(
         raise ValueError(f"embedded_2d shape {embedded_2d.shape} != ({n}, 2)")
     if embedded_3d.shape != (n, 3):
         raise ValueError(f"embedded_3d shape {embedded_3d.shape} != ({n}, 3)")
+    if lod_levels.shape != (n,):
+        raise ValueError(f"lod_levels shape {lod_levels.shape} != ({n},)")
     return pa.table(
         {
             "pubmed_id": pa.array([a.pubmed_id for a in articles], type=pa.int64()),
@@ -170,6 +179,9 @@ def _coords_table(
             "umap_3d": pa.array(
                 [row.astype(np.float32).tolist() for row in embedded_3d],
                 type=pa.list_(pa.float32(), 3),
+            ),
+            "lod_level": pa.array(
+                [int(v) for v in lod_levels.tolist()], type=pa.int16()
             ),
         }
     )
@@ -337,7 +349,8 @@ def write_neuroscape_parquet(
     palette: Mapping[int, tuple[str, str]],
     embedded_3d: np.ndarray,
     embedded_2d: np.ndarray,
-    decimated_indices: np.ndarray,
+    lod_levels: np.ndarray,
+    n_backdrop_levels: int,
     knn: KnnResult,
     titles_index_bin: bytes,
     titles_index_meta: Mapping[str, Any],
@@ -349,12 +362,19 @@ def write_neuroscape_parquet(
 
     - ``articles``   identity + search fields (no coordinates).
     - ``coords``     full-corpus scatter geometry (pubmed_id, cluster_id,
-                     umap_2d, umap_3d) — split out so the scatter geometry
-                     can be fetched without titles and vice versa.
-    - ``backdrop_decimated`` self-contained stratified sample (with
-                     title/year for hover) used as the default landing
-                     scatter — atlas-root range-fetches THIS instead of
-                     duplicating a 27 MB full backdrop into atlas.parquet.
+                     umap_2d, umap_3d, lod_level) — split out so the
+                     scatter geometry can be fetched without titles and
+                     vice versa, and so ``/neuroscape/`` can cap the
+                     scatter by ``lod_level`` without an extra fetch.
+    - ``backdrop_lod0 … backdrop_lod{n-1}`` self-contained progressive
+                     scatter tiers (each with title/year for hover). The
+                     quadtree LOD (``lod.assign_lod_levels``) makes every
+                     cumulative prefix a blue-noise cover, so atlas-root
+                     range-fetches ``backdrop_lod0`` for an instant coarse
+                     paint and the finer tiers to refine — the rest tier
+                     (``lod_level == n_backdrop_levels``) is the full-
+                     corpus remainder and is deliberately NOT emitted as a
+                     backdrop table (it lives only in ``coords``).
     - ``clusters`` / ``neighbors_neuroscape`` / search sidecars.
 
     Spec 019: ``cluster_centroids`` is an OPTIONAL additional table
@@ -364,13 +384,22 @@ def write_neuroscape_parquet(
     to thread it through; the table is omitted in that case.
     """
 
-    dec_idx = [int(i) for i in np.asarray(decimated_indices).tolist()]
+    lod_levels = np.asarray(lod_levels)
+    levels_list = lod_levels.tolist()
+    # Partition representative tiers (rest tier excluded — see docstring).
+    tier_indices: list[list[int]] = [[] for _ in range(n_backdrop_levels)]
+    for i, lv in enumerate(levels_list):
+        if 0 <= lv < n_backdrop_levels:
+            tier_indices[int(lv)].append(i)
+    backdrop_lod_sizes = [len(t) for t in tier_indices]
+
     manifest_json = {
         "schema_version": "neuroscape.v1",
         "build_info": dict(build_info),
         "n_articles": len(articles),
         "n_clusters": len(clusters),
-        "n_backdrop_decimated": len(dec_idx),
+        "n_backdrop_levels": int(n_backdrop_levels),
+        "backdrop_lod_sizes": backdrop_lod_sizes,
         "k_neighbors": int(knn.nearest_pmids.shape[1]) if knn.nearest_pmids.size else 0,
         "has_cluster_centroids": cluster_centroids is not None and len(cluster_centroids) > 0,
     }
@@ -379,13 +408,18 @@ def write_neuroscape_parquet(
         ("articles", _to_inner_parquet_bytes(_articles_table(articles))),
         (
             "coords",
-            _to_inner_parquet_bytes(_coords_table(articles, embedded_2d, embedded_3d)),
-        ),
-        (
-            "backdrop_decimated",
             _to_inner_parquet_bytes(
-                _backdrop_table(articles, dec_idx, embedded_2d, embedded_3d)
+                _coords_table(articles, embedded_2d, embedded_3d, lod_levels)
             ),
+        ),
+        *(
+            (
+                f"backdrop_lod{k}",
+                _to_inner_parquet_bytes(
+                    _backdrop_table(articles, tier_indices[k], embedded_2d, embedded_3d)
+                ),
+            )
+            for k in range(n_backdrop_levels)
         ),
         (
             "clusters",

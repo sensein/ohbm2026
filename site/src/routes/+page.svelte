@@ -84,8 +84,9 @@
 		loadClusterVectors,
 		loadClusterCentroidsFromNeuroscape,
 		loadClustersFromNeuroscape,
-		loadBackdropDecimatedFromNeuroscape,
 		loadArticlesFromNeuroscape,
+		loadBackdropLevelFromNeuroscape,
+		readNeuroscapeBackdropLevelCount,
 		verifyAtlasSiblingDrift,
 		type AtlasDriftEntry
 	} from '$lib/data_package/loader';
@@ -117,6 +118,11 @@
 		// neighbours.
 		nearest_pubmed_ids?: number[];
 		nearest_distances?: number[];
+		// Quadtree LOD tier (spec 019 follow-up). Present on the
+		// /neuroscape/ build (folded from `coords`); used to cap the
+		// scatter to the blue-noise sample. atlas-root's per-tier rows
+		// don't carry it (they're already the sample for that tier).
+		lod_level?: number;
 	};
 	type AtlasOverlayPoint = {
 		submission_id: number;
@@ -525,6 +531,13 @@
 	let listCorpus: AtlasBackdropPoint[] = [];
 	let atlasOverlayPoints: AtlasOverlayPoint[] = [];
 	let atlasClusters: AtlasClusterRow[] = [];
+	// Spec 019 follow-up — /neuroscape/ loads the full 461k corpus for
+	// search + result-list, but renders the SCATTER from the quadtree
+	// blue-noise sample only (lod_level <= cap), which preserves the
+	// overall shape while keeping the WebGL scene light. `null` ⇒ older
+	// build with no lod_level → render every point (no cap). The cap is
+	// the highest representative tier (rest tier hidden by default).
+	let neuroscapeLodCap: number | null = null;
 	// T046 + T047 — selection state for the slide-in detail panel
 	// and the lasso grouped result list. Both are atlas-root-only.
 	let atlasSelection:
@@ -627,6 +640,20 @@
 		if (SITE_MODE !== 'atlas-root' || !filterShowOhbm) return [] as AtlasOverlayPoint[];
 		if (filterClusterIds.size === 0) return atlasOverlayPoints;
 		return atlasOverlayPoints.filter((p) => filterClusterIds.has(p.nearest_cluster_id));
+	})();
+	// Spec 019 follow-up — the SCATTER-only render set. atlas-root already
+	// renders the LOD sample it range-fetched (no per-point lod_level, no
+	// cap). /neuroscape/ holds the full corpus, so cap the scatter to the
+	// blue-noise representative tiers (lod_level <= cap) while the result
+	// list keeps the full `filteredBackdrop`. Derived from `scatterBackdrop`
+	// so facet filters still apply to the map.
+	$: scatterBackdropForMap = (() => {
+		if (SITE_MODE !== 'neuroscape' || neuroscapeLodCap === null) return scatterBackdrop;
+		const cap = neuroscapeLodCap;
+		return scatterBackdrop.filter((p) => {
+			const lv = (p as { lod_level?: number }).lod_level;
+			return lv === undefined || lv <= cap;
+		});
 	})();
 	// Result-list filters — the same facets plus the lasso. Browse
 	// panel narrows to lassoed ids when the lasso is active.
@@ -1186,6 +1213,30 @@
 		}
 	}
 
+	// Rebuild the cross-site NeuroScape title lookup from the current
+	// `listCorpus` + `atlasClusters`. Sourced from `listCorpus` (the
+	// LIST/search corpus) rather than the SCATTER (`atlasBackdrop`) so it
+	// covers the full corpus once the background `articles` fetch lands —
+	// on atlas-root the scatter is only the LOD sample, so sourcing it
+	// there would shrink the cart's title coverage. Called after first
+	// paint and again when the full corpus swaps in.
+	function refreshNeuroscapeTitleLookup() {
+		const clusterTitleById = new Map<number, string>();
+		for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
+		const neuroMap = new Map<
+			number,
+			{ title: string; year?: number; cluster_title?: string }
+		>();
+		for (const p of listCorpus) {
+			neuroMap.set(p.pubmed_id, {
+				title: p.title,
+				year: p.year,
+				cluster_title: clusterTitleById.get(p.cluster_id)
+			});
+		}
+		neuroscapeTitleLookup.set(neuroMap);
+	}
+
 	async function loadAtlasData() {
 		if (SITE_MODE === 'ohbm2026') return;
 		if (atlasLoading || atlasBackdrop.length > 0) return;
@@ -1229,24 +1280,59 @@
 				// overlay. The cluster legend + the landing backdrop are
 				// range-fetched from the sibling neuroscape.parquet (single
 				// source of truth, no 27 MB duplication in atlas.parquet).
-				const [clustersRows, backdropRows] = await Promise.all([
+				//
+				// Spec 019 follow-up — the backdrop is range-fetched
+				// progressively as quadtree LOD tiers: `backdrop_lod0` (a
+				// coarse blue-noise cover) paints almost instantly, then the
+				// finer tiers stream in and refine. The full corpus is never
+				// fetched for the backdrop. Clusters + the coarse tier load
+				// together so the first paint already has its legend colours.
+				const [clustersRows, lod0Rows, levelCount] = await Promise.all([
 					loadClustersFromNeuroscape(),
-					loadBackdropDecimatedFromNeuroscape()
+					loadBackdropLevelFromNeuroscape(0),
+					readNeuroscapeBackdropLevelCount()
 				]);
-				if (!clustersRows || !backdropRows) {
+				if (!clustersRows || !lod0Rows) {
 					atlasError =
 						'Atlas backdrop/clusters could not be range-fetched from the NeuroScape sibling parquet.';
 					return;
 				}
-				atlasBackdrop = backdropRows as unknown as AtlasBackdropPoint[];
-				// Seed the LIST/search corpus with the decimated 50k so the
-				// result list renders immediately on first paint; the FULL
-				// ~461k identity table is range-fetched in the background below
-				// and swapped in when ready (progressive enhancement — the
-				// no-query count ticks 53k → full once the articles land).
-				listCorpus = backdropRows as unknown as AtlasBackdropPoint[];
+				atlasBackdrop = lod0Rows as unknown as AtlasBackdropPoint[];
+				// Seed the LIST/search corpus with the coarse tier so the result
+				// list renders immediately on first paint; the FULL ~461k identity
+				// table is range-fetched in the background below and swapped in
+				// when ready (progressive enhancement — the no-query count ticks
+				// up to the full corpus once the articles land). The SCATTER and
+				// the LIST diverge on atlas-root: the scatter refines through the
+				// LOD tiers (below), the list jumps to the full identity table.
+				listCorpus = lod0Rows as unknown as AtlasBackdropPoint[];
 				atlasOverlayPoints = overlayShard.points;
 				atlasClusters = clustersRows as unknown as AtlasClusterRow[];
+				// Refine: stream the remaining tiers (lod1..N-1) and append.
+				// A missing/absent level resolves to null and is skipped — the
+				// scatter still shows every tier that did load (no silent
+				// zero-result; a fully-failed refine just keeps the coarse
+				// cover already painted).
+				const nLevels = levelCount ?? 1;
+				if (nLevels > 1) {
+					void (async () => {
+						const finer = await Promise.all(
+							Array.from({ length: nLevels - 1 }, (_, i) =>
+								loadBackdropLevelFromNeuroscape(i + 1).catch(() => null)
+							)
+						);
+						const extra = finer
+							.filter((r): r is Array<Record<string, unknown>> => !!r && r.length > 0)
+							.flat() as unknown as AtlasBackdropPoint[];
+						if (extra.length > 0) {
+							// Reassign (not push) so Svelte's reactivity repaints
+							// the scatter + rebuilds the derived id maps. The title
+							// lookup is driven by `listCorpus` (the full identity
+							// table), not the scatter, so it isn't rebuilt here.
+							atlasBackdrop = [...atlasBackdrop, ...extra];
+						}
+					})();
+				}
 				// Publish title lookups so the unifying cart drawer can
 				// render rich rows for items from EITHER subsite when
 				// the user is on atlas-root (the only build that loads
@@ -1256,20 +1342,7 @@
 					ohbmMap.set(p.poster_id, { title: p.title });
 				}
 				ohbmTitleLookup.set(ohbmMap);
-				const clusterTitleById = new Map<number, string>();
-				for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
-				const neuroMap = new Map<
-					number,
-					{ title: string; year?: number; cluster_title?: string }
-				>();
-				for (const p of atlasBackdrop) {
-					neuroMap.set(p.pubmed_id, {
-						title: p.title,
-						year: p.year,
-						cluster_title: clusterTitleById.get(p.cluster_id)
-					});
-				}
-				neuroscapeTitleLookup.set(neuroMap);
+				refreshNeuroscapeTitleLookup();
 				// T043 — Sibling-state-key drift check. Fires after the
 				// atlas scatter renders, so a slow / unreachable sibling
 				// doesn't block first paint. The check itself retries
@@ -1304,22 +1377,9 @@
 						}
 						listCorpus = rows as unknown as AtlasBackdropPoint[];
 						// Widen the cart's NeuroScape title lookup to the full
-						// corpus now that we have every title (was seeded with
-						// the 50k decimated set above).
-						const fullNeuroMap = new Map<
-							number,
-							{ title: string; year?: number; cluster_title?: string }
-						>();
-						const clusterTitleById2 = new Map<number, string>();
-						for (const c of atlasClusters) clusterTitleById2.set(c.cluster_id, c.title);
-						for (const p of listCorpus) {
-							fullNeuroMap.set(p.pubmed_id, {
-								title: p.title,
-								year: p.year,
-								cluster_title: clusterTitleById2.get(p.cluster_id)
-							});
-						}
-						neuroscapeTitleLookup.set(fullNeuroMap);
+						// corpus now that we have every title (was seeded with the
+						// coarse LOD tier above). Sources `listCorpus`, just set.
+						refreshNeuroscapeTitleLookup();
 					})
 					.catch((err) => {
 						console.warn(
@@ -1349,24 +1409,24 @@
 				listCorpus = articlesShard.articles;
 				atlasOverlayPoints = [];
 				atlasClusters = clustersShard.clusters;
+				// Cap the scatter to the representative tiers (hide the
+				// rest tier) so the WebGL scene stays light; the full
+				// corpus above still feeds search + the result list. An
+				// older build with no n_backdrop_levels leaves the cap
+				// null → every point renders (prior behaviour).
+				const nsManifest = pkg.get('data/manifest.json') as
+					| { n_backdrop_levels?: number }
+					| undefined;
+				neuroscapeLodCap =
+					typeof nsManifest?.n_backdrop_levels === 'number' &&
+					nsManifest.n_backdrop_levels > 0
+						? nsManifest.n_backdrop_levels - 1
+						: null;
 				// /neuroscape/ publishes only the neuroscape title
 				// lookup; cross-site OHBM rows in the cart render with
 				// a placeholder until the user visits an OHBM page or
 				// atlas-root warms the OHBM lookup.
-				const clusterTitleById = new Map<number, string>();
-				for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
-				const neuroMap = new Map<
-					number,
-					{ title: string; year?: number; cluster_title?: string }
-				>();
-				for (const p of atlasBackdrop) {
-					neuroMap.set(p.pubmed_id, {
-						title: p.title,
-						year: p.year,
-						cluster_title: clusterTitleById.get(p.cluster_id)
-					});
-				}
-				neuroscapeTitleLookup.set(neuroMap);
+				refreshNeuroscapeTitleLookup();
 			}
 			// Kick off the full cluster-routed ranker in the background
 			// once the articles + clusters are in memory. Non-blocking;
@@ -1723,7 +1783,7 @@
 			<div class="atlas-map-wrap">
 				<UmapPanel
 					mode={SITE_MODE === 'atlas-root' ? 'atlas' : 'neuroscape'}
-					backdropPoints={scatterBackdrop}
+					backdropPoints={scatterBackdropForMap}
 					overlayPoints={scatterOverlay}
 					atlasClusters={atlasClusters}
 					showOverlay={SITE_MODE === 'atlas-root' ? filterShowOhbm : false}

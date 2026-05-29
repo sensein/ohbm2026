@@ -74,6 +74,7 @@ __all__ = [
     "NeuroScapeInputError",
     "UmapFitError",
     "UmapCacheError",
+    "KnnCacheError",
     "OhbmProjectionError",
     "CrossParquetDriftError",
     "AtlasProvenanceError",
@@ -443,6 +444,32 @@ class UmapCacheError(Stage15Error):
     operator can delete the offending directory and re-run to re-fit
     cleanly. Carries (``path``, ``reason``) so the message points at
     the exact file.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.path = path
+        self.reason = reason
+
+
+class KnnCacheError(Stage15Error):
+    """The k-NN neighbour-index on-disk cache is unreadable or
+    inconsistent.
+
+    Raised by :func:`ohbm2026.atlas_package.neighbour_index.build_knn`
+    when a cache entry exists at the expected
+    ``<cache_root>/<state_key>/`` path but cannot be loaded (missing
+    companion array, unreadable ``.npy``, shape mismatch with the
+    requested ``k``). Like :class:`UmapCacheError` the builder treats
+    this as precise + recoverable: delete the offending directory and
+    re-run to recompute the brute-force k-NN cleanly. Carries
+    (``path``, ``reason``).
     """
 
     def __init__(

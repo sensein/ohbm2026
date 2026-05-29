@@ -14,9 +14,12 @@ pages.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
+from ohbm2026 import exceptions
 from ohbm2026.atlas_package import neighbour_index
 
 
@@ -105,6 +108,82 @@ class BuildKnnEdgeCaseTests(unittest.TestCase):
         result = neighbour_index.build_knn(pmids, vectors, k=20)
         self.assertEqual(result.nearest_pmids.shape, (5, 4))
         self.assertEqual(result.nearest_distances.shape, (5, 4))
+
+
+class BuildKnnCacheTests(unittest.TestCase):
+    """The brute-force k-NN is the dominant build cost on the 461k
+    corpus. Like the UMAP fit, it must cache on disk keyed by its
+    inputs so a rebuild with unchanged (pmids, vectors, k) skips the
+    O(n²) search entirely (constitution III)."""
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.cache_root = Path(self._tmp.name)
+        self.pmids = np.arange(40, dtype=np.int64) + 10000
+        self.vectors = _synthetic_vectors(n=40)
+
+    def test_state_key_is_stable_for_identical_inputs(self) -> None:
+        a = neighbour_index.compute_knn_state_key(self.pmids, self.vectors, k=5)
+        b = neighbour_index.compute_knn_state_key(self.pmids, self.vectors, k=5)
+        self.assertEqual(a, b)
+        self.assertEqual(len(a), 12)
+
+    def test_state_key_changes_with_k_and_vectors(self) -> None:
+        base = neighbour_index.compute_knn_state_key(self.pmids, self.vectors, k=5)
+        self.assertNotEqual(
+            base, neighbour_index.compute_knn_state_key(self.pmids, self.vectors, k=6)
+        )
+        other = _synthetic_vectors(n=40, seed=99)
+        self.assertNotEqual(
+            base, neighbour_index.compute_knn_state_key(self.pmids, other, k=5)
+        )
+
+    def test_miss_then_hit_returns_identical_result(self) -> None:
+        miss = neighbour_index.build_knn(
+            self.pmids, self.vectors, k=5, cache_root=self.cache_root
+        )
+        hit = neighbour_index.build_knn(
+            self.pmids, self.vectors, k=5, cache_root=self.cache_root
+        )
+        self.assertTrue(np.array_equal(miss.nearest_pmids, hit.nearest_pmids))
+        self.assertTrue(np.array_equal(miss.nearest_distances, hit.nearest_distances))
+        self.assertTrue(np.array_equal(miss.pmids, hit.pmids))
+
+    def test_hit_reads_cache_rather_than_recomputing(self) -> None:
+        # Populate, then tamper the cached distances with a sentinel. A
+        # genuine cache HIT returns the sentinel; a recompute would
+        # return the real distances. Proves the second call is a read.
+        neighbour_index.build_knn(
+            self.pmids, self.vectors, k=5, cache_root=self.cache_root
+        )
+        sk = neighbour_index.compute_knn_state_key(self.pmids, self.vectors, k=5)
+        paths = neighbour_index.cache_paths(self.cache_root, sk)
+        sentinel = np.full((40, 5), 0.4242, dtype=np.float32)
+        np.save(paths["nearest_distances"], sentinel, allow_pickle=False)
+        hit = neighbour_index.build_knn(
+            self.pmids, self.vectors, k=5, cache_root=self.cache_root
+        )
+        self.assertTrue(np.array_equal(hit.nearest_distances, sentinel))
+
+    def test_no_cache_root_still_computes(self) -> None:
+        res = neighbour_index.build_knn(self.pmids, self.vectors, k=5)
+        self.assertEqual(res.nearest_pmids.shape, (40, 5))
+
+    def test_incomplete_cache_entry_raises(self) -> None:
+        neighbour_index.build_knn(
+            self.pmids, self.vectors, k=5, cache_root=self.cache_root
+        )
+        sk = neighbour_index.compute_knn_state_key(self.pmids, self.vectors, k=5)
+        paths = neighbour_index.cache_paths(self.cache_root, sk)
+        # Delete one companion file → the entry is corrupt; the loader
+        # must raise loudly (operator cleans up) rather than silently
+        # recompute or return a partial result.
+        paths["nearest_pmids"].unlink()
+        with self.assertRaises(exceptions.KnnCacheError):
+            neighbour_index.build_knn(
+                self.pmids, self.vectors, k=5, cache_root=self.cache_root
+            )
 
 
 if __name__ == "__main__":

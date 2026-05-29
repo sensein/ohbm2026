@@ -55,7 +55,11 @@ def _build_config(neuroscape_root: Path, output: Path, cache: Path) -> orchestra
         ohbm2026_state_key="ohbm00000001",
         output_root=output,
         umap_cache_root=cache,
-        decimated_backdrop_size=3,
+        # Small quadtree resolutions so the 6-article fixture spreads
+        # across a couple of representative tiers + a rest tier (the
+        # production DEFAULT_RESOLUTIONS are exercised against the real
+        # release at T033).
+        lod_resolutions=(2, 4),
         neighbors_k=3,
         # Synthetic fixture has 6 articles — production R-001 defaults
         # (n_neighbors=30) can't fit. Use small overrides; the
@@ -128,6 +132,45 @@ class OrchestratorEndToEndTests(unittest.TestCase):
         self.assertEqual(prov["ohbm_inclusion"]["n_overlay_points"], 4)
         self.assertEqual(prov["ohbm_inclusion"]["n_omitted"], 0)
         self.assertEqual(prov["ohbm_inclusion"]["omitted_submission_ids"], [])
+
+    def test_neuroscape_parquet_has_lod_backdrop_tiers_and_coords_lod_level(self) -> None:
+        import io
+
+        import pyarrow.parquet as pq
+
+        out = self.tmp_root / "out_lod"
+        cache = self.tmp_root / "cache_lod"
+        cfg = _build_config(self.ns_root, out, cache)
+        orchestrator.build_atlas_package(cfg)
+
+        ns = pq.read_table(out / "neuroscape.parquet")
+        names = ns.column("table_name").to_pylist()
+        bodies = dict(zip(names, ns.column("table_bytes").to_pylist()))
+        # One backdrop tier per quadtree resolution; no legacy single table.
+        for k in range(len(cfg.lod_resolutions)):
+            self.assertIn(f"backdrop_lod{k}", names)
+        self.assertNotIn("backdrop_decimated", names)
+        # coords carries the per-point lod_level annotation.
+        coords = pq.read_table(io.BytesIO(bytes(bodies["coords"])))
+        self.assertIn("lod_level", coords.column_names)
+
+    def test_provenance_records_lod_block(self) -> None:
+        out = self.tmp_root / "out_lodprov"
+        cache = self.tmp_root / "cache_lodprov"
+        cfg = _build_config(self.ns_root, out, cache)
+        prov = orchestrator.build_atlas_package(cfg)
+        self.assertIn("lod", prov)
+        block = prov["lod"]
+        self.assertEqual(block["resolutions"], list(cfg.lod_resolutions))
+        self.assertEqual(block["n_backdrop_levels"], len(cfg.lod_resolutions))
+        self.assertEqual(len(block["backdrop_lod_sizes"]), len(cfg.lod_resolutions))
+        # Coverage is a monotone non-decreasing fraction reaching 1.0 —
+        # the quantitative "overall shape maintained" check (constitution VIII).
+        cov = block["coverage"]
+        self.assertGreater(len(cov), 0)
+        for earlier, later in zip(cov, cov[1:]):
+            self.assertLessEqual(earlier, later + 1e-9)
+        self.assertAlmostEqual(cov[-1], 1.0, places=6)
 
     def test_provenance_state_keys_chain_correctly(self) -> None:
         out = self.tmp_root / "out3"

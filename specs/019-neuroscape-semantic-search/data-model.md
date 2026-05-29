@@ -14,10 +14,15 @@ file consistency rules the builder + the browser ranker MUST honour.
 > - `neuroscape.parquet` `articles` carries identity/search only
 >   (`pubmed_id, title, year, cluster_id`).
 > - NEW `coords` table holds geometry: `(pubmed_id, cluster_id, umap_2d,
->   umap_3d)`. The loader folds it onto `articles` after the full GET.
-> - NEW self-contained `backdrop_decimated` table (`pubmed_id, cluster_id,
->   umap_2d, umap_3d, title, year`) is the landing scatter — moved OUT of
->   `atlas.parquet`.
+>   umap_3d, lod_level)`. The loader folds it onto `articles` after the
+>   full GET; `/neuroscape/` caps its scatter by `lod_level` (no extra fetch).
+> - NEW progressive backdrop tiers `backdrop_lod0 … backdrop_lod{N-1}`
+>   (each `pubmed_id, cluster_id, umap_2d, umap_3d, title, year`) replace
+>   the single `backdrop_decimated` table — a quadtree blue-noise LOD
+>   (`lod.py`). atlas-root range-fetches `lod0` (instant coarse paint)
+>   then streams finer tiers; the rest tier stays only in `coords` so the
+>   full corpus is never fetched for the backdrop. These live in
+>   `neuroscape.parquet` (NOT `atlas.parquet`).
 > - `atlas.parquet` now carries ONLY `manifest` + `ohbm_overlay`. The
 >   cluster legend, backdrop, and `cluster_centroids` are range-fetched
 >   from the `neuroscape.parquet` sibling. `cross_pointers` is dropped

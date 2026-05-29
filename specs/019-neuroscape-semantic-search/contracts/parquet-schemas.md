@@ -10,13 +10,31 @@ consistency invariants](../data-model.md#cross-file-consistency-invariants).
 > addendum in [../data-model.md](../data-model.md). In the shipped
 > writer (`parquet_writer.py`): `neuroscape.parquet` = `manifest`,
 > `articles` (identity/search: `pubmed_id, title, year, cluster_id`),
-> `coords` (`pubmed_id, cluster_id, umap_2d, umap_3d`),
-> `backdrop_decimated` (`+title, year`), `clusters`,
+> `coords` (`pubmed_id, cluster_id, umap_2d, umap_3d, lod_level`),
+> `backdrop_lod0 … backdrop_lod{N-1}` (`+title, year`), `clusters`,
 > `neighbors_neuroscape`, `search:*`, `cluster_centroids`.
 > `atlas.parquet` = `manifest` + `ohbm_overlay` ONLY. §3 `ohbm_vectors`
 > below is aspirational and NOT written; atlas-root ranks NeuroScape via
 > the sibling vectors + centroids (range-fetched), OHBM overlay is
 > scatter-only.
+>
+> **Addendum (2026-05-29) — progressive LOD backdrop.** The single
+> `backdrop_decimated` table was replaced by a quadtree blue-noise
+> level-of-detail (`src/ohbm2026/atlas_package/lod.py`). `coords` gains
+> `lod_level INT16` (every point's tier; rest tier = `n_backdrop_levels`)
+> so `/neuroscape/` caps its scatter (`lod_level <= cap`) with no extra
+> fetch. The backdrop sample is split into self-contained per-tier outer
+> rows `backdrop_lod{k}` (`pubmed_id, cluster_id, umap_2d, umap_3d,
+> title, year`), each independently range-fetchable: atlas-root fetches
+> `backdrop_lod0` (a coarse cover, instant first paint) then streams the
+> finer tiers (`loadBackdropLevelFromNeuroscape`,
+> `readNeuroscapeBackdropLevelCount`). The rest tier is NOT emitted as a
+> backdrop table (it lives only in `coords` — the full corpus is never
+> fetched for the backdrop). Manifest gains `n_backdrop_levels` +
+> `backdrop_lod_sizes`; default tiers use resolutions
+> `(24,48,96,192,384)` → ≈56k representative backdrop on the real 461k
+> corpus. Provenance records per-tier `lod.coverage` (occupied-cell
+> coverage at reference resolution 64) as a "shape maintained" metric.
 
 ---
 
