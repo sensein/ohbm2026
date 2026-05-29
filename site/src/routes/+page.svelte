@@ -20,7 +20,7 @@
 		lexicalSearch,
 		parseQuery,
 		queryForSemantic,
-		searchTitleIndex,
+		seedScores,
 		type InvertedIndex
 	} from '$lib/filter';
 	import { filterByFacets, recomputeFacets, type FacetCellContext } from '$lib/facets';
@@ -639,25 +639,25 @@
 		// expansion; the BrowsePanel's full operator + typo path handles
 		// exact ranking downstream.
 		//
-		// Route through queryForSemantic() so the seed honours the same
-		// operator handling as the real ranker: quote/OR operators are
-		// dropped and negated clauses excluded (no positive-seed leak from
-		// a `-term`). Quotes therefore don't force a literal phrase here.
-		// Seed scoring queries the prebuilt inverted index (built once on the
-		// full corpus) via the shared OHBM search core — vocabulary lookup,
-		// no per-query 461k tokenization. queryForSemantic() strips operators
-		// and negations so a `-term` can't leak a positive seed. Intersecting
-		// the hit set with `filteredBackdrop` keeps the seed set facet-aware.
-		const seedQuery = queryForSemantic(parseQuery(raw));
-		const seedHits = searchTitleIndex(titleSearchIndex, seedQuery);
-		if (!seedHits || seedHits.ids.size === 0) return new Map<number, number>();
+		// seedScores() does a UNION over the query's positive words (≥1 token
+		// qualifies), NOT searchTitleIndex()'s AND-intersection: a bare
+		// multi-word query otherwise requires one title to contain ALL words,
+		// which a titles-only corpus almost never does → 0 seeds → empty
+		// fallback (the bug this fixes). It reuses the shared per-word typo
+		// ladder (lookupWord) so quote/typo handling stays consistent across
+		// sites, and excludes negated clauses so a `-term` can't leak a
+		// positive seed. The returned count of distinct matched words drives
+		// the match-count ranking below. Intersecting with filteredBackdrop
+		// keeps it facet-aware; the BrowsePanel applies full AND/phrase ranking.
+		const seedCounts = seedScores(titleSearchIndex, parseQuery(raw));
+		if (seedCounts.size === 0) return new Map<number, number>();
 		const facetSet = new Set(filteredBackdrop.map((a) => a.pubmed_id));
 		const scored: { id: number; exact: number; year: number }[] = [];
-		for (const id of seedHits.ids) {
+		for (const [id, cnt] of seedCounts) {
 			if (!facetSet.has(id)) continue;
 			const a = atlasBackdropById.get(id);
 			if (!a) continue;
-			scored.push({ id, exact: seedHits.exactness.get(id) ?? 0, year: a.year });
+			scored.push({ id, exact: cnt, year: a.year });
 		}
 		if (scored.length === 0) return new Map<number, number>();
 		scored.sort((x, y) => y.exact - x.exact || y.year - x.year);

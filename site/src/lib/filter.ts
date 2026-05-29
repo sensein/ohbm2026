@@ -307,6 +307,37 @@ export function queryForSemantic(parsed: ParsedQuery): string {
 	return parts.join(' ');
 }
 
+/**
+ * Loose UNION seed scoring for the NeuroScape / atlas-root KNN fallback.
+ *
+ * {@link searchInvertedIndex} AND-intersects the positive words in a bare
+ * multi-word query — correct for ranked search, but far too strict to pick
+ * KNN seeds over a titles-only corpus: a 3-word query like
+ * "corpus callosum disorders" would require one ~10-token title to contain all
+ * three words, which almost never happens → zero seeds → empty fallback. The
+ * seed only needs to be loose enough to drive KNN expansion (the BrowsePanel
+ * applies the full AND/phrase/typo ranking downstream), so this scores each
+ * id by how many DISTINCT query words it contains (≥1 to qualify), reusing the
+ * same per-word typo ladder ({@link lookupWord}) as every other surface.
+ * Negated clauses are excluded, matching {@link queryForSemantic}.
+ */
+export function seedScores(index: InvertedIndex, parsed: ParsedQuery): Map<number, number> {
+	const words: string[] = [];
+	for (const g of parsed.groups) {
+		for (const c of g.clauses) {
+			if (c.negate) continue;
+			if (c.kind === 'word') words.push(c.word);
+			else words.push(...c.words);
+		}
+	}
+	const counts = new Map<number, number>();
+	for (const w of words) {
+		const { all } = lookupWord(w, index);
+		for (const id of all) counts.set(id, (counts.get(id) ?? 0) + 1);
+	}
+	return counts;
+}
+
 // ─── Evaluation ────────────────────────────────────────────────────────────
 
 /** Set of poster_ids whose corpus contains a token within DL threshold of `qword`. */

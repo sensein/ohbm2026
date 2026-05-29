@@ -6,6 +6,7 @@ import {
 	parseQuery,
 	queryForSemantic,
 	searchTitleIndex,
+	seedScores,
 	tokenizeForIndex
 } from '$lib/filter';
 import type { AbstractRecord, AuthorRecord } from '$lib/shards';
@@ -346,5 +347,50 @@ describe('buildTitleIndex + searchTitleIndex (Spec 019 — NeuroScape title sear
 			(t) => t.title
 		);
 		expect(again).toBe(index);
+	});
+});
+
+describe('seedScores (Spec 019 — KNN-fallback union seed selection)', () => {
+	// Words deliberately scattered across DIFFERENT titles: no single title
+	// holds all of corpus+memory+sleep, so searchTitleIndex's AND-intersection
+	// would yield zero. seedScores must still return a seed per matched word.
+	const titles = [
+		{ pubmed_id: 10, title: 'Corpus callosum development' },
+		{ pubmed_id: 11, title: 'Working memory and aging' },
+		{ pubmed_id: 13, title: 'Memory consolidation during sleep' }
+	];
+	const index = buildTitleIndex(
+		titles,
+		(t) => t.pubmed_id,
+		(t) => t.title
+	);
+
+	it('unions across words instead of AND-intersecting (the zero-hit fix)', () => {
+		// The AND path returns nothing for this scattered query…
+		expect(searchTitleIndex(index, 'corpus memory sleep')?.ids).toEqual(new Set());
+		// …but the union seed still surfaces every title matching ≥1 word.
+		const scores = seedScores(index, parseQuery('corpus memory sleep'));
+		expect(new Set(scores.keys())).toEqual(new Set([10, 11, 13]));
+	});
+
+	it('counts distinct query words matched (drives match-count ranking)', () => {
+		// 13 holds both "memory" and "sleep" → 2; 11 holds only "memory" → 1.
+		const scores = seedScores(index, parseQuery('memory sleep'));
+		expect(scores.get(13)).toBe(2);
+		expect(scores.get(11)).toBe(1);
+	});
+
+	it('reuses the shared typo ladder and flattens quoted phrases to words', () => {
+		// Quoted, with a transposition typo in "callosum"; phrase words are
+		// flattened and matched per-word via lookupWord.
+		const scores = seedScores(index, parseQuery('"corpus callsoum"'));
+		expect(scores.get(10)).toBe(2);
+	});
+
+	it('excludes negated clauses so a -term cannot leak a positive seed', () => {
+		const scores = seedScores(index, parseQuery('memory -sleep'));
+		expect(scores.get(11)).toBe(1);
+		expect(scores.has(13)).toBe(true); // 13 still has "memory"
+		expect(scores.get(13)).toBe(1); // but "sleep" was negated, not counted
 	});
 });
