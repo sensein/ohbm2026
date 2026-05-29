@@ -83,6 +83,13 @@ jobs:
           VITE_DATA_PACKAGE_URL_ATLAS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_ATLAS }}
           VITE_DATA_PACKAGE_URL_OHBM2026: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_OHBM2026 || vars.OHBM2026_UI_DATA_PACKAGE_URL }}
           VITE_DATA_PACKAGE_URL_NEUROSCAPE: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE }}
+          # Spec 019 — INT8 vectors sidecar for the cluster-routed
+          # semantic ranker. Set repo-wide, so PR previews fetch it too
+          # and exercise the live ranker (not the KNN fallback). The
+          # loader range-fetches per cluster, so the ~170 MB sidecar is
+          # never downloaded whole at runtime. If unset, `loader.ts`
+          # degrades to KNN-only.
+          VITE_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS }}
           # Legacy single-var fallback honoured by `loader.ts` for one
           # deploy cycle.
           VITE_DATA_PACKAGE_URL: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL }}

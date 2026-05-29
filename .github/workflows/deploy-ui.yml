@@ -203,6 +203,11 @@ jobs:
           VITE_DATA_PACKAGE_URL_ATLAS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_ATLAS }}
           VITE_DATA_PACKAGE_URL_OHBM2026: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_OHBM2026 || vars.OHBM2026_UI_DATA_PACKAGE_URL }}
           VITE_DATA_PACKAGE_URL_NEUROSCAPE: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE }}
+          # Spec 019 — per-cluster INT8 vectors sidecar that drives the
+          # full cluster-routed semantic ranker on /neuroscape/ +
+          # atlas-root. Unset → loader.getNeuroscapeVectorsUrl() returns
+          # null → the UI keeps the KNN-only semantic fallback.
+          VITE_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS }}
           # Legacy single-var fallback honoured by `loader.ts` for one
           # deploy cycle. Drops once main has been on the per-mode env
           # vars for a full publish.
