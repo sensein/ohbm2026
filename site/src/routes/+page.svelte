@@ -15,7 +15,7 @@
 		type TopicShard
 	} from '$lib/shards';
 	import { activeFilters, authorChips, cartOnly, debouncedSearchQuery, focusedAbstract, lassoSelection, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
-	import { lexicalSearch, parseQuery, queryForSemantic } from '$lib/filter';
+	import { lexicalSearch, parseQuery, queryForSemantic, tokenizeForIndex } from '$lib/filter';
 	import { filterByFacets, recomputeFacets, type FacetCellContext } from '$lib/facets';
 	import { normaliseQuery, parseIdOperator } from '$lib/goto_poster';
 	import SearchBar from '$lib/components/SearchBar.svelte';
@@ -598,17 +598,28 @@
 		if (SITE_MODE !== 'neuroscape' && SITE_MODE !== 'atlas-root') {
 			return new Map<number, number>();
 		}
-		// Lightweight seed selection — pick the first SEMANTIC_SEED_LIMIT
-		// articles whose normalised title CONTAINS the query (any token).
-		// The BrowsePanel's full operator + typo path is more accurate
-		// but iterating it twice is wasteful for the seed step; this
-		// loose substring seed is plenty to drive KNN expansion.
-		const seedIds: number[] = [];
+		// Lightweight seed selection — token-aware so multi-word natural-
+		// language queries (e.g. "corpus callosum disorders") still seed.
+		// A whole-phrase substring match would require some title to
+		// literally contain the full phrase, which almost never happens for
+		// 3+ word queries → 0 seeds → empty result. Instead: tokenise the
+		// query, score each title by how many distinct query tokens it
+		// contains, keep titles matching ≥1 token, and rank by match-count
+		// (desc) then year (desc). This loose seed is plenty to drive KNN
+		// expansion; the BrowsePanel's full operator + typo path handles
+		// exact ranking downstream.
+		const queryTokens = tokenizeForIndex(q);
+		if (queryTokens.length === 0) return new Map<number, number>();
+		const scored: { id: number; matches: number; year: number }[] = [];
 		for (const a of filteredBackdrop) {
-			if (seedIds.length >= SEMANTIC_SEED_LIMIT) break;
-			if ((a.title ?? '').toLowerCase().includes(q)) seedIds.push(a.pubmed_id);
+			const titleTokens = new Set(tokenizeForIndex(a.title ?? ''));
+			let matches = 0;
+			for (const t of queryTokens) if (titleTokens.has(t)) matches++;
+			if (matches > 0) scored.push({ id: a.pubmed_id, matches, year: a.year });
 		}
-		if (seedIds.length === 0) return new Map<number, number>();
+		if (scored.length === 0) return new Map<number, number>();
+		scored.sort((x, y) => y.matches - x.matches || y.year - x.year);
+		const seedIds = scored.slice(0, SEMANTIC_SEED_LIMIT).map((s) => s.id);
 		// Walk the KNN graph from each seed. The graph is attached to
 		// each article as `nearest_pubmed_ids` + `nearest_distances`
 		// (loader.ts:545 join). For each neighbour, record the minimum
