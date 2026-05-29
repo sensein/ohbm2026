@@ -148,79 +148,144 @@ describe('NeuroscapeRanker — 5-step pipeline (T013)', () => {
 	});
 });
 
-describe('NeuroscapeRanker — cluster cap (T014, FR-024)', () => {
-	it('5th distinct cluster route triggers onCapExceeded and skips fetch', async () => {
+describe('NeuroscapeRanker — per-query cluster budget (T014, FR-024)', () => {
+	it('caps the clusters fetched WITHIN one query; over-budget neighbours fall back to knn-distance (routing cluster always loads)', async () => {
+		// One seed in cluster 0 whose KNN neighbours span clusters 1, 2, 3.
 		const centroids = [
 			{ cluster_id: 0, centroid_vector: new Float32Array([1, 0, 0, 0]) },
 			{ cluster_id: 1, centroid_vector: new Float32Array([0, 1, 0, 0]) },
 			{ cluster_id: 2, centroid_vector: new Float32Array([0, 0, 1, 0]) },
-			{ cluster_id: 3, centroid_vector: new Float32Array([0, 0, 0, 1]) },
-			{
-				cluster_id: 4,
-				centroid_vector: new Float32Array([0.5, 0.5, 0.5, 0.5])
-			}
+			{ cluster_id: 3, centroid_vector: new Float32Array([0, 0, 0, 1]) }
 		];
+		const pubmedToCluster = new Map<bigint, number>([
+			[100n, 0],
+			[200n, 1],
+			[300n, 2],
+			[400n, 3]
+		]);
+		const knnIndex = new Map<bigint, KnnEntry>([
+			[
+				100n,
+				{
+					pubmed_id: 100n,
+					nearest_pubmed_ids: [200n, 300n, 400n],
+					nearest_distances: [0.1, 0.2, 0.3]
+				}
+			]
+		]);
 		const fetched: number[] = [];
 		const cfg = makeBaseCfg({
-			clusterCap: 4,
+			clusterCap: 2, // routing cluster + exactly one expansion cluster
 			centroids,
+			pubmedToCluster,
+			knnIndex,
+			worker: {
+				...makeBaseCfg().worker,
+				encodeQuery: vi.fn(async () => new Float32Array([1, 0, 0, 0])),
+				bruteForceCluster: vi.fn(async () => [{ id: 100n, cosine: 0.9 }])
+			} as WorkerLike,
 			fetchClusterVectors: vi.fn(async (clusterId: number) => {
 				fetched.push(clusterId);
-				return {
-					pubmed_ids: new BigInt64Array([]),
-					vectors: new Int8Array(0)
-				};
+				return { pubmed_ids: new BigInt64Array([]), vectors: new Int8Array(0) };
 			})
 		});
 		const r = new NeuroscapeRanker(cfg);
 
-		// Drive 4 distinct cluster routes (fills LRU to cap).
-		for (let i = 0; i < 4; i++) {
-			cfg.worker.encodeQuery = vi.fn(async () => {
-				const v = new Float32Array([0, 0, 0, 0]);
-				v[i] = 1;
-				return v;
-			});
-			await r.searchNeuroscape(parsedFromText(`topic ${i}`), 5);
-		}
-		expect(fetched).toEqual([0, 1, 2, 3]);
-
-		// 5th route → cluster 4 — should hit the cap.
 		const capCalls: number[] = [];
-		const hooks: RankerHooks = { onCapExceeded: (n) => capCalls.push(n) };
-		cfg.worker.encodeQuery = vi.fn(async () => new Float32Array([0.5, 0.5, 0.5, 0.5]));
-		const hits = await r.searchNeuroscape(parsedFromText('topic four'), 5, hooks);
+		const hits = await r.searchNeuroscape(parsedFromText('memory consolidation'), 10, {
+			onCapExceeded: (n) => capCalls.push(n)
+		});
+
+		// Routing cluster (0) + exactly one expansion cluster (1) range-fetched;
+		// clusters 2 and 3 are over the per-query budget.
+		expect(fetched).toEqual([0, 1]);
 		expect(capCalls.length).toBeGreaterThan(0);
-		expect(capCalls[0]).toBe(4);
-		expect(hits).toEqual([]); // capped path returns empty per the contract
+		// Search still returns results — the capped neighbours appear via the
+		// precomputed knn-distance fallback, never an empty result.
+		expect(hits.length).toBeGreaterThan(0);
+		expect(hits.some((h) => h.score_source === 'knn-distance')).toBe(true);
 	});
 
-	it('expandSearchDepth() releases the cap; next query fetches', async () => {
+	it('a fresh query routing cluster always loads — earlier queries never starve it (regression for the empty-results bug)', async () => {
+		const centroids = [
+			{ cluster_id: 0, centroid_vector: new Float32Array([1, 0, 0, 0]) },
+			{ cluster_id: 1, centroid_vector: new Float32Array([0, 1, 0, 0]) }
+		];
+		const pubmedToCluster = new Map<bigint, number>([
+			[100n, 0],
+			[200n, 1]
+		]);
+		const knnIndex = new Map<bigint, KnnEntry>([
+			[100n, { pubmed_id: 100n, nearest_pubmed_ids: [], nearest_distances: [] }],
+			[200n, { pubmed_id: 200n, nearest_pubmed_ids: [], nearest_distances: [] }]
+		]);
+		const fetched: number[] = [];
+		const cfg = makeBaseCfg({
+			clusterCap: 1, // a session-scoped cap would block the 2nd query here
+			centroids,
+			pubmedToCluster,
+			knnIndex,
+			fetchClusterVectors: vi.fn(async (clusterId: number) => {
+				fetched.push(clusterId);
+				return { pubmed_ids: new BigInt64Array([]), vectors: new Int8Array(0) };
+			})
+		});
+		const r = new NeuroscapeRanker(cfg);
+
+		cfg.worker.encodeQuery = vi.fn(async () => new Float32Array([1, 0, 0, 0]));
+		cfg.worker.bruteForceCluster = vi.fn(async () => [{ id: 100n, cosine: 0.9 }]);
+		const h1 = await r.searchNeuroscape(parsedFromText('first topic'), 5);
+		expect(h1.length).toBeGreaterThan(0);
+
+		// Second query routes to a DIFFERENT cluster. The old per-session cap
+		// (LRU already at size 1) would return [] here; the per-query budget
+		// resets, so cluster 1 loads and the query returns hits.
+		cfg.worker.encodeQuery = vi.fn(async () => new Float32Array([0, 1, 0, 0]));
+		cfg.worker.bruteForceCluster = vi.fn(async () => [{ id: 200n, cosine: 0.9 }]);
+		const h2 = await r.searchNeuroscape(parsedFromText('second topic'), 5);
+		expect(fetched).toEqual([0, 1]);
+		expect(h2.length).toBeGreaterThan(0);
+	});
+
+	it('expandSearchDepth() lifts the per-query budget so a previously-capped neighbour cluster gets fetched', async () => {
+		const centroids = [
+			{ cluster_id: 0, centroid_vector: new Float32Array([1, 0, 0, 0]) },
+			{ cluster_id: 1, centroid_vector: new Float32Array([0, 1, 0, 0]) }
+		];
+		const pubmedToCluster = new Map<bigint, number>([
+			[100n, 0],
+			[200n, 1]
+		]);
+		const knnIndex = new Map<bigint, KnnEntry>([
+			[100n, { pubmed_id: 100n, nearest_pubmed_ids: [200n], nearest_distances: [0.2] }]
+		]);
 		const fetched: number[] = [];
 		const cfg = makeBaseCfg({
 			clusterCap: 1,
+			centroids,
+			pubmedToCluster,
+			knnIndex,
+			worker: {
+				...makeBaseCfg().worker,
+				encodeQuery: vi.fn(async () => new Float32Array([1, 0, 0, 0])),
+				bruteForceCluster: vi.fn(async () => [{ id: 100n, cosine: 0.9 }])
+			} as WorkerLike,
 			fetchClusterVectors: vi.fn(async (clusterId: number) => {
 				fetched.push(clusterId);
-				return {
-					pubmed_ids: new BigInt64Array([]),
-					vectors: new Int8Array(0)
-				};
+				return { pubmed_ids: new BigInt64Array([]), vectors: new Int8Array(0) };
 			})
 		});
 		const r = new NeuroscapeRanker(cfg);
-		cfg.worker.encodeQuery = vi.fn(async () => new Float32Array([1, 0, 0, 0]));
-		await r.searchNeuroscape(parsedFromText('first'), 5);
-		expect(fetched).toEqual([0]);
 
-		// Route to cluster 1 next — would hit cap.
-		cfg.worker.encodeQuery = vi.fn(async () => new Float32Array([0, 1, 0, 0]));
 		const capCalls: number[] = [];
-		await r.searchNeuroscape(parsedFromText('second'), 5, {
+		await r.searchNeuroscape(parsedFromText('first'), 5, {
 			onCapExceeded: (n) => capCalls.push(n)
 		});
-		expect(capCalls.length).toBe(1);
+		// Budget 1: routing cluster only; the cross-cluster neighbour is capped.
+		expect(fetched).toEqual([0]);
+		expect(capCalls.length).toBeGreaterThan(0);
 
-		// Release + retry.
+		// Release the budget; the next query may fetch the neighbour cluster.
 		r.expandSearchDepth();
 		await r.searchNeuroscape(parsedFromText('second'), 5);
 		expect(fetched).toContain(1);

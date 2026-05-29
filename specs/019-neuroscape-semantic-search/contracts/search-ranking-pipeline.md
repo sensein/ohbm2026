@@ -87,8 +87,8 @@ export function searchAtlasRoot(
   hooks?: RankerHooks
 ): Promise<RankedHit[]>;
 
-/** Release the FR-024 cluster-budget cap for this session. The next
- *  query that crosses the cap proceeds without prompting. */
+/** Release the FR-024 per-query cluster-fetch budget for this session.
+ *  Subsequent queries that cross the budget proceed without prompting. */
 export function expandSearchDepth(): void;
 ```
 
@@ -150,16 +150,20 @@ avoid main-thread copy overhead (~1.5 MB per cluster transfer).
    - worker.route → routing_cluster_id (argmax cosine over centroids)
 
 4. ENSURE CLUSTER VECTORS LOADED
-   - state := 'fetching-vectors' if routing_cluster_id not in LRU
-   - check FR-024 cap (default 4 distinct clusters per session):
-     - if (LRU.size >= cap AND routing_cluster_id not in LRU):
+   - state := 'fetching-vectors' if routing_cluster_id not resident
+   - check FR-024 PER-QUERY fetch budget (default 4 *new* clusters per query;
+     `clustersFetchedThisQuery` resets to 0 at the start of each searchNeuroscape):
+     - if (clustersFetchedThisQuery >= cap AND cluster not resident):
        - state := 'cap-exceeded'
-       - hooks.onCapExceeded?(LRU.size)
-       - return early (caller may invoke expandSearchDepth())
-   - else: range-fetch routing_cluster_id from neuroscape_vectors.parquet
-     via $lib/data_package/loader.loadClusterVectors(routing_cluster_id)
+       - hooks.onCapExceeded?(clustersFetchedThisQuery)
+       - return early (caller may invoke expandSearchDepth() to lift the budget)
+   - else: range-fetch cluster from neuroscape_vectors.parquet
+     via $lib/data_package/loader.loadClusterVectors(cluster_id)
    - worker.load-cluster(cluster_id, vectors, pubmedIds)
-   - LRU.set(cluster_id, /* timestamp */)
+   - clusterLru.add(cluster_id); clustersFetchedThisQuery++
+   - evict beyond (cap + RESIDENT_SLACK) resident clusters (never the
+     just-loaded one), so a fresh query's routing cluster always loads —
+     earlier queries can never starve it
 
 5. BRUTE-FORCE TOP-3 WITHIN CLUSTER
    - state := 'brute-force'
@@ -170,8 +174,8 @@ avoid main-thread copy overhead (~1.5 MB per cluster transfer).
    - state := 'knn-expand'
    - knn_table loaded eagerly with neuroscape.parquet (neighbours: LIST<INT64>)
    - candidate_pmids := top3_seeds ∪ KNN(top3_seeds[i].id) for i in [0..2]
-   - for each candidate's cluster_id NOT in LRU:
-     - if cap permits: load + worker.load-cluster
+   - for each candidate's cluster_id NOT resident:
+     - if per-query budget permits: load + worker.load-cluster
      - else: mark candidate as score_source='knn-distance' (FR-024 fallback)
 
 7. RE-RANK
@@ -225,7 +229,7 @@ the next user query). No silent fallbacks (Constitution VI).
 |---|---|---|
 | `ModelLoadError` | HuggingFace CDN fetch fails, model sha256 mismatch | Toggle returns to OFF; banner: "semantic search unavailable" + Retry |
 | `RangeFetchError` | hyparquet range request fails (network, byte range out of file, parquet decode error) | Toggle stays ON but query returns lexical-only results + console error |
-| `CapExceededError` | FR-024 cluster cap hit; emitted as a hook callback, not a thrown error | One-time banner: "Expand search depth?" with allow/deny buttons |
+| `CapExceededError` | FR-024 per-query cluster-fetch budget hit; emitted as a hook callback, not a thrown error | One-time banner: "Expand search depth?" with allow/deny buttons |
 | `VectorsManifestDriftError` | INV-006 / model_sha256 mismatch | Banner: "semantic index changed — refresh" with Refresh button |
 
 ---
@@ -239,9 +243,12 @@ Mirrors the existing OHBM 2026 e2e suite in
 vitest (site/src/tests/unit/neuroscape_ranker.test.ts):
 - searchNeuroscape happy path: mocked worker returns canned hits;
   pipeline produces 5 ranked results in the expected order.
-- LRU cap: 5th distinct cluster routes triggers onCapExceeded hook
-  before fetching.
-- expandSearchDepth(): subsequent call DOES fetch.
+- per-query budget: clusters fetched within ONE query are capped;
+  over-budget neighbours fall back to knn-distance while the routing
+  cluster always loads. A fresh query resets the budget so earlier
+  queries never starve a later query's routing cluster.
+- expandSearchDepth(): lifts the budget so a previously-capped
+  neighbour cluster DOES fetch.
 - Drift: worker init message includes mismatched model_sha256 →
   ModelLoadError surfaced.
 

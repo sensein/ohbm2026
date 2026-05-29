@@ -114,6 +114,10 @@ export interface RankerConfig {
 const DEFAULT_CLUSTER_CAP = 4;
 const TOP_K_SEEDS = 3;
 const MIN_QUERY_CHARS = 3;
+// How many clusters we keep resident beyond the per-query fetch budget so
+// that consecutive queries about adjacent topics reuse warm clusters (LRU
+// cache hit → no re-fetch) instead of re-ranging the sidecar each time.
+const RESIDENT_SLACK = 8;
 
 // Module-level state — each browser session has one ranker, so we
 // keep the LRU + cap-released flag + state-machine here. (In a multi-
@@ -123,6 +127,15 @@ class NeuroscapeRanker {
 	private clusterLru: Set<number> = new Set();
 	private capReleased = false;
 	private state: RankerState = 'idle';
+	// FR-024 cost bound is PER QUERY, not per session: each query may
+	// range-fetch at most `clusterCap` *new* clusters from the sidecar
+	// (~one cluster's INT8 vectors each). Resident clusters from earlier
+	// queries are reused for free and don't count. Reset at the start of
+	// every searchNeuroscape so a fresh query's routing cluster always
+	// loads — a session-scoped cap would let one query's KNN-expansion
+	// exhaust the budget and starve every subsequent query's routing
+	// cluster (→ empty results).
+	private clustersFetchedThisQuery = 0;
 
 	constructor(cfg: RankerConfig) {
 		this.cfg = cfg;
@@ -164,24 +177,31 @@ class NeuroscapeRanker {
 		hooks?: RankerHooks
 	): Promise<'loaded' | 'cap-exceeded'> {
 		if (this.clusterLru.has(clusterId)) {
-			// Move-to-front on access.
+			// Move-to-front on access — LRU cache hit, no fetch, free.
 			this.clusterLru.delete(clusterId);
 			this.clusterLru.add(clusterId);
 			return 'loaded';
 		}
-		// FR-024 cap check.
-		if (!this.capReleased && this.clusterLru.size >= this.clusterCap) {
-			hooks?.onCapExceeded?.(this.clusterLru.size);
+		// FR-024 PER-QUERY fetch budget. A non-resident cluster costs one
+		// range-fetch; cap how many of those a single query incurs. The
+		// counter resets each searchNeuroscape, so the routing cluster of a
+		// fresh query is always within budget (counter starts at 0) and
+		// never gets starved by a previous query's expansion.
+		if (!this.capReleased && this.clustersFetchedThisQuery >= this.clusterCap) {
+			hooks?.onCapExceeded?.(this.clustersFetchedThisQuery);
 			return 'cap-exceeded';
 		}
 		// Range-fetch + load into worker.
 		const { pubmed_ids, vectors } = await this.cfg.fetchClusterVectors(clusterId);
 		await this.cfg.worker.loadCluster(clusterId, vectors, pubmed_ids);
 		this.clusterLru.add(clusterId);
-		// LRU eviction if we're now over cap (after a cap release).
-		while (this.clusterLru.size > this.clusterCap + 8) {
+		this.clustersFetchedThisQuery++;
+		// Bound resident memory across queries: evict LRU-oldest clusters
+		// beyond the budget + slack. Never evict the cluster we just loaded
+		// (it's needed for this query's brute-force / re-rank).
+		while (this.clusterLru.size > this.clusterCap + RESIDENT_SLACK) {
 			const oldest = this.clusterLru.values().next().value as number | undefined;
-			if (oldest === undefined) break;
+			if (oldest === undefined || oldest === clusterId) break;
 			this.clusterLru.delete(oldest);
 			await this.cfg.worker.evictCluster(oldest);
 		}
@@ -207,6 +227,10 @@ class NeuroscapeRanker {
 		hooks?: RankerHooks
 	): Promise<RankedHit[]> {
 		try {
+			// Reset the per-query fetch budget so this query's routing
+			// cluster always loads regardless of how many clusters earlier
+			// queries pulled in (FR-024 is a per-query egress bound).
+			this.clustersFetchedThisQuery = 0;
 			// Step 0: extract operator-stripped string for semantic
 			// encoding. The parsed query carries the structural
 			// clauses; the encoder gets the plain word/phrase content.

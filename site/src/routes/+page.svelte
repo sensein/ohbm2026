@@ -735,8 +735,13 @@
 	// not silently zero out semantic search — it degrades to KNN instead.
 	// Both are pubmed_id → score Maps consumed identically by
 	// NeuroscapeBrowsePanel / AtlasRootBrowsePanel.
+	// A ranker that is "ready" but returns an EMPTY set for a query the
+	// KNN graph can answer (per-query cluster-budget cap, empty routed
+	// cluster) must also degrade to KNN rather than show 0 semantic rows.
 	$: neuroscapeSemanticHits =
-		rankerReady && !rankerErrored ? neuroscapeRankerHits : neuroscapeKnnHits;
+		rankerReady && !rankerErrored && neuroscapeRankerHits.size > 0
+			? neuroscapeRankerHits
+			: neuroscapeKnnHits;
 	// True while the ranker pipeline is mid-flight (any non-terminal
 	// state) — drives the "searching…" toggle hint.
 	$: rankerBusy =
