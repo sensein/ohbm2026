@@ -8,6 +8,28 @@ in [contracts/parquet-schemas.md](contracts/parquet-schemas.md);
 this file captures the entities, their relationships, and the cross-
 file consistency rules the builder + the browser ranker MUST honour.
 
+> **Addendum (2026-05-29) — table reorganization for per-view access.**
+> A later pass split geometry out of `articles` and slimmed
+> `atlas.parquet` so no view downloads a whole envelope:
+> - `neuroscape.parquet` `articles` carries identity/search only
+>   (`pubmed_id, title, year, cluster_id`).
+> - NEW `coords` table holds geometry: `(pubmed_id, cluster_id, umap_2d,
+>   umap_3d)`. The loader folds it onto `articles` after the full GET.
+> - NEW self-contained `backdrop_decimated` table (`pubmed_id, cluster_id,
+>   umap_2d, umap_3d, title, year`) is the landing scatter — moved OUT of
+>   `atlas.parquet`.
+> - `atlas.parquet` now carries ONLY `manifest` + `ohbm_overlay`. The
+>   cluster legend, backdrop, and `cluster_centroids` are range-fetched
+>   from the `neuroscape.parquet` sibling. `cross_pointers` is dropped
+>   (permalinks derived from `(kind, id)` in the browser).
+> - The `ohbm_vectors` table (§3 below) was NEVER implemented in
+>   `write_atlas_parquet`; it is aspirational. Atlas-root semantic search
+>   ranks NeuroScape via the sibling vectors + centroids; the OHBM overlay
+>   is scatter-only, mapped to `nearest_cluster_id`. Invariants INV-005..007
+>   that reference `ohbm_vectors` are therefore not enforced.
+> - NeuroScape minilm vectors embed `title+abstract` (was title-only),
+>   reusing the OHBM seq-length window + `chunk_mean_pool`.
+
 ---
 
 ## Entities

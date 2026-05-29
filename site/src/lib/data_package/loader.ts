@@ -373,30 +373,6 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 		// Stage 15 — atlas.parquet dispatch (schema_version === 'atlas.v1').
 		// Bare-root cross-conference landing page reads these row groups.
 		if (isAtlas) {
-			if (name === 'clusters') {
-				out.set('data/atlas/clusters.json', {
-					schema_version: 'atlas.clusters.v1',
-					build_info: buildInfo,
-					clusters: rows
-				});
-				continue;
-			}
-			if (name === 'neuroscape_backdrop_full') {
-				out.set('data/atlas/backdrop_full.json', {
-					schema_version: 'atlas.backdrop.v1',
-					build_info: buildInfo,
-					points: rows
-				});
-				continue;
-			}
-			if (name === 'neuroscape_backdrop_decimated') {
-				out.set('data/atlas/backdrop_decimated.json', {
-					schema_version: 'atlas.backdrop.v1',
-					build_info: buildInfo,
-					points: rows
-				});
-				continue;
-			}
 			if (name === 'ohbm_overlay') {
 				out.set('data/atlas/ohbm_overlay.json', {
 					schema_version: 'atlas.overlay.v1',
@@ -405,18 +381,14 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 				});
 				continue;
 			}
-			if (name === 'cross_pointers') {
-				out.set('data/atlas/cross_pointers.json', {
-					schema_version: 'atlas.cross_pointers.v1',
-					build_info: buildInfo,
-					pointers: rows
-				});
-				continue;
-			}
-			// Note: atlas.parquet intentionally carries NO cluster_centroids
-			// table. atlas-root range-fetches that row group from the sibling
-			// neuroscape.parquet via loadClusterCentroidsFromNeuroscape() —
-			// single source of truth, no duplication.
+			// Spec 019 — atlas.parquet now carries ONLY manifest + ohbm_overlay
+			// (the OHBM→NeuroScape projection, which is impossible to derive
+			// from either sibling alone). clusters, backdrop_decimated, and
+			// cluster_centroids are all range-fetched from the sibling
+			// neuroscape.parquet (loadClustersFromNeuroscape /
+			// loadBackdropDecimatedFromNeuroscape / loadClusterCentroidsFromNeuroscape)
+			// — single source of truth, no duplication. cross_pointers dropped:
+			// permalinks are derived from (kind, id) in the browser.
 			// Unknown atlas.v1 outer row — ignore silently (forwards
 			// compatible: future atlas.parquet versions can add tables
 			// without breaking this decoder).
@@ -431,6 +403,28 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 					schema_version: 'neuroscape.articles.v1',
 					build_info: buildInfo,
 					articles: rows
+				});
+				continue;
+			}
+			if (name === 'coords') {
+				// Spec 019 — geometry split out of `articles` so a view that
+				// only needs identity/search never pays for umap_2d/umap_3d.
+				// Folded onto articles in the post-loop join below.
+				out.set('data/neuroscape/coords.json', {
+					schema_version: 'neuroscape.coords.v1',
+					build_info: buildInfo,
+					coords: rows
+				});
+				continue;
+			}
+			if (name === 'backdrop_decimated') {
+				// Spec 019 — self-contained landing scatter sample (moved here
+				// from atlas.parquet). Carries its own title/year/umap so the
+				// atlas-root backdrop renders from one range fetch.
+				out.set('data/neuroscape/backdrop_decimated.json', {
+					schema_version: 'neuroscape.backdrop.v1',
+					build_info: buildInfo,
+					points: rows
 				});
 				continue;
 			}
@@ -545,9 +539,36 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 						pubmed_id: number;
 						nearest_pubmed_ids?: number[];
 						nearest_distances?: number[];
+						umap_2d?: number[];
+						umap_3d?: number[];
 					}>;
 			  }
 			| undefined;
+		// Spec 019 — geometry now lives in its own `coords` table; fold it
+		// back onto every article so the existing /neuroscape/ render code
+		// (which reads a.umap_2d / a.umap_3d) is unchanged.
+		const coordsShard = out.get('data/neuroscape/coords.json') as
+			| {
+					coords?: Array<{
+						pubmed_id: number;
+						umap_2d: number[];
+						umap_3d: number[];
+					}>;
+			  }
+			| undefined;
+		if (articlesShard?.articles && coordsShard?.coords) {
+			const geoById = new Map<number, { umap_2d: number[]; umap_3d: number[] }>();
+			for (const c of coordsShard.coords) {
+				geoById.set(c.pubmed_id, { umap_2d: c.umap_2d, umap_3d: c.umap_3d });
+			}
+			for (const a of articlesShard.articles) {
+				const hit = geoById.get(a.pubmed_id);
+				if (hit) {
+					a.umap_2d = hit.umap_2d;
+					a.umap_3d = hit.umap_3d;
+				}
+			}
+		}
 		const neighboursShard = out.get('data/neuroscape/neighbors.json') as
 			| {
 					rows?: Array<{
@@ -662,7 +683,7 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 // The actual `ohbm2026.parquet` and `neuroscape.parquet` deployed beside
 // it carry their own state-keys in their own manifests. If a deploy ever
 // publishes a refreshed sibling without re-running the atlas builder, the
-// `cross_pointers` / `ohbm_overlay` rows in `atlas.parquet` will point at
+// `ohbm_overlay` rows in `atlas.parquet` will point at
 // stale ids on the sibling subsite. R-012 mandates the atlas-root page
 // detect this and render a visible banner rather than rendering a
 // partial / silently-wrong scatter.
@@ -887,6 +908,60 @@ export async function loadClusterCentroidsFromNeuroscape(): Promise<Array<{
 				: new Float32Array(r.centroid_vector),
 		member_count: Number(r.member_count)
 	}));
+}
+
+/**
+ * Spec 019 — range-fetch the `clusters` legend table from the sibling
+ * `neuroscape.parquet`. atlas.parquet no longer duplicates it; the
+ * atlas-root cluster legend (id, label, colour, member_count) is pulled
+ * from the single source of truth via the same row_group_size=1
+ * predicate-pushdown trick as loadClusterCentroidsFromNeuroscape().
+ * Returns `null` when the sibling URL is unset or the table is absent.
+ */
+export async function loadClustersFromNeuroscape(): Promise<Array<
+	Record<string, unknown>
+> | null> {
+	const url = neuroscapeSiblingUrl();
+	if (!url) return null;
+	const file = await asyncBufferFromUrl({ url });
+	const outer = (await parquetReadObjects({
+		file,
+		compressors,
+		utf8: false,
+		filter: { table_name: { $eq: 'clusters' } }
+	})) as Array<{ table_name?: string; table_bytes?: Uint8Array }>;
+	const match = outer.find((r) => r.table_name === 'clusters');
+	if (!match?.table_bytes) return null;
+	const rows = (await decodeBlob(match.table_bytes)) as Array<Record<string, unknown>>;
+	if (rows.length === 0) return null;
+	return rows;
+}
+
+/**
+ * Spec 019 — range-fetch the self-contained `backdrop_decimated` scatter
+ * sample from the sibling `neuroscape.parquet`. This table moved out of
+ * atlas.parquet: each row carries its own pubmed_id, cluster_id, umap_2d,
+ * umap_3d, title, year, so the atlas-root landing backdrop renders from a
+ * single range fetch without joining the full corpus. Returns `null` when
+ * the sibling URL is unset or the table is absent.
+ */
+export async function loadBackdropDecimatedFromNeuroscape(): Promise<Array<
+	Record<string, unknown>
+> | null> {
+	const url = neuroscapeSiblingUrl();
+	if (!url) return null;
+	const file = await asyncBufferFromUrl({ url });
+	const outer = (await parquetReadObjects({
+		file,
+		compressors,
+		utf8: false,
+		filter: { table_name: { $eq: 'backdrop_decimated' } }
+	})) as Array<{ table_name?: string; table_bytes?: Uint8Array }>;
+	const match = outer.find((r) => r.table_name === 'backdrop_decimated');
+	if (!match?.table_bytes) return null;
+	const rows = (await decodeBlob(match.table_bytes)) as Array<Record<string, unknown>>;
+	if (rows.length === 0) return null;
+	return rows;
 }
 
 /**

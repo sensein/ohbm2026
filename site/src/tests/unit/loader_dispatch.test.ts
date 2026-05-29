@@ -103,36 +103,32 @@ describe('loader atlas-root dispatch (T042)', () => {
 		}
 	}
 
-	it('emits the documented atlas-root envelope keys for schema_version atlas.v1', async () => {
+	it('emits ONLY manifest + ohbm_overlay for schema_version atlas.v1 (spec 019 slim atlas)', async () => {
+		// Spec 019 — atlas.parquet now carries only the OHBM→NeuroScape
+		// overlay (sibling-impossible). clusters / backdrop / centroids are
+		// range-fetched from neuroscape.parquet, cross_pointers is dropped.
 		await runAssertions({
 			innerByName: {
 				manifest: [
 					{
 						manifest_json: JSON.stringify({
 							schema_version: 'atlas.v1',
-							build_info: { state_key: 'atlas1234abcd' },
-							n_overlay_points: 2,
-							n_clusters: 3
+							build_info: {
+								state_key: 'atlas1234abcd',
+								sibling_state_keys: { ohbm2026: 'ohbm12345678', neuroscape: 'ns0000000001' }
+							},
+							n_overlay_points: 2
 						})
 					}
 				],
-				clusters: [{ cluster_id: 0, title: 'C0' }],
-				neuroscape_backdrop_full: [{ pubmed_id: 100, cluster_id: 0 }],
-				neuroscape_backdrop_decimated: [{ pubmed_id: 100, cluster_id: 0 }],
-				ohbm_overlay: [{ submission_id: 1001, poster_id: 201 }],
-				cross_pointers: [
-					{ point_kind: 'ohbm2026', id: 201, permalink: '/ohbm2026/abstract/201/' }
-				]
+				ohbm_overlay: [{ submission_id: 1001, poster_id: 201 }]
 			},
-			expectedKeys: [
-				'data/manifest.json',
+			expectedKeys: ['data/manifest.json', 'data/atlas/ohbm_overlay.json'],
+			notExpectedKeys: [
 				'data/atlas/clusters.json',
 				'data/atlas/backdrop_full.json',
 				'data/atlas/backdrop_decimated.json',
-				'data/atlas/ohbm_overlay.json',
-				'data/atlas/cross_pointers.json'
-			],
-			notExpectedKeys: [
+				'data/atlas/cross_pointers.json',
 				'data/abstracts.json',
 				'data/enrichment.json',
 				'data/standby_slots.json'
@@ -154,17 +150,62 @@ describe('loader atlas-root dispatch (T042)', () => {
 					}
 				],
 				articles: [{ pubmed_id: 100, title: 'T', year: 2020, cluster_id: 0 }],
+				coords: [{ pubmed_id: 100, cluster_id: 0, umap_2d: [1, 2], umap_3d: [1, 2, 3] }],
+				backdrop_decimated: [
+					{ pubmed_id: 100, cluster_id: 0, umap_2d: [1, 2], umap_3d: [1, 2, 3], title: 'T', year: 2020 }
+				],
 				clusters: [{ cluster_id: 0, title: 'C0' }],
 				neighbors_neuroscape: [{ pubmed_id: 100, nearest_pubmed_ids: [101, 102] }]
 			},
 			expectedKeys: [
 				'data/manifest.json',
 				'data/neuroscape/articles.json',
+				'data/neuroscape/coords.json',
+				'data/neuroscape/backdrop_decimated.json',
 				'data/neuroscape/clusters.json',
 				'data/neuroscape/neighbors.json'
 			],
 			notExpectedKeys: ['data/abstracts.json', 'data/enrichment.json']
 		});
+	});
+
+	it('folds the coords table onto neuroscape articles (umap_2d / umap_3d join)', async () => {
+		__innerByName = {
+			manifest: [
+				{
+					manifest_json: JSON.stringify({
+						schema_version: 'neuroscape.v1',
+						build_info: { state_key: 'ns0000000001' },
+						n_articles: 1
+					})
+				}
+			],
+			articles: [{ pubmed_id: 100, title: 'T', year: 2020, cluster_id: 0 }],
+			coords: [{ pubmed_id: 100, cluster_id: 0, umap_2d: [1.5, 2.5], umap_3d: [1, 2, 3] }]
+		};
+		__outerNames = Object.keys(__innerByName);
+
+		const fakeFetch = vi.fn(async () => {
+			return new Response(new Uint8Array(8).buffer, {
+				status: 200,
+				headers: { 'content-type': 'application/octet-stream' }
+			});
+		}) as unknown as typeof fetch;
+
+		vi.stubEnv('VITE_DATA_PACKAGE_URL_NEUROSCAPE', 'https://example.test/neuroscape.parquet');
+		vi.stubEnv('VITE_SITE_MODE', 'neuroscape');
+
+		const { loadDataPackage, resetDataPackageCacheForTests } = await import(
+			'$lib/data_package/loader'
+		);
+		resetDataPackageCacheForTests();
+		const map = await loadDataPackage(fakeFetch);
+		expect(map).not.toBeNull();
+		const articlesShard = map!.get('data/neuroscape/articles.json') as {
+			articles: Array<{ pubmed_id: number; umap_2d?: number[]; umap_3d?: number[] }>;
+		};
+		expect(articlesShard.articles[0].umap_2d).toEqual([1.5, 2.5]);
+		expect(articlesShard.articles[0].umap_3d).toEqual([1, 2, 3]);
 	});
 
 	it('still emits the OHBM 2026 envelope when manifest has no schema_version (legacy abstracts.v2 path)', async () => {

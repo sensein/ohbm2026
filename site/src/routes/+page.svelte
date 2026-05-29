@@ -83,6 +83,8 @@
 		loadVectorsManifest,
 		loadClusterVectors,
 		loadClusterCentroidsFromNeuroscape,
+		loadClustersFromNeuroscape,
+		loadBackdropDecimatedFromNeuroscape,
 		verifyAtlasSiblingDrift,
 		type AtlasDriftEntry
 	} from '$lib/data_package/loader';
@@ -1146,22 +1148,29 @@
 				return;
 			}
 			if (SITE_MODE === 'atlas-root') {
-				const backdropShard = pkg.get('data/atlas/backdrop_full.json') as
-					| { points: AtlasBackdropPoint[] }
-					| undefined;
 				const overlayShard = pkg.get('data/atlas/ohbm_overlay.json') as
 					| { points: AtlasOverlayPoint[] }
 					| undefined;
-				const clustersShard = pkg.get('data/atlas/clusters.json') as
-					| { clusters: AtlasClusterRow[] }
-					| undefined;
-				if (!backdropShard || !overlayShard || !clustersShard) {
-					atlasError = 'Atlas data package is missing one of the expected row groups.';
+				if (!overlayShard) {
+					atlasError = 'Atlas data package is missing the ohbm_overlay row group.';
 					return;
 				}
-				atlasBackdrop = backdropShard.points;
+				// Spec 019 — atlas.parquet now carries ONLY the OHBM→NeuroScape
+				// overlay. The cluster legend + the landing backdrop are
+				// range-fetched from the sibling neuroscape.parquet (single
+				// source of truth, no 27 MB duplication in atlas.parquet).
+				const [clustersRows, backdropRows] = await Promise.all([
+					loadClustersFromNeuroscape(),
+					loadBackdropDecimatedFromNeuroscape()
+				]);
+				if (!clustersRows || !backdropRows) {
+					atlasError =
+						'Atlas backdrop/clusters could not be range-fetched from the NeuroScape sibling parquet.';
+					return;
+				}
+				atlasBackdrop = backdropRows as unknown as AtlasBackdropPoint[];
 				atlasOverlayPoints = overlayShard.points;
-				atlasClusters = clustersShard.clusters;
+				atlasClusters = clustersRows as unknown as AtlasClusterRow[];
 				// Publish title lookups so the unifying cart drawer can
 				// render rich rows for items from EITHER subsite when
 				// the user is on atlas-root (the only build that loads

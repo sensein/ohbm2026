@@ -76,8 +76,9 @@ swatch colour that `cross_pointers` produces today.
 NO new badge UX (per spec US4 + Clarifications session 2026-05-27
 Q1).
 
-Row interaction: clicking a row navigates via the existing
-`cross_pointers` table on `atlas.parquet`:
+Row interaction: clicking a row navigates to a permalink derived
+in-browser from `(kind, id)` — the `cross_pointers` table was dropped
+(2026-05-29 addendum) because the mapping is a pure function of the row:
 
 | Row corpus | Permalink |
 |---|---|

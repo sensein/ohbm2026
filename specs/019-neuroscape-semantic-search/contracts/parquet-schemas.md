@@ -6,6 +6,18 @@ Wire-level schemas the build step writes and the browser loader reads.
 Cross-table invariants live in [../data-model.md §Cross-file
 consistency invariants](../data-model.md#cross-file-consistency-invariants).
 
+> **Addendum (2026-05-29) — actual table layout.** See the matching
+> addendum in [../data-model.md](../data-model.md). In the shipped
+> writer (`parquet_writer.py`): `neuroscape.parquet` = `manifest`,
+> `articles` (identity/search: `pubmed_id, title, year, cluster_id`),
+> `coords` (`pubmed_id, cluster_id, umap_2d, umap_3d`),
+> `backdrop_decimated` (`+title, year`), `clusters`,
+> `neighbors_neuroscape`, `search:*`, `cluster_centroids`.
+> `atlas.parquet` = `manifest` + `ohbm_overlay` ONLY. §3 `ohbm_vectors`
+> below is aspirational and NOT written; atlas-root ranks NeuroScape via
+> the sibling vectors + centroids (range-fetched), OHBM overlay is
+> scatter-only.
+
 ---
 
 ## 1. `cluster_centroids` (table inside `neuroscape.parquet`)

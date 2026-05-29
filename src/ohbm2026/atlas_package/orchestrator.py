@@ -408,6 +408,7 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
         palette=palette,
         embedded_3d=fit3d.embedded,
         embedded_2d=fit2d.embedded,
+        decimated_indices=decimated_indices,
         knn=knn,
         titles_index_bin=cfg.titles_index_bin,
         titles_index_meta=titles_meta,
@@ -434,13 +435,6 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
             "ohbm2026": cfg.ohbm2026_state_key,
             "neuroscape": neuroscape_state_key,
         },
-        articles=articles,
-        clusters=clusters,
-        cluster_counts=cluster_counts,
-        palette=palette,
-        embedded_3d=fit3d.embedded,
-        embedded_2d=fit2d.embedded,
-        decimated_indices=decimated_indices,
         ohbm_overlay=projection,
         ohbm_overlay_2d=ohbm_2d,
         ohbm_poster_ids=poster_ids,
@@ -448,8 +442,13 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
         ohbm_nearest_cluster=nearest_cluster,
     )
 
-    # 11. Cross-parquet invariant.
-    parquet_writer.assert_cluster_tables_match(neuroscape_path, atlas_path)
+    # 11. Cross-parquet invariant — atlas.parquet must declare the
+    # sibling state-keys it was projected against (browser drift check
+    # depends on these being present + correct).
+    parquet_writer.assert_atlas_sibling_keys(
+        atlas_path,
+        {"ohbm2026": cfg.ohbm2026_state_key, "neuroscape": neuroscape_state_key},
+    )
 
     # 12. Link check.
     link_report: dict[str, Any]
