@@ -180,6 +180,27 @@ worker; adds a cluster-routed + KNN-expansion pipeline that bounds
 per-query cost (~4 MB cold-cache range fetch instead of full 50 MB
 sidecar).
 
+**Per-table range fetch — never download a whole envelope parquet.**
+The nested-envelope parquets (`ohbm2026.parquet`, `neuroscape.parquet`,
+`atlas.parquet`) are written with `row_group_size=1`
+(`_OUTER_PARQUET_KWARGS` in `atlas_package/parquet_writer.py`)
+specifically so a browser can fetch ONE inner table via hyparquet
+predicate pushdown: a `{ table_name: { $eq: '<table>' } }` filter skips
+every other row group via row-group stats, so only that table's blob
+crosses the network (e.g. ~268 KB for `cluster_centroids`, not the 97 MB
+file). The flat `neuroscape_vectors.parquet` sidecar uses the same trick
+on `cluster_id`. When a browser surface needs one table from a sibling
+parquet, range-fetch it — do not download or duplicate the whole file.
+`atlas.parquet` deliberately carries NO `cluster_centroids` table;
+atlas-root range-fetches it from the sibling `neuroscape.parquet` via
+`loadClusterCentroidsFromNeuroscape()` (the sibling URL is already known
+for cache-prefetch + drift detection). The atlas-root backdrop ships no
+KNN neighbour graph, so the ranker uses an adaptive seed count
+(`max(topK, TOP_K_SEEDS)` when `knnIndex` is empty). NeuroScape v1.0.1
+build inputs live at `data/inputs/neuroscape-source/v101/` +
+`data/inputs/neuroscape/`; `ohbmcli build-atlas-package` runs locally
+end-to-end (built package under `data/outputs/atlas-package__*/`).
+
 The earlier Stage-15 baseline (the three-sibling-deployment architecture
 + three-parquet data layout this spec extends) is documented in
 `specs/015-neuroscape-context/plan.md` — that plan remains the canonical

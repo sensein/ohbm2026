@@ -410,14 +410,14 @@ def write_atlas_parquet(
     ohbm_poster_ids: Mapping[int, int],
     ohbm_titles: Mapping[int, str],
     ohbm_nearest_cluster: Mapping[int, int],
-    cluster_centroids: Mapping[int, np.ndarray] | None = None,
 ) -> None:
     """Emit ``atlas.parquet`` per contracts/parquet-schemas.md.
 
-    ``cluster_centroids`` (spec 019) is duplicated from neuroscape.parquet so
-    atlas-root can route the embedded query to a cluster before any range-fetch
-    into neuroscape_vectors.parquet. Without it, atlas-root's semantic lane has
-    no centroids to score against and silently returns zero NeuroScape hits.
+    The cluster-centroid table is NOT duplicated here: atlas-root range-fetches
+    the ``cluster_centroids`` row group that already lives in the sibling
+    ``neuroscape.parquet`` (the outer envelope is written ``row_group_size=1``
+    so a single inner table costs one Range request, not the full file). One
+    source of truth, no cross-parquet drift surface.
     """
 
     bi = dict(build_info)
@@ -474,15 +474,6 @@ def write_atlas_parquet(
             _to_inner_parquet_bytes(_cross_pointers_table(ohbm_overlay, ohbm_poster_ids, articles)),
         ),
     ]
-    if cluster_centroids:
-        entries.append(
-            (
-                "cluster_centroids",
-                _to_inner_parquet_bytes(
-                    _cluster_centroids_table(cluster_centroids, cluster_counts)
-                ),
-            )
-        )
     _write_outer(out_path, entries)
 
 

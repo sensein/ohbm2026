@@ -413,20 +413,10 @@ async function parseParquetSingle(bytes: Uint8Array): Promise<Map<string, unknow
 				});
 				continue;
 			}
-			if (name === 'cluster_centroids') {
-				// Spec 019 — atlas.parquet duplicates the centroid table so
-				// the cross-conference search bar can route an embedded query
-				// to a cluster (Step 2 of the cluster-routed pipeline) before
-				// range-fetching neuroscape_vectors.parquet. Emit the SAME key
-				// the /neuroscape/ branch uses so loadClusterCentroids() finds
-				// it regardless of SITE_MODE.
-				out.set('data/neuroscape/cluster_centroids.json', {
-					schema_version: 'neuroscape.cluster_centroids.v1',
-					build_info: buildInfo,
-					rows
-				});
-				continue;
-			}
+			// Note: atlas.parquet intentionally carries NO cluster_centroids
+			// table. atlas-root range-fetches that row group from the sibling
+			// neuroscape.parquet via loadClusterCentroidsFromNeuroscape() —
+			// single source of truth, no duplication.
 			// Unknown atlas.v1 outer row — ignore silently (forwards
 			// compatible: future atlas.parquet versions can add tables
 			// without breaking this decoder).
@@ -848,6 +838,55 @@ export async function loadVectorsManifest(url: string): Promise<VectorsManifest 
 	};
 	if (typeof m.scale !== 'number' || typeof m.vector_dim !== 'number') return null;
 	return { scale: m.scale, dim: m.vector_dim, model_sha256: m.model_sha256 ?? null };
+}
+
+/**
+ * Spec 019 — range-fetch the `cluster_centroids` table from the sibling
+ * `neuroscape.parquet` without downloading the whole ~97 MB corpus file.
+ *
+ * The main parquets are a nested envelope: an outer parquet with one row
+ * per inner table (`table_name`, `table_bytes` BLOB), written
+ * `row_group_size=1` precisely so a browser can pull one inner table in
+ * isolation. A `{ table_name: { $eq: 'cluster_centroids' } }` predicate
+ * skips every other row group via row-group stats (same strategy
+ * `loadClusterVectors` uses on the flat vectors sidecar), so only the
+ * ~268 KB centroid blob (175 clusters × 384-dim) crosses the network.
+ *
+ * Used by atlas-root, whose own `atlas.parquet` carries no centroid table.
+ * Returns `null` when the neuroscape sibling URL is unset or the table is
+ * absent (older build) — the caller then keeps the KNN-only fallback and
+ * logs loudly (CA-006). Shape matches `shards.loadClusterCentroids`.
+ */
+export async function loadClusterCentroidsFromNeuroscape(): Promise<Array<{
+	cluster_id: number;
+	centroid_vector: Float32Array;
+	member_count: number;
+}> | null> {
+	const url = neuroscapeSiblingUrl();
+	if (!url) return null;
+	const file = await asyncBufferFromUrl({ url });
+	const outer = (await parquetReadObjects({
+		file,
+		compressors,
+		utf8: false,
+		filter: { table_name: { $eq: 'cluster_centroids' } }
+	})) as Array<{ table_name?: string; table_bytes?: Uint8Array }>;
+	const match = outer.find((r) => r.table_name === 'cluster_centroids');
+	if (!match?.table_bytes) return null;
+	const rows = (await decodeBlob(match.table_bytes)) as Array<{
+		cluster_id: number | bigint;
+		centroid_vector: number[] | Float32Array;
+		member_count: number | bigint;
+	}>;
+	if (rows.length === 0) return null;
+	return rows.map((r) => ({
+		cluster_id: Number(r.cluster_id),
+		centroid_vector:
+			r.centroid_vector instanceof Float32Array
+				? r.centroid_vector
+				: new Float32Array(r.centroid_vector),
+		member_count: Number(r.member_count)
+	}));
 }
 
 /**

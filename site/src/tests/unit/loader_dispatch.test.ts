@@ -38,7 +38,15 @@ vi.mock('hyparquet', () => {
 				// read above can route back to the canned rows.
 				table_bytes: new TextEncoder().encode(name)
 			}));
-		})
+		}),
+		// Used by loadClusterCentroidsFromNeuroscape's range-fetch. Returns
+		// a zero-length buffer; the parquetReadObjects mock decodes '' (not a
+		// known inner table) and falls through to the outer-rows branch.
+		asyncBufferFromUrl: vi.fn(async () => ({
+			byteLength: 0,
+			slice: async () => new ArrayBuffer(0)
+		})),
+		parquetMetadataAsync: vi.fn(async () => ({ key_value_metadata: [] }))
 	};
 });
 
@@ -132,37 +140,6 @@ describe('loader atlas-root dispatch (T042)', () => {
 		});
 	});
 
-	it('surfaces the atlas.v1 cluster_centroids row as data/neuroscape/cluster_centroids.json (spec 019)', async () => {
-		await runAssertions({
-			innerByName: {
-				manifest: [
-					{
-						manifest_json: JSON.stringify({
-							schema_version: 'atlas.v1',
-							build_info: { state_key: 'atlas1234abcd' },
-							n_overlay_points: 1,
-							n_clusters: 1
-						})
-					}
-				],
-				clusters: [{ cluster_id: 0, title: 'C0' }],
-				neuroscape_backdrop_full: [{ pubmed_id: 100, cluster_id: 0 }],
-				neuroscape_backdrop_decimated: [{ pubmed_id: 100, cluster_id: 0 }],
-				ohbm_overlay: [{ submission_id: 1001, poster_id: 201 }],
-				cross_pointers: [
-					{ point_kind: 'ohbm2026', id: 201, permalink: '/ohbm2026/abstract/201/' }
-				],
-				cluster_centroids: [
-					{ cluster_id: 0, centroid_vector: [0.1, 0.2], member_count: 3 }
-				]
-			},
-			// Emitted under the SAME key the /neuroscape/ branch uses so
-			// loadClusterCentroids() finds it regardless of SITE_MODE.
-			expectedKeys: ['data/manifest.json', 'data/neuroscape/cluster_centroids.json'],
-			notExpectedKeys: ['data/abstracts.json']
-		});
-	});
-
 	it('emits the documented neuroscape envelope keys for schema_version neuroscape.v1', async () => {
 		await runAssertions({
 			innerByName: {
@@ -249,6 +226,39 @@ describe('loader atlas-root dispatch (T042)', () => {
 		expect(enrichment).toBeDefined();
 		expect(enrichment.ai_provenance.claims_model_id).toBe('gpt-5.4-mini');
 		expect(enrichment.ai_provenance.figures_model_id).toBe('gpt-5.4-mini');
+	});
+
+	it('range-fetches cluster_centroids from the sibling neuroscape.parquet (atlas-root fallback)', async () => {
+		// The outer read returns one row per name in __outerNames; the inner
+		// decode of the 'cluster_centroids' blob routes back to these rows.
+		__innerByName = {
+			cluster_centroids: [
+				{ cluster_id: 0, centroid_vector: [0.1, 0.2, 0.3], member_count: 12 },
+				{ cluster_id: 1, centroid_vector: [0.4, 0.5, 0.6], member_count: 7 }
+			]
+		};
+		__outerNames = ['clusters', 'cluster_centroids', 'articles'];
+
+		vi.stubEnv('VITE_DATA_PACKAGE_URL_NEUROSCAPE', 'https://example.test/neuroscape.parquet');
+
+		const { loadClusterCentroidsFromNeuroscape } = await import('$lib/data_package/loader');
+		const centroids = await loadClusterCentroidsFromNeuroscape();
+		expect(centroids).not.toBeNull();
+		expect(centroids!.length).toBe(2);
+		expect(centroids![0].cluster_id).toBe(0);
+		expect(centroids![0].member_count).toBe(12);
+		expect(centroids![0].centroid_vector).toBeInstanceOf(Float32Array);
+		expect(Array.from(centroids![0].centroid_vector)).toEqual([
+			expect.closeTo(0.1, 5),
+			expect.closeTo(0.2, 5),
+			expect.closeTo(0.3, 5)
+		]);
+	});
+
+	it('returns null from loadClusterCentroidsFromNeuroscape when the sibling URL is unset', async () => {
+		vi.stubEnv('VITE_DATA_PACKAGE_URL_NEUROSCAPE', '');
+		const { loadClusterCentroidsFromNeuroscape } = await import('$lib/data_package/loader');
+		expect(await loadClusterCentroidsFromNeuroscape()).toBeNull();
 	});
 
 	it('leaves ai_provenance keys null when the manifest carries no enrichment attribution', async () => {

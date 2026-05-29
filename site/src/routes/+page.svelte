@@ -82,6 +82,7 @@
 		getNeuroscapeVectorsUrl,
 		loadVectorsManifest,
 		loadClusterVectors,
+		loadClusterCentroidsFromNeuroscape,
 		verifyAtlasSiblingDrift,
 		type AtlasDriftEntry
 	} from '$lib/data_package/loader';
@@ -1034,23 +1035,30 @@
 		const vectorsUrl = getNeuroscapeVectorsUrl();
 		if (!vectorsUrl) return; // KNN-only fallback
 		try {
-			const [manifest, centroids] = await Promise.all([
+			const [manifest, localCentroids] = await Promise.all([
 				loadVectorsManifest(vectorsUrl),
 				loadClusterCentroids()
 			]);
+			// atlas-root's own atlas.parquet carries no centroid table; pull
+			// the cluster_centroids row group that already exists in the
+			// sibling neuroscape.parquet (one Range request, ~268 KB — the
+			// envelope is row_group_size=1). One source of truth, no
+			// duplication, no data rebuild.
+			let centroids = localCentroids;
+			if (!centroids || centroids.length === 0) {
+				centroids = await loadClusterCentroidsFromNeuroscape();
+			}
 			if (!manifest || !centroids || centroids.length === 0) {
 				// CA-006 — never degrade to lexical-only silently. The vectors
-				// sidecar is configured (vectorsUrl present) but the centroid
-				// table is missing from the data package, so the cluster-routed
-				// ranker can't run. On atlas-root this means the data package
-				// predates the spec-019 centroid-in-atlas.parquet fix; rebuild
-				// via `ohbmcli build-atlas-package` and re-upload.
+				// sidecar is configured (vectorsUrl present) but no centroids
+				// were found locally or in the neuroscape sibling, so the
+				// cluster-routed ranker can't run.
 				console.warn(
 					`neuroscape ranker: vectors sidecar present but cluster centroids ` +
-						`missing (manifest=${!!manifest}, centroids=${centroids?.length ?? 0}) — ` +
-						`semantic search will fall back to KNN-only. Rebuild the data package ` +
-						`so ${SITE_MODE === 'atlas-root' ? 'atlas.parquet' : 'neuroscape.parquet'} ` +
-						`carries the cluster_centroids table.`
+						`unavailable (manifest=${!!manifest}, centroids=${centroids?.length ?? 0}) — ` +
+						`semantic search will fall back to KNN-only. Check that ` +
+						`VITE_DATA_PACKAGE_URL_NEUROSCAPE points at a neuroscape.parquet ` +
+						`carrying the cluster_centroids table.`
 				);
 				return;
 			}
