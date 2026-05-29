@@ -64,6 +64,17 @@ class StateKeyTests(unittest.TestCase):
         b = vectors_compute.compute_state_key(article_set_hash="bbb", model_id="m")
         self.assertNotEqual(a, b)
 
+    def test_state_key_changes_when_text_recipe_changes(self) -> None:
+        # Switching the field composition (title → title+abstract) must
+        # invalidate any cache built under the previous recipe.
+        a = vectors_compute.compute_state_key(
+            article_set_hash="aaa", model_id="m", text_recipe="title"
+        )
+        b = vectors_compute.compute_state_key(
+            article_set_hash="aaa", model_id="m", text_recipe="title+abstract"
+        )
+        self.assertNotEqual(a, b)
+
 
 class ComputeCachingTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -78,7 +89,7 @@ class ComputeCachingTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             cache_root = Path(tmp)
             res = vectors_compute.compute_cluster_vectors(
-                article_titles=self.titles,
+                article_texts=self.titles,
                 pubmed_ids=self.pubmed_ids,
                 cluster_ids=self.cluster_ids,
                 state_key=self.state_key,
@@ -98,7 +109,7 @@ class ComputeCachingTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             cache_root = Path(tmp)
             _ = vectors_compute.compute_cluster_vectors(
-                article_titles=self.titles,
+                article_texts=self.titles,
                 pubmed_ids=self.pubmed_ids,
                 cluster_ids=self.cluster_ids,
                 state_key=self.state_key,
@@ -106,7 +117,7 @@ class ComputeCachingTests(unittest.TestCase):
                 encoder=self.encoder,
             )
             res2 = vectors_compute.compute_cluster_vectors(
-                article_titles=self.titles,
+                article_texts=self.titles,
                 pubmed_ids=self.pubmed_ids,
                 cluster_ids=self.cluster_ids,
                 state_key=self.state_key,
@@ -124,7 +135,7 @@ class ComputeCachingTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             cache_root = Path(tmp)
             _ = vectors_compute.compute_cluster_vectors(
-                article_titles=self.titles,
+                article_texts=self.titles,
                 pubmed_ids=self.pubmed_ids,
                 cluster_ids=self.cluster_ids,
                 state_key=self.state_key,
@@ -134,7 +145,7 @@ class ComputeCachingTests(unittest.TestCase):
             # Corrupt one cluster file.
             (cache_root / self.state_key / "cluster_1.npz").write_bytes(b"not an npz")
             res = vectors_compute.compute_cluster_vectors(
-                article_titles=self.titles,
+                article_texts=self.titles,
                 pubmed_ids=self.pubmed_ids,
                 cluster_ids=self.cluster_ids,
                 state_key=self.state_key,
@@ -156,7 +167,7 @@ class Int8RoundtripTests(unittest.TestCase):
         encoder = _make_encoder()
         with TemporaryDirectory() as tmp:
             res = vectors_compute.compute_cluster_vectors(
-                article_titles=titles,
+                article_texts=titles,
                 pubmed_ids=list(range(50)),
                 cluster_ids=[0] * 50,
                 state_key="rtroundtrip",
@@ -180,7 +191,7 @@ class InputGuardTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             with self.assertRaises(exceptions.EmbeddingComputeError) as ctx:
                 vectors_compute.compute_cluster_vectors(
-                    article_titles=["a", "b", "c"],
+                    article_texts=["a", "b", "c"],
                     pubmed_ids=[1, 2],  # one short
                     cluster_ids=[0, 0, 0],
                     state_key="badlen",
@@ -196,7 +207,7 @@ class InputGuardTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             with self.assertRaises(exceptions.EmbeddingComputeError) as ctx:
                 vectors_compute.compute_cluster_vectors(
-                    article_titles=["a", "b"],
+                    article_texts=["a", "b"],
                     pubmed_ids=[1, 2],
                     cluster_ids=[0, 0],
                     state_key="badenc",
@@ -214,7 +225,7 @@ class InputGuardTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             with self.assertRaises(exceptions.EmbeddingComputeError) as ctx:
                 vectors_compute.compute_cluster_vectors(
-                    article_titles=["a", "b"],
+                    article_texts=["a", "b"],
                     pubmed_ids=[1, 2],
                     cluster_ids=[0, 0],
                     state_key="nanenc",

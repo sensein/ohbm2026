@@ -294,13 +294,23 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
     if cfg.semantic_index_enabled:
         from . import semantic_index, vectors_compute
 
+        # Embed title + abstract (the same field set the /ohbm2026/
+        # corpus vectors use). Abstracts are loaded build-time-only and
+        # never written to neuroscape.parquet (R-015) — they ride into
+        # the INT8 vectors and are then discarded.
+        text_recipe = "title+abstract"
+        abstracts = neuroscape_loader.load_article_abstracts(bundle)
+        article_texts = [
+            f"{a.title}\n\n{abstracts.get(a.pubmed_id, '')}".strip() for a in articles
+        ]
         sk = vectors_compute.compute_state_key(
             article_set_hash=neuroscape_state_key,
             model_id=cfg.semantic_model_id,
+            text_recipe=text_recipe,
         )
         cache_root = cfg.semantic_cache_root or (Path("data") / "cache" / "atlas-vectors")
         vectors_result = vectors_compute.compute_cluster_vectors(
-            article_titles=[a.title for a in articles],
+            article_texts=article_texts,
             pubmed_ids=[a.pubmed_id for a in articles],
             cluster_ids=[a.cluster_id for a in articles],
             state_key=sk,
@@ -337,6 +347,7 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
             "seed": cfg.seed,
             "model_id": cfg.semantic_model_id,
             "model_sha256": vectors_result.model_sha256,
+            "text_recipe": text_recipe,
             "vector_dim": vectors_compute.VECTOR_DIM,
             "quantization": "int8-global-scale",
             "scale": vectors_result.scale,
@@ -360,6 +371,7 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
             "state_key": sk,
             "model_id": cfg.semantic_model_id,
             "model_sha256": vectors_result.model_sha256,
+            "text_recipe": text_recipe,
             "vector_dim": vectors_compute.VECTOR_DIM,
             "quantization": "int8-global-scale",
             "scale": vectors_result.scale,

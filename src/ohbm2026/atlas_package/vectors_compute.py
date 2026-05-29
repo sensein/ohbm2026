@@ -4,7 +4,9 @@ Spec: ``specs/019-neuroscape-semantic-search/research.md#R-002`` +
 ``#R-009`` (build-step caching).
 
 Loads the corpus-side MiniLM model (``sentence-transformers/all-MiniLM-L6-v2``)
-via sentence-transformers, runs inference over article titles batch-by-batch,
+via the shared ``embed/hf.py`` chunk-mean-pool client (token window 512,
+overlap 64 — the same long-input handling the ``/ohbm2026/`` corpus vectors
+use), runs inference over ``title + abstract`` batch-by-batch,
 quantises with the single-global-scale scheme that matches
 ``src/ohbm2026/ui_data/vectors.py`` (so the browser dequantisation path
 in ``site/src/lib/workers/semantic.worker.ts`` works unchanged), and
@@ -82,12 +84,20 @@ def compute_state_key(
     article_set_hash: str,
     model_id: str,
     quantization_scheme: str = "int8-global-scale",
+    text_recipe: str = "title",
 ) -> str:
-    """Return ``sha256(article_set_hash || model_id || quantization)[:12]``.
+    """Return
+    ``sha256(article_set_hash || model_id || quantization || text_recipe)[:12]``.
 
     The article_set_hash is the upstream NeuroScape ingest's
     article-set state-key (already present on neuroscape.parquet's
     manifest as ``state_key``).
+
+    ``text_recipe`` names the field composition fed to the encoder
+    (e.g. ``"title"`` vs ``"title+abstract"``). It is folded into the
+    hash so switching the composition invalidates any cache built under
+    the previous recipe — otherwise a title-only cache would be silently
+    reused for a title+abstract build.
     """
     h = hashlib.sha256()
     h.update(article_set_hash.encode("utf-8"))
@@ -95,6 +105,8 @@ def compute_state_key(
     h.update(model_id.encode("utf-8"))
     h.update(b"|")
     h.update(quantization_scheme.encode("utf-8"))
+    h.update(b"|")
+    h.update(text_recipe.encode("utf-8"))
     return h.hexdigest()[:VECTORS_CACHE_STATE_KEY_LEN]
 
 
@@ -173,7 +185,7 @@ def _l2_renormalise(vectors: np.ndarray) -> np.ndarray:
 
 def compute_cluster_vectors(
     *,
-    article_titles: Sequence[str],
+    article_texts: Sequence[str],
     pubmed_ids: Sequence[int],
     cluster_ids: Sequence[int],
     state_key: str,
@@ -184,23 +196,31 @@ def compute_cluster_vectors(
 ) -> VectorsComputeResult:
     """Compute INT8 cluster-grouped MiniLM vectors with per-cluster cache.
 
+    ``article_texts`` is the per-article string fed to the encoder. The
+    orchestrator composes it as ``title + "\\n\\n" + abstract`` so the
+    corpus vectors carry the same field set the ``/ohbm2026/`` vectors
+    use; the long-input handling (token window 512, overlap 64,
+    mean-pool across chunks) reuses ``embed/hf.py`` so a multi-hundred-
+    token abstract is never silently truncated.
+
     Cache layout: ``<cache_root>/<state_key>/cluster_<id>.npz`` carries
     ``{pubmed_ids: int64[N], vectors_int8: int8[N, 384]}`` per cluster
     plus ``<cache_root>/<state_key>/scale.json`` for the global scale +
     max_abs_original (so a partial-rebuild after a corpus delta produces
     a coherent global scale).
 
-    When ``encoder`` is None the production sentence-transformers
-    pathway runs (``Xenova/all-MiniLM-L6-v2``). Tests inject a callable
+    When ``encoder`` is None the production chunk-mean-pool pathway runs
+    (``HFBatchClient`` over the PyTorch ``all-MiniLM-L6-v2`` origin of the
+    browser's Xenova ONNX model). Tests inject a callable
     ``encoder(texts: list[str]) -> np.ndarray[N, 384]`` to skip the heavy
     download.
     """
-    if len(article_titles) != len(pubmed_ids) or len(article_titles) != len(cluster_ids):
+    if len(article_texts) != len(pubmed_ids) or len(article_texts) != len(cluster_ids):
         raise EmbeddingComputeError(
-            f"input length mismatch: titles={len(article_titles)} "
+            f"input length mismatch: texts={len(article_texts)} "
             f"pubmed_ids={len(pubmed_ids)} cluster_ids={len(cluster_ids)}",
             reason="input_length_mismatch",
-            n_titles=len(article_titles),
+            n_titles=len(article_texts),
         )
     state_dir = Path(cache_root) / state_key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -250,30 +270,35 @@ def compute_cluster_vectors(
     # cluster needs recompute and we don't have a stable scale.json yet).
     if encoder is None:
         try:
-            from sentence_transformers import SentenceTransformer  # type: ignore
+            from ohbm2026.embed.hf import HFBatchClient
         except ImportError as exc:
             raise EmbeddingComputeError(
-                f"sentence-transformers not installed: {exc}",
+                f"sentence-transformers / embed.hf not importable: {exc}",
                 reason="sentence_transformers_missing",
-                n_titles=len(article_titles),
+                n_titles=len(article_texts),
             ) from exc
         try:
-            model = SentenceTransformer(model_id)
+            client = HFBatchClient(model_id=model_id, batch_size=batch_size)
         except Exception as exc:
             raise EmbeddingComputeError(
-                f"could not load model {model_id!r}: {exc}",
+                f"could not construct HFBatchClient for {model_id!r}: {exc}",
                 reason="model_load_failed",
-                n_titles=len(article_titles),
+                n_titles=len(article_texts),
             ) from exc
 
         def _default_encoder(texts: list[str]) -> np.ndarray:
-            vectors = model.encode(
-                texts,
-                batch_size=batch_size,
-                show_progress_bar=False,
-                convert_to_numpy=True,
-            )
-            return np.asarray(vectors, dtype=np.float32)
+            # Mini-batch the chunk-mean-pool client so the flat list of
+            # token chunks for a 461K-row corpus never materialises at
+            # once (each text may expand to several chunks). Each mini-
+            # batch produces (m, 384); we stack them at the end.
+            step = max(batch_size * 8, 256)
+            out_chunks: list[np.ndarray] = []
+            for start in range(0, len(texts), step):
+                vecs, _telemetry = client.embed_batch(texts[start : start + step])
+                out_chunks.append(np.asarray(vecs, dtype=np.float32))
+            if not out_chunks:
+                return np.empty((0, VECTOR_DIM), dtype=np.float32)
+            return np.concatenate(out_chunks, axis=0)
 
         encoder = _default_encoder
 
@@ -284,26 +309,26 @@ def compute_cluster_vectors(
     # meaningful in the "no inputs changed" case (full hit) but on any
     # delta we recompute everything for byte-identity.
     try:
-        all_vectors = encoder(list(article_titles))
+        all_vectors = encoder(list(article_texts))
     except Exception as exc:
         raise EmbeddingComputeError(
             f"encoder failed: {exc}",
             reason="encoder_failed",
-            n_titles=len(article_titles),
+            n_titles=len(article_texts),
         ) from exc
     all_vectors = np.asarray(all_vectors, dtype=np.float32)
-    if all_vectors.shape != (len(article_titles), VECTOR_DIM):
+    if all_vectors.shape != (len(article_texts), VECTOR_DIM):
         raise EmbeddingComputeError(
             f"encoder output shape {all_vectors.shape!r} != "
-            f"({len(article_titles)}, {VECTOR_DIM})",
+            f"({len(article_texts)}, {VECTOR_DIM})",
             reason="encoder_output_shape",
-            n_titles=len(article_titles),
+            n_titles=len(article_texts),
         )
     if not np.isfinite(all_vectors).all():
         raise EmbeddingComputeError(
             "encoder output contains non-finite values",
             reason="encoder_output_nonfinite",
-            n_titles=len(article_titles),
+            n_titles=len(article_texts),
         )
 
     normed = _l2_renormalise(all_vectors)

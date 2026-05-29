@@ -55,6 +55,7 @@ __all__ = [
     "discover_inputs",
     "iter_stage2_vectors",
     "iter_articles",
+    "load_article_abstracts",
     "load_clusters",
 ]
 
@@ -299,6 +300,41 @@ def iter_articles(bundle: InputBundle) -> Iterator[ArticleHeader]:
             year=year,
             cluster_id=cluster_id,
         )
+
+
+def load_article_abstracts(bundle: InputBundle) -> dict[int, str]:
+    """Return ``{pubmed_id: abstract_text}`` for build-time embedding only.
+
+    The abstract column is read so the semantic-index step can embed
+    ``title + abstract`` (the same field set the ``/ohbm2026/`` vectors
+    use), but it is NEVER written to ``neuroscape.parquet`` — body fields
+    stay in the source release and are fetched at view time via NCBI
+    EFetch (R-015). This is the reason the abstract is loaded into a
+    separate dict rather than onto :class:`ArticleHeader`: the header is
+    what reaches the browser bundle, and it must stay body-free.
+
+    Rows are filtered with the same year-range / required-field guards as
+    :func:`iter_articles` so the returned map aligns with the article set.
+    Missing or empty abstracts simply map to ``""``.
+    """
+
+    abstracts: dict[int, str] = {}
+    for row in _articles_csv_rows(bundle):
+        pmid_raw = row.get("Pmid") or row.get("pmid") or ""
+        year_raw = row.get("Year") or ""
+        cluster_raw = row.get("Cluster ID") or ""
+        if not pmid_raw or not year_raw or not cluster_raw:
+            continue
+        try:
+            pmid = int(pmid_raw)
+            year = int(year_raw)
+            int(cluster_raw)
+        except ValueError:
+            continue
+        if year < 1999 or year > 2023:
+            continue
+        abstracts[pmid] = row.get("Abstract") or ""
+    return abstracts
 
 
 # ---------------------------------------------------------------------------
