@@ -1,0 +1,4 @@
+{
+  "key": "coords-split",
+  "_comment": "Selects which key of the OHBM2026_UI_DATA_PACKAGE_URLS GitHub Actions variable supplies this branch's parquet URLs (see .github/scripts/resolve-data-channel.sh). This branch (spec 019 semantic-search) ships the coords/identity-split parquet layout, so it points at the 'coords-split' channel rather than 'baseline'. The choice merges with the code: preview, sandbox, and prod for this ref all resolve coords-split."
+}

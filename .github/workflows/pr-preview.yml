@@ -73,6 +73,16 @@ jobs:
         # the merge instead of failing at deploy time.
         run: PYTHONPATH=src python -m ohbm2026.ui_data.link_check specs/008-ui-rewrite/contracts/references.yaml
 
+      # Resolve the parquet URLs from the keyed registry variable, using the
+      # channel this PR branch declares in site/data-channel.json. A PR can
+      # point its preview at a different data set (a new channel key) without
+      # touching production's — they no longer share flat URL vars.
+      # See .github/scripts/resolve-data-channel.sh.
+      - name: Resolve data-package URLs from channel registry
+        env:
+          DATA_URLS_REGISTRY: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URLS }}
+        run: .github/scripts/resolve-data-channel.sh
+
       - name: Build all three SITE_MODE bundles (T049)
         working-directory: site
         env:
@@ -80,19 +90,9 @@ jobs:
           STAGE_ROOT_RELATIVE: site/publish
           VITE_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
           VITE_BUILD_AT: ${{ github.event.pull_request.head.repo.pushed_at }}
-          VITE_DATA_PACKAGE_URL_ATLAS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_ATLAS }}
-          VITE_DATA_PACKAGE_URL_OHBM2026: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_OHBM2026 || vars.OHBM2026_UI_DATA_PACKAGE_URL }}
-          VITE_DATA_PACKAGE_URL_NEUROSCAPE: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE }}
-          # Spec 019 — INT8 vectors sidecar for the cluster-routed
-          # semantic ranker. Set repo-wide, so PR previews fetch it too
-          # and exercise the live ranker (not the KNN fallback). The
-          # loader range-fetches per cluster, so the ~170 MB sidecar is
-          # never downloaded whole at runtime. If unset, `loader.ts`
-          # degrades to KNN-only.
-          VITE_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS }}
-          # Legacy single-var fallback honoured by `loader.ts` for one
-          # deploy cycle.
-          VITE_DATA_PACKAGE_URL: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL }}
+          # VITE_DATA_PACKAGE_URL_{OHBM2026,NEUROSCAPE,ATLAS,NEUROSCAPE_VECTORS}
+          # are exported to $GITHUB_ENV by the "Resolve data-package URLs"
+          # step above (keyed registry → channel from site/data-channel.json).
         run: |
           set -euo pipefail
           export VITE_BUILD_SHA_SHORT="${VITE_BUILD_SHA:0:7}"
