@@ -22,7 +22,7 @@ test.describe('US2: UMAP panel + lasso + model selector', () => {
 		page
 	}) => {
 		await page.goto('./');
-		await expect(page.getByTestId('result-count')).toBeVisible({ timeout: 5000 });
+		await expect(page.getByTestId('result-count')).toBeVisible({ timeout: 15_000 });
 		await expect(page.getByTestId('umap-panel')).toHaveCount(0);
 
 		await page.getByTestId('toggle-map').click();

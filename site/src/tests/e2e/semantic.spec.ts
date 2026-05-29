@@ -95,10 +95,12 @@ test.describe('US1: /neuroscape/ semantic search', () => {
 		page
 	}) => {
 		// Per-test timeout extension: the 461k-article parquet stream
-		// keeps the result list reflowing for ~30-60s on CI; the
-		// default 30s test timeout isn't enough for "wait for stable
-		// list → click → assert panel".
-		test.setTimeout(120_000);
+		// keeps the result list reflowing for ~30-60s on CI — longer when
+		// the (rate-limit-prone) data host throttles — and the default 30s
+		// test timeout isn't enough for "wait for stable list → click →
+		// assert panel". Budget leaves headroom past the stabilisation poll
+		// for the click + panel assertion.
+		test.setTimeout(180_000);
 		const input = page.getByTestId('search-input');
 		await input.fill('memory');
 		// Wait until the result count stops changing — two consecutive
@@ -114,7 +116,7 @@ test.describe('US1: /neuroscape/ semantic search', () => {
 					previous = cur;
 					return 'changing';
 				},
-				{ timeout: 90_000, intervals: [1_000, 2_000, 3_000] }
+				{ timeout: 120_000, intervals: [1_000, 2_000, 3_000] }
 			)
 			.toBe('stable');
 		const firstRow = page.getByTestId('neuroscape-result-row').first();
