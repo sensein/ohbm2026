@@ -274,6 +274,135 @@ def mlp_predict(model, x, device):
     return _l2norm(p.astype(np.float32))
 
 
+def _make_projector(in_dim, out_dim, device):
+    """384 -> 512 -> 256 -> 64 with LayerNorm + GELU + dropout; L2-normed output.
+
+    Wider, normed, regularised vs the plain MLP — the retrieval loss below is
+    what matters, but the architecture follows the survey recommendation.
+    """
+    import torch.nn as nn
+
+    class Projector(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.Linear(in_dim, 512),
+                nn.LayerNorm(512),
+                nn.GELU(),
+                nn.Dropout(0.1),
+                nn.Linear(512, 256),
+                nn.LayerNorm(256),
+                nn.GELU(),
+                nn.Dropout(0.1),
+                nn.Linear(256, out_dim),
+            )
+
+        def forward(self, x):
+            p = self.net(x)
+            return p / p.norm(dim=1, keepdim=True).clamp_min(1e-8)
+
+    return Projector().to(device)
+
+
+def _val_recall20(model, xval_probe, yval_probe, ref_true, device):
+    """recall@20 on a FIXED val probe vs a FIXED reference — the early-stop signal.
+
+    This is the metric we actually report, so we stop on it directly rather than
+    on cosine/MSE (which the survey flags as the reason naive regression plateaus:
+    low MSE can still scramble local rank order).
+
+    Reviewer fix: the probe + reference are sampled ONCE by the caller and the
+    reference size matches the test reference, so early-stop is on the same
+    metric we report (no per-epoch resampling jitter; no 50k-vs-100k mismatch
+    that mechanically inflated val recall@20 over test)."""
+    pv = mlp_predict(model, xval_probe, device)
+    return recall_at_k(pv, yval_probe, ref_true, 20)
+
+
+def fit_infonce(
+    xtr, ytr, xval_probe, yval_probe, val_ref, epochs, lr, device,
+    tau=0.05, nbr_thresh=0.8, batch=8192, weight_decay=1e-4,
+    loss_kind="cosine", verbose=True,
+):
+    """InfoNCE projector: pull pred(x_i) toward its OWN true-64 AND its in-batch
+    true-64 neighbours (cos >= nbr_thresh), push away the rest.
+
+    Directly optimises retrieval geometry instead of point-wise distance, which
+    is the survey's top recommendation for a UMAP-like (locally-warped) target.
+    In-batch similarities supply the neighbour-graph positives cheaply — no
+    global kNN precompute.
+
+    Optimisations / reviewer fixes over the first pass:
+      * symmetric loss (pred->true AND true->pred directions),
+      * larger batch (more in-batch negatives + neighbours),
+      * AdamW + cosine LR decay + weight decay,
+      * nbr_thresh raised 0.6 -> 0.8 so positives are true near-duplicates,
+        not the whole cluster blob (the loose threshold reproduced the
+        centroid-shrinkage failure mode it was meant to avoid),
+      * loss_kind="geodesic": Riemannian anchor on S^63 — minimise the
+        squared geodesic (arc-length) distance arccos(<p,y>)^2 instead of
+        the chordal 1-cos. arccos is the intrinsic metric of the unit
+        sphere, so it weights near-orthogonal (hard) pairs more than cosine,
+        which saturates. Logits stay cosine/tau (standard contrastive).
+    Early-stops on val recall@20 (fixed probe+ref). Returns (model, best_val_recall)."""
+    import torch
+
+    torch.manual_seed(0)
+    Xtr = torch.from_numpy(xtr).to(device)
+    Ytr = torch.from_numpy(ytr).to(device)
+
+    model = _make_projector(xtr.shape[1], ytr.shape[1], device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs)
+
+    def anchor_term(pb, yb):
+        cos = (pb * yb).sum(dim=1).clamp(-1.0 + 1e-6, 1.0 - 1e-6)
+        if loss_kind == "geodesic":
+            # squared arc-length on S^63; arccos in [0, pi].
+            return (torch.arccos(cos) ** 2).mean()
+        return (1.0 - cos).mean()
+
+    n = Xtr.shape[0]
+    best_state = None
+    best_rec = -1.0
+    for ep in range(epochs):
+        model.train()
+        perm = torch.randperm(n, device=device)
+        for s in range(0, n, batch):
+            idx = perm[s : s + batch]
+            xb = Xtr[idx]
+            yb = Ytr[idx]  # already L2-normed at assembly time
+            opt.zero_grad()
+            pb = model(xb)  # [B,64] normed
+            # Positive set per row: self + in-batch true-64 neighbours.
+            with torch.no_grad():
+                ysim = yb @ yb.T
+                pos = (ysim >= nbr_thresh).float()
+                pos.fill_diagonal_(1.0)
+                pos_row = pos / pos.sum(dim=1, keepdim=True).clamp_min(1.0)
+                pos_col = pos / pos.sum(dim=0, keepdim=True).clamp_min(1.0)
+            logits = (pb @ yb.T) / tau  # [B,B] — pred_i vs true_j
+            # Symmetric: rows = pred retrieves true; cols = true retrieves pred.
+            logp_row = torch.log_softmax(logits, dim=1)
+            logp_col = torch.log_softmax(logits, dim=0)
+            nce = -(pos_row * logp_row).sum(dim=1).mean() \
+                  - (pos_col * logp_col).sum(dim=0).mean()
+            loss = 0.5 * nce + 0.1 * anchor_term(pb, yb)
+            loss.backward()
+            opt.step()
+        sched.step()
+        rec = _val_recall20(model, xval_probe, yval_probe, val_ref, device)
+        if verbose:
+            _log(f"  infonce[{loss_kind}] epoch {ep + 1}/{epochs} val recall@20={rec:.4f}")
+        if rec > best_rec:
+            best_rec = rec
+            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    _log(f"  infonce[{loss_kind}] best val recall@20={best_rec:.4f}")
+    return model, best_rec
+
+
 # ── metrics ──────────────────────────────────────────────────────────
 
 
@@ -304,6 +433,26 @@ def recall_at_k(probe, ideal_probe, reference, k, batch=512):
     return float(np.mean(accs))
 
 
+def same_cluster_purity(probe, probe_cluster, reference, ref_cluster, k, batch=512):
+    """purity@k: fraction of a probe's top-k neighbours in `reference` that
+    share the probe's true cluster.
+
+    Reviewer's recommended headline metric: it measures "does the query land in
+    the right neighbourhood" without penalising the projector for failing to
+    reproduce true-64's idiosyncratic exact neighbour order (true-64 is itself a
+    lossy UMAP-like projection, so matching its neighbour list is not the
+    deployment goal — landing in the right cluster is)."""
+    n = probe.shape[0]
+    accs = np.empty(n, dtype=np.float32)
+    for s in range(0, n, batch):
+        e = min(s + batch, n)
+        ap = probe[s:e] @ reference.T
+        ak = np.argpartition(-ap, k, axis=1)[:, :k]
+        for r in range(e - s):
+            accs[s + r] = float(np.mean(ref_cluster[ak[r]] == probe_cluster[s + r]))
+    return float(np.mean(accs))
+
+
 # ── orchestration ────────────────────────────────────────────────────
 
 
@@ -322,10 +471,25 @@ def main() -> int:
         default=None,
         help="defaults to the latest data/inputs/neuroscape/centroids__*.npy",
     )
-    ap.add_argument("--models", default="both", choices=["ridge", "mlp", "both"])
+    ap.add_argument(
+        "--models", default="both", choices=["ridge", "mlp", "infonce", "both", "all"]
+    )
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--hidden", type=int, default=512)
     ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--tau", type=float, default=0.05, help="InfoNCE temperature")
+    ap.add_argument(
+        "--nbr-thresh",
+        type=float,
+        default=0.8,
+        help="true-64 cosine above which an in-batch row is an InfoNCE positive",
+    )
+    ap.add_argument(
+        "--loss",
+        default="cosine",
+        choices=["cosine", "geodesic"],
+        help="InfoNCE anchor metric: chordal 1-cos or Riemannian arccos^2 on S^63",
+    )
     ap.add_argument("--recall-k", type=int, default=20)
     ap.add_argument("--recall-test", type=int, default=5000, help="sampled test probes for recall@k")
     ap.add_argument("--recall-ref", type=int, default=100000, help="sampled reference corpus size")
@@ -387,28 +551,57 @@ def main() -> int:
     ref_pool = np.flatnonzero(tr | va)
     ref_idx = rng.choice(ref_pool, size=min(args.recall_ref, ref_pool.size), replace=False)
     ref_true = y[ref_idx]
+    ref_cluster = cluster[ref_idx]
     ideal_probe = y[probe_idx]
+    probe_cluster = cluster[probe_idx]
+
+    # Fixed val probe + reference for the InfoNCE early-stop signal. Reviewer
+    # fix: reference size matches the TEST reference (args.recall_ref), and the
+    # probe/ref are sampled ONCE, so early-stop tracks the same metric we report
+    # (the old 50k-vs-100k mismatch mechanically inflated val over test).
+    va_idx = np.flatnonzero(va)
+    val_probe_idx = rng.choice(va_idx, size=min(2000, va_idx.size), replace=False)
+    val_ref_pool = np.flatnonzero(tr)
+    val_ref_idx = rng.choice(
+        val_ref_pool, size=min(args.recall_ref, val_ref_pool.size), replace=False
+    )
+    xval_probe, yval_probe = x[val_probe_idx], y[val_probe_idx]
+    val_ref = y[val_ref_idx]
+
+    # purity@k ceiling (true-64 itself).
+    ceil_purity = same_cluster_purity(
+        ideal_probe, probe_cluster, ref_true, ref_cluster, args.recall_k
+    )
+    _log(f"CEILING (true-64): purity@{args.recall_k}={ceil_purity:.4f}")
 
     results: dict[str, dict] = {
-        "ceiling_true64": {"centroid_top1": ceil_top1, "centroid_top3": ceil_top3}
+        "ceiling_true64": {
+            "centroid_top1": ceil_top1,
+            "centroid_top3": ceil_top3,
+            f"purity@{args.recall_k}": ceil_purity,
+        }
     }
 
     def evaluate(name, pred_test_full, pred_probe):
         top1, top3 = centroid_agreement(pred_test_full, cluster[te], cluster_ids, centroids)
         cos = float(np.mean(np.sum(pred_test_full * y[te], axis=1)))
         rec = recall_at_k(pred_probe, ideal_probe, ref_true, args.recall_k)
+        purity = same_cluster_purity(
+            pred_probe, probe_cluster, ref_true, ref_cluster, args.recall_k
+        )
         _log(
             f"== {name}: cos={cos:.4f} centroid top1={top1:.4f} top3={top3:.4f} "
-            f"recall@{args.recall_k}={rec:.4f}"
+            f"recall@{args.recall_k}={rec:.4f} purity@{args.recall_k}={purity:.4f}"
         )
         results[name] = {
             "cos_to_true64": cos,
             "centroid_top1": top1,
             "centroid_top3": top3,
             f"recall@{args.recall_k}": rec,
+            f"purity@{args.recall_k}": purity,
         }
 
-    if args.models in ("ridge", "both"):
+    if args.models in ("ridge", "both", "all"):
         _log("fitting ridge")
         model, alpha = fit_ridge(x[tr], y[tr], x[va], y[va], [1.0, 10.0, 100.0, 300.0, 1000.0])
         pred_test = _l2norm(model.predict(x[te]).astype(np.float32))
@@ -421,7 +614,7 @@ def main() -> int:
             alpha=np.float32(alpha),
         )
 
-    if args.models in ("mlp", "both"):
+    if args.models in ("mlp", "both", "all"):
         _log(f"fitting mlp on {device}")
         model = fit_mlp(x[tr], y[tr], x[va], y[va], args.epochs, args.hidden, args.lr, device)
         pred_test = mlp_predict(model, x[te], device)
@@ -431,6 +624,24 @@ def main() -> int:
 
         torch.save(model.state_dict(), cache_dir / "mlp.pt")
         np.save(out_dir / "mlp_pred_test.npy", pred_test)
+
+    if args.models in ("infonce", "all"):
+        name = f"infonce_{args.loss}"
+        _log(
+            f"fitting {name} projector on {device} "
+            f"(tau={args.tau} nbr_thresh={args.nbr_thresh})"
+        )
+        model, _ = fit_infonce(
+            x[tr], y[tr], xval_probe, yval_probe, val_ref, args.epochs, args.lr, device,
+            tau=args.tau, nbr_thresh=args.nbr_thresh, loss_kind=args.loss,
+        )
+        pred_test = mlp_predict(model, x[te], device)
+        pred_probe = mlp_predict(model, x[probe_idx], device)
+        evaluate(name, pred_test, pred_probe)
+        import torch
+
+        torch.save(model.state_dict(), cache_dir / f"{name}.pt")
+        np.save(out_dir / f"{name}_pred_test.npy", pred_test)
 
     (out_dir / "metrics.json").write_text(json.dumps(results, indent=2))
     _log(f"wrote {out_dir / 'metrics.json'}")
