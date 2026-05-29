@@ -719,7 +719,13 @@
 			});
 			if (my !== neuroscapeRankerSerial) return;
 			const m = new Map<number, number>();
-			for (const h of hits) m.set(Number(h.id), h.cosine);
+			// Store DISTANCE (1 − cosine), not cosine similarity, so this map
+			// is the SAME metric as the KNN-fallback map (`nearest_distances`):
+			// both are "lower = better". The browse panels sort ascending on
+			// the value and surface it as `d=` on the ✨ badge. Storing cosine
+			// here would invert the sort order and mislabel the badge whenever
+			// the ranker path is active.
+			for (const h of hits) m.set(Number(h.id), 1 - h.cosine);
 			neuroscapeRankerHits = m;
 			rankerErrored = false;
 		} catch (err) {
@@ -734,8 +740,11 @@
 	// query succeeded; otherwise the KNN-only fallback. A ranker that's
 	// "ready" but errors on every query (range-fetch/parquet failure) must
 	// not silently zero out semantic search — it degrades to KNN instead.
-	// Both are pubmed_id → score Maps consumed identically by
-	// NeuroscapeBrowsePanel / AtlasRootBrowsePanel.
+	// Both are pubmed_id → DISTANCE maps (lower = better) consumed
+	// identically by NeuroscapeBrowsePanel / AtlasRootBrowsePanel: the
+	// ranker path stores 1 − cosine (above) so it matches the KNN
+	// fallback's `nearest_distances` metric. The panels sort ascending
+	// and render the value as `d=` on the ✨ badge.
 	// A ranker that is "ready" but returns an EMPTY set for a query the
 	// KNN graph can answer (per-query cluster-budget cap, empty routed
 	// cluster) must also degrade to KNN rather than show 0 semantic rows.

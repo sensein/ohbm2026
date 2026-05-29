@@ -73,6 +73,10 @@
 				title: string;
 				cluster_id: number;
 				subline: string;
+				// Set only on semantic-only (KNN-expanded) rows: the distance
+				// from the nearest lexical match (lower = better). Drives the
+				// ✨ d= badge, matching /ohbm2026/ ResultList + NeuroscapeBrowsePanel.
+				d?: number;
 		  };
 
 	// Spec 019 / FR-025 / FR-026 — operator-aware cross-conference filter.
@@ -225,7 +229,8 @@
 					id: a.pubmed_id,
 					title: a.title,
 					cluster_id: a.cluster_id,
-					subline: `NeuroScape · PMID ${a.pubmed_id} · ${a.year}`
+					subline: `NeuroScape · PMID ${a.pubmed_id} · ${a.year}`,
+					d
 				},
 				d
 			});
@@ -326,6 +331,13 @@
 							{r.kind === 'ohbm2026' ? 'OHBM' : 'NeuroScape'}
 						</span>
 						<span class="ar-subline">{r.subline}</span>
+						{#if r.kind === 'neuroscape' && r.d !== undefined}
+							<span
+								class="ar-semantic-badge"
+								title={`Semantic-only hit — distance ${r.d.toFixed(3)} from nearest lexical match`}
+								data-testid="semantic-only-badge"
+							>✨ d={r.d.toFixed(3)}</span>
+						{/if}
 						{#if cluster}
 							<span class="ar-cluster">
 								<span
@@ -465,6 +477,18 @@
 	}
 	.ar-subline {
 		font-variant-numeric: tabular-nums;
+	}
+	.ar-semantic-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.4rem;
+		font-size: 0.72rem;
+		font-variant-numeric: tabular-nums;
+		border-radius: 9999px;
+		background: var(--accent-soft-bg);
+		color: var(--accent-soft-text);
+		border: 1px solid var(--accent);
 	}
 	.ar-cluster {
 		display: inline-flex;
