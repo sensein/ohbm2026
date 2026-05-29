@@ -1,0 +1,4 @@
+{
+  "key": "baseline",
+  "_comment": "Selects which key of the OHBM2026_UI_DATA_PACKAGE_URLS GitHub Actions variable supplies this branch's parquet URLs (see .github/scripts/resolve-data-channel.sh). Change this in a PR to point its preview + eventual sandbox/prod deploy at a different data set; the choice merges with the code. 'baseline' = the current production parquets."
+}

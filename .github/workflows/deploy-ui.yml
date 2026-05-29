@@ -193,6 +193,16 @@ jobs:
         # sandbox either.
         run: PYTHONPATH=src python -m ohbm2026.ui_data.link_check specs/008-ui-rewrite/contracts/references.yaml
 
+      # Resolve the parquet URLs from the keyed registry variable, using the
+      # channel this ref declares in site/data-channel.json. The same
+      # committed key drives preview, sandbox, and production for a given
+      # ref, so a data swap merges atomically with the code that needs it.
+      # See .github/scripts/resolve-data-channel.sh.
+      - name: Resolve data-package URLs from channel registry
+        env:
+          DATA_URLS_REGISTRY: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URLS }}
+        run: .github/scripts/resolve-data-channel.sh
+
       - name: Build all three SITE_MODE bundles (T049)
         working-directory: site
         env:
@@ -200,18 +210,9 @@ jobs:
           STAGE_ROOT_RELATIVE: ${{ needs.resolve-target.outputs.stage_root }}
           VITE_BUILD_SHA: ${{ github.sha }}
           VITE_BUILD_AT: ${{ github.event.head_commit.timestamp }}
-          VITE_DATA_PACKAGE_URL_ATLAS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_ATLAS }}
-          VITE_DATA_PACKAGE_URL_OHBM2026: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_OHBM2026 || vars.OHBM2026_UI_DATA_PACKAGE_URL }}
-          VITE_DATA_PACKAGE_URL_NEUROSCAPE: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE }}
-          # Spec 019 — per-cluster INT8 vectors sidecar that drives the
-          # full cluster-routed semantic ranker on /neuroscape/ +
-          # atlas-root. Unset → loader.getNeuroscapeVectorsUrl() returns
-          # null → the UI keeps the KNN-only semantic fallback.
-          VITE_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS }}
-          # Legacy single-var fallback honoured by `loader.ts` for one
-          # deploy cycle. Drops once main has been on the per-mode env
-          # vars for a full publish.
-          VITE_DATA_PACKAGE_URL: ${{ vars.OHBM2026_UI_DATA_PACKAGE_URL }}
+          # VITE_DATA_PACKAGE_URL_{OHBM2026,NEUROSCAPE,ATLAS,NEUROSCAPE_VECTORS}
+          # are exported to $GITHUB_ENV by the "Resolve data-package URLs"
+          # step above (keyed registry → channel from site/data-channel.json).
         run: |
           set -euo pipefail
           export VITE_BUILD_SHA_SHORT="${VITE_BUILD_SHA:0:7}"
