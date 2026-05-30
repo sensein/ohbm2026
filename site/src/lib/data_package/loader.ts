@@ -969,8 +969,15 @@ export async function readNeuroscapeBackdropLevelCount(): Promise<number | null>
 	const inner = (await decodeBlob(match.table_bytes)) as Array<{ manifest_json?: string }>;
 	const json = inner[0]?.manifest_json;
 	if (!json) return null;
-	const n = (JSON.parse(json) as { n_backdrop_levels?: number }).n_backdrop_levels;
-	return typeof n === 'number' && n > 0 ? n : null;
+	// Defensive: a malformed/corrupt manifest must NOT reject the load
+	// promise and break atlas-root's first paint — fall back to null
+	// (caller treats it as "single-tier", per CA-006 no silent break).
+	try {
+		const n = (JSON.parse(json) as { n_backdrop_levels?: number }).n_backdrop_levels;
+		return typeof n === 'number' && n > 0 ? n : null;
+	} catch {
+		return null;
+	}
 }
 
 /**

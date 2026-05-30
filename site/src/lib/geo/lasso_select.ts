@@ -35,6 +35,32 @@ export function pointInPolygon(px: number, py: number, xs: number[], ys: number[
 	return inside;
 }
 
+/** Axis-aligned bounding box `[minX, minY, maxX, maxY]` of a geometry —
+ *  used as an O(1) reject pre-filter before the O(V) ray cast. */
+export function geometryBounds(g: LassoGeometry): [number, number, number, number] {
+	if (g.kind === 'box') {
+		return [
+			Math.min(g.x[0], g.x[1]),
+			Math.min(g.y[0], g.y[1]),
+			Math.max(g.x[0], g.x[1]),
+			Math.max(g.y[0], g.y[1])
+		];
+	}
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	for (let i = 0; i < g.x.length; i++) {
+		const x = g.x[i];
+		const y = g.y[i];
+		if (x < minX) minX = x;
+		if (x > maxX) maxX = x;
+		if (y < minY) minY = y;
+		if (y > maxY) maxY = y;
+	}
+	return [minX, minY, maxX, maxY];
+}
+
 /** Test a point against a lasso polygon or an axis-aligned box. */
 export function isInGeometry(px: number, py: number, g: LassoGeometry): boolean {
 	if (g.kind === 'box') {
@@ -59,11 +85,21 @@ export function selectIdsInGeometry<T>(
 	getId: (p: T) => number,
 	getXY: (p: T) => [number, number] | undefined
 ): number[] {
+	// O(1) bounding-box reject first: a lasso usually covers a small part
+	// of the view, so the bbox test discards the vast majority of points
+	// before the O(V) ray cast — keeps the 461k-point scan off the main
+	// thread's critical path. For a box geometry the bbox test IS the
+	// full test, so the ray cast below is skipped entirely.
+	const [minX, minY, maxX, maxY] = geometryBounds(g);
+	const isBox = g.kind === 'box';
 	const out: number[] = [];
 	for (const p of points) {
 		const xy = getXY(p);
 		if (!xy) continue;
-		if (isInGeometry(xy[0], xy[1], g)) out.push(getId(p));
+		const x = xy[0];
+		const y = xy[1];
+		if (x < minX || x > maxX || y < minY || y > maxY) continue;
+		if (isBox || isInGeometry(x, y, g)) out.push(getId(p));
 	}
 	return out;
 }

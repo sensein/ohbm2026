@@ -114,6 +114,26 @@ def _load_cached(entry: dict[str, Path], k: int) -> KnnResult:
             path=str(entry["dir"]),
             reason="unreadable",
         ) from exc
+    # Defensive shape checks — a corrupt/partial cache entry must raise
+    # (operator deletes + recomputes), never return mismatched arrays
+    # that would silently desync pmids from their neighbour rows.
+    if pmids.ndim != 1 or nearest_pmids.ndim != 2 or nearest_distances.ndim != 2:
+        raise KnnCacheError(
+            f"k-NN cache entry at {entry['dir']!s} has wrong ndims "
+            f"(pmids={pmids.ndim}, nearest_pmids={nearest_pmids.ndim}, "
+            f"nearest_distances={nearest_distances.ndim})",
+            path=str(entry["dir"]),
+            reason="bad_ndim",
+        )
+    n = pmids.shape[0]
+    if nearest_pmids.shape[0] != n or nearest_distances.shape[0] != n:
+        raise KnnCacheError(
+            f"k-NN cache entry at {entry['dir']!s} has inconsistent row counts "
+            f"(pmids={n}, nearest_pmids={nearest_pmids.shape[0]}, "
+            f"nearest_distances={nearest_distances.shape[0]})",
+            path=str(entry["dir"]),
+            reason="row_count_mismatch",
+        )
     expected_k = max(0, int(k))
     if nearest_pmids.shape[1] != expected_k or nearest_distances.shape[1] != expected_k:
         raise KnnCacheError(
