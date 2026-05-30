@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
 	densityOpacity,
 	backdropOpacity,
+	overlayMarkerSize,
 	BACKDROP_OPACITY_FLOOR,
-	BACKDROP_OPACITY_CAP
+	BACKDROP_OPACITY_CAP,
+	OVERLAY_SIZE_BASE,
+	OVERLAY_SIZE_CAP
 } from '$lib/atlas/opacity';
 
 describe('densityOpacity — fewer points ⇒ higher opacity', () => {
@@ -72,5 +75,28 @@ describe('backdropOpacity — deeper zoom ⇒ higher opacity', () => {
 		expect(backdropOpacity(56268, Number.POSITIVE_INFINITY)).toBeCloseTo(base, 10);
 		expect(backdropOpacity(56268, NaN)).toBeCloseTo(base, 10);
 		expect(Number.isFinite(backdropOpacity(56268, NaN))).toBe(true);
+	});
+});
+
+describe('overlayMarkerSize — OHBM points grow with zoom to stay distinct', () => {
+	it('is the base size when fully zoomed out', () => {
+		expect(overlayMarkerSize(1)).toBe(OVERLAY_SIZE_BASE);
+		expect(overlayMarkerSize(0.5)).toBe(OVERLAY_SIZE_BASE);
+	});
+
+	it('grows monotonically with zoom, clamped to the cap', () => {
+		const zooms = [1, 2, 4, 9, 16, 64];
+		const sizes = zooms.map(overlayMarkerSize);
+		for (let i = 1; i < sizes.length; i++) {
+			expect(sizes[i]).toBeGreaterThanOrEqual(sizes[i - 1] - 1e-9);
+		}
+		expect(sizes[0]).toBe(OVERLAY_SIZE_BASE);
+		expect(sizes.at(-1)).toBe(OVERLAY_SIZE_CAP);
+		expect(overlayMarkerSize(4)).toBeGreaterThan(OVERLAY_SIZE_BASE);
+	});
+
+	it('degrades a non-finite zoom factor to the base size, never NaN', () => {
+		expect(overlayMarkerSize(Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(OVERLAY_SIZE_CAP);
+		expect(overlayMarkerSize(NaN)).toBe(OVERLAY_SIZE_BASE);
 	});
 });

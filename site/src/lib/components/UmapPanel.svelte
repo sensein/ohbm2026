@@ -10,7 +10,8 @@
 	} from '$lib/geo/lasso_select';
 	import {
 		backdropOpacity as densityZoomOpacity,
-		densityOpacity
+		densityOpacity,
+		overlayMarkerSize
 	} from '$lib/atlas/opacity';
 
 	/**
@@ -371,6 +372,7 @@
 		// all points instead of inheriting a stale "interacted" state.
 		userHasInteracted2d = false;
 		atlas2dRenderedCount = 0;
+		atlas2dOverlayTraceIdx = -1;
 		// Drop the 2D array cache so post-bfcache restore renders
 		// build fresh references that match the (purged-then-reborn)
 		// chart's internal data buffers. Stale cached arrays could
@@ -1078,6 +1080,11 @@
 	// load) and compute stale opacity after the dataset grows to ~56k. Reading
 	// this module var keeps the zoom-opacity keyed to the current sample size.
 	let atlas2dRenderedCount = 0;
+	// Trace index of the OHBM overlay in the 2D chart (or -1 when no overlay,
+	// e.g. /neuroscape/). Set each render; the zoom restyle grows the overlay
+	// markers with zoom so the conference points stay distinct against the
+	// (zoom-brightened) NeuroScape backdrop.
+	let atlas2dOverlayTraceIdx = -1;
 	// Current zoom factor (fullExtentSpan / visibleSpan, ≥1) for the
 	// density+zoom opacity model. 1 when fully zoomed out / unknown.
 	function currentZoomFactor2d(span: number): number {
@@ -1117,15 +1124,23 @@
 		// the base opacity means lassoing never dims the surrounding cloud into
 		// invisibility (the "lasso-while-zoomed goes very dark" report). Only the
 		// SELECTED points pop, via the constant `selected.marker.opacity: 1`.
-		void (
+		const restyle = (
 			api as unknown as {
 				restyle: (e: HTMLDivElement, u: Record<string, unknown[]>, idx: number[]) => Promise<unknown>;
 			}
-		).restyle(
+		).restyle;
+		void restyle(
 			el,
 			{ 'marker.opacity': [op], 'unselected.marker.opacity': [op] },
 			[0]
 		);
+		// Grow the OHBM overlay markers with zoom so the conference points stay
+		// distinct as the backdrop brightens (otherwise they vanish among the
+		// dense NeuroScape cloud when zoomed in).
+		if (atlas2dOverlayTraceIdx >= 0) {
+			const size = overlayMarkerSize(currentZoomFactor2d(currentSpan));
+			void restyle(el, { 'marker.size': [size] }, [atlas2dOverlayTraceIdx]);
+		}
 	}
 
 	// Spec 019 follow-up — viewport-driven LOD. The 'lod-detail' trace is
@@ -1382,6 +1397,7 @@
 		if (!api || !el) return;
 		const c = themedColors(t);
 		atlas2dRenderedCount = backdrop.length;
+		atlas2dOverlayTraceIdx = -1;
 
 		// Pull the 461k-point arrays from the cache instead of
 		// rebuilding them every lasso adjustment. Cache invalidates on
@@ -1495,6 +1511,8 @@
 				unselected: { marker: { opacity: 0.45 } },
 				...(overlaySelectedIdx.length ? { selectedpoints: overlaySelectedIdx } : {})
 			};
+			// Record this trace's index so the zoom restyle can grow its markers.
+			atlas2dOverlayTraceIdx = traces.length;
 			traces.push({
 				type: 'scattergl' as const,
 				mode: 'markers' as const,
@@ -1503,10 +1521,18 @@
 				name: 'OHBM 2026 overlay',
 				visible: showOverlayTrace,
 				marker: {
-					size: 5,
+					// Zoom-aware: grows from the base size as the user zooms in so
+					// the conference points stay distinct against the brightening
+					// NeuroScape backdrop (re-applied on zoom in applyAtlasZoomOpacity).
+					size: overlayMarkerSize(currentZoomFactor2d(current2dXSpan)),
 					color: ovr.colours,
 					opacity: 1.0,
-					line: { color: '#111111', width: 1.5 },
+					// High-contrast, theme-aware outline (white on dark, near-black
+					// on light) at width 2 — the OHBM points are cluster-COLOURED
+					// (same palette as the backdrop), so a contrasting ring is what
+					// keeps them distinct from the dense, zoom-brightened NeuroScape
+					// cloud. The old near-black ring vanished against the dark theme.
+					line: { color: t === 'dark' ? '#ffffff' : '#111111', width: 2 },
 					...(ovr.symbol ? { symbol: ovr.symbol } : {})
 				},
 				hovertemplate: '%{text}<extra></extra>',
@@ -1921,13 +1947,24 @@
 		// inspect it more closely.
 		const axisCfg = { visible: false, showbackground: false };
 		const uirev = 'atlas-3d';
-		let cameraEye: { x: number; y: number; z: number } = { x: 1.6, y: 1.6, z: 0.9 };
+		// Closer eye (was {1.6,1.6,0.9}, mag ~2.43) so the cloud FILLS the pane
+		// instead of floating small in the centre. {0.85,0.85,0.85} (mag ~1.47)
+		// fills ~75% of the pane against the `aspectmode: 'cube'` scene below
+		// without clipping the cloud's extremes — tuned by visual probe.
+		let cameraEye: { x: number; y: number; z: number } = { x: 0.85, y: 0.85, z: 0.85 };
 		if (chart3dInitialized && currentEye3D) cameraEye = currentEye3D;
 		const scene: Record<string, unknown> = {
 			xaxis: { ...axisCfg },
 			yaxis: { ...axisCfg },
 			zaxis: { ...axisCfg },
 			bgcolor: c.plot,
+			// `aspectmode: 'cube'` normalises the scene to a cube so the UMAP
+			// cloud fills the viewport (the default 'auto' fits it to the data's
+			// raw extent — a flatter slab that leaves big empty margins). This
+			// also matches the aspect the smooth-rotation path already applies
+			// (gl-plot3d setViewport defaults to cube), removing the reshape jump
+			// when rotation starts.
+			aspectmode: 'cube',
 			camera: { eye: cameraEye }
 		};
 		const layout = {

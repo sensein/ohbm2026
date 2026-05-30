@@ -64,3 +64,24 @@ export function backdropOpacity(renderedCount: number, zoomFactor: number): numb
 	const z = Math.max(1, Number.isFinite(zoomFactor) ? zoomFactor : 1);
 	return clampOpacity(densityOpacity(renderedCount) * Math.pow(z, BACKDROP_ZOOM_EXP));
 }
+
+/** OHBM overlay marker size at full zoom-out (the size that reads clearly
+ *  against the fully-zoomed-out backdrop). */
+export const OVERLAY_SIZE_BASE = 5;
+/** Upper bound so the overlay markers never balloon into blobs. */
+export const OVERLAY_SIZE_CAP = 14;
+/** Zoom-growth exponent for the overlay markers. */
+export const OVERLAY_SIZE_ZOOM_EXP = 0.4;
+
+/**
+ * OHBM overlay marker size for a given zoom factor (≥1). The backdrop opacity
+ * rises as you zoom in (the whole point of the density+zoom model), which
+ * otherwise lets the dense NeuroScape cloud swallow the conference points. The
+ * overlay markers grow with zoom to stay distinct — visible at full view AND
+ * when zoomed in. Monotonic non-decreasing, clamped to [BASE, CAP].
+ */
+export function overlayMarkerSize(zoomFactor: number): number {
+	const z = Math.max(1, Number.isFinite(zoomFactor) ? zoomFactor : 1);
+	const s = OVERLAY_SIZE_BASE * Math.pow(z, OVERLAY_SIZE_ZOOM_EXP);
+	return Math.min(OVERLAY_SIZE_CAP, Math.max(OVERLAY_SIZE_BASE, s));
+}
