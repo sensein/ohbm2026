@@ -143,12 +143,16 @@
 		colour_hex: string;
 		palette_tier: 'primary' | 'secondary';
 	};
-	// Minimal shape the lasso point-in-polygon test + focus-coord lookup
-	// need — satisfied by AtlasBackdropPoint and the lazily-fetched coords.
+	// Minimal shape the lasso point-in-polygon test + focus-coord lookup +
+	// viewport-LOD detail trace need — satisfied by AtlasBackdropPoint and the
+	// lazily-fetched coords (the coords table always carries cluster_id +
+	// lod_level).
 	type CoordPoint = {
 		pubmed_id: number;
+		cluster_id: number;
 		umap_2d?: [number, number];
 		umap_3d?: [number, number, number];
+		lod_level?: number;
 	};
 
 	let manifest: Manifest | null = null;
@@ -551,6 +555,17 @@
 	// build with no lod_level → render every point (no cap). The cap is
 	// the highest representative tier (rest tier hidden by default).
 	let neuroscapeLodCap: number | null = null;
+	// Number of representative backdrop tiers (= the rest-tier lod_level).
+	// Drives viewport-LOD: points with lod_level >= this are the rest tier,
+	// revealed inside the zoom window. Set from the manifest on both surfaces.
+	let atlasBackdropLevels: number | null = null;
+	// Full corpus with per-point lod_level for the 2D viewport-LOD trace:
+	// atlasBackdrop on /neuroscape/ (full after coords fold), the lazily-
+	// fetched coords on atlas-root. Empty until resident → feature simply off.
+	$: backdropFull = (
+		SITE_MODE === 'neuroscape' ? atlasBackdrop : (atlasFullCoords ?? [])
+	) as Array<{ pubmed_id: number; cluster_id: number; umap_2d?: [number, number]; lod_level?: number }>;
+	$: lodRestLevel = atlasBackdropLevels ?? Number.POSITIVE_INFINITY;
 	// T046 + T047 — selection state for the slide-in detail panel
 	// and the lasso grouped result list. Both are atlas-root-only.
 	let atlasSelection: AtlasSelection | null = null;
@@ -1346,6 +1361,8 @@
 		atlasOverlayPoints = [];
 		neuroscapeLodCap =
 			typeof levelCount === 'number' && levelCount > 0 ? levelCount - 1 : null;
+		atlasBackdropLevels =
+			typeof levelCount === 'number' && levelCount > 0 ? levelCount : null;
 		refreshNeuroscapeTitleLookup();
 		void initNeuroscapeRanker();
 
@@ -1478,6 +1495,13 @@
 				listCorpus = lod0Rows as unknown as AtlasBackdropPoint[];
 				atlasOverlayPoints = overlayShard.points;
 				atlasClusters = clustersRows as unknown as AtlasClusterRow[];
+				atlasBackdropLevels =
+					typeof levelCount === 'number' && levelCount > 0 ? levelCount : null;
+				// Prefetch the full coords (with lod_level) in the background so
+				// the 2D viewport-LOD (zoom reveals finer points) + lasso + focus
+				// have geometry without waiting for a first interaction. ~11 MB,
+				// fire-and-forget; populates `atlasFullCoords` → `backdropFull`.
+				void ensureAtlasFullCoords();
 				// Refine: stream the remaining tiers (lod1..N-1) and append.
 				// A missing/absent level resolves to null and is skipped — the
 				// scatter still shows every tier that did load (no silent
@@ -1968,6 +1992,8 @@
 						: null}
 					atlasFocusUmap2d={atlasFocusUmap2d}
 					atlasFocusUmap3d={atlasFocusUmap3d}
+					backdropFull={backdropFull}
+					lodRestLevel={lodRestLevel}
 					on:pointclick={onAtlasPointClick}
 					on:lassoselect={onAtlasLasso}
 					on:lassoclear={clearAtlasLasso}
