@@ -562,9 +562,42 @@
 	// Full corpus with per-point lod_level for the 2D viewport-LOD trace:
 	// atlasBackdrop on /neuroscape/ (full after coords fold), the lazily-
 	// fetched coords on atlas-root. Empty until resident → feature simply off.
-	$: backdropFull = (
-		SITE_MODE === 'neuroscape' ? atlasBackdrop : (atlasFullCoords ?? [])
-	) as Array<{ pubmed_id: number; cluster_id: number; umap_2d?: [number, number]; lod_level?: number }>;
+	//
+	// MUST honour the SAME facet filters as `scatterBackdrop` (the base map
+	// trace) — otherwise unchecking "NeuroScape" (or selecting clusters / a
+	// year range) hides the base dots but the zoom-revealed rest-tier detail
+	// trace keeps drawing the filtered-out NeuroScape points. Filter deps are
+	// referenced directly in this `$:` block (not hidden behind a helper that
+	// reads them internally) so Svelte's reactive dependency tracker re-runs
+	// this when any facet changes. `year` only exists on the neuroscape source
+	// (the atlas-root coords table carries no year, and atlas-root has no year
+	// facet), so the year gate is a no-op there.
+	$: backdropFull = ((): Array<{
+		pubmed_id: number;
+		cluster_id: number;
+		umap_2d?: [number, number];
+		lod_level?: number;
+		year?: number;
+	}> => {
+		const src = (SITE_MODE === 'neuroscape' ? atlasBackdrop : (atlasFullCoords ?? [])) as Array<{
+			pubmed_id: number;
+			cluster_id: number;
+			umap_2d?: [number, number];
+			lod_level?: number;
+			year?: number;
+		}>;
+		if (SITE_MODE === 'atlas-root' && !filterShowNeuro) return [];
+		const needsCluster = filterClusterIds.size > 0;
+		const needsYear = SITE_MODE === 'neuroscape';
+		if (!needsCluster && !needsYear) return src;
+		const yLo = filterMinYear ?? yearBounds.lo;
+		const yHi = filterMaxYear ?? yearBounds.hi;
+		return src.filter((p) => {
+			if (needsCluster && !filterClusterIds.has(p.cluster_id)) return false;
+			if (needsYear && p.year !== undefined && (p.year < yLo || p.year > yHi)) return false;
+			return true;
+		});
+	})();
 	$: lodRestLevel = atlasBackdropLevels ?? Number.POSITIVE_INFINITY;
 	// T046 + T047 — selection state for the slide-in detail panel
 	// and the lasso grouped result list. Both are atlas-root-only.
