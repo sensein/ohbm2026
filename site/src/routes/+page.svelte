@@ -14,8 +14,15 @@
 		type Manifest,
 		type TopicShard
 	} from '$lib/shards';
-	import { activeFilters, authorChips, cartOnly, focusedAbstract, lassoSelection, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
-	import { lexicalSearch, parseQuery, queryForSemantic } from '$lib/filter';
+	import { activeFilters, authorChips, cartOnly, debouncedSearchQuery, focusedAbstract, lassoSelection, searchQuery, selectedCell, showMap } from '$lib/stores/selection';
+	import {
+		buildTitleIndex,
+		lexicalSearch,
+		parseQuery,
+		queryForSemantic,
+		seedScores,
+		type InvertedIndex
+	} from '$lib/filter';
 	import { filterByFacets, recomputeFacets, type FacetCellContext } from '$lib/facets';
 	import { normaliseQuery, parseIdOperator } from '$lib/goto_poster';
 	import SearchBar from '$lib/components/SearchBar.svelte';
@@ -71,9 +78,34 @@
 	// external consumer; tree-shaken from this bundle if unused.
 	import {
 		loadDataPackage,
+		getDataPackageUrl,
+		getNeuroscapeVectorsUrl,
+		loadVectorsManifest,
+		loadClusterVectors,
+		loadClusterCentroidsFromNeuroscape,
+		loadClustersFromNeuroscape,
+		loadArticlesFromNeuroscape,
+		loadCoordsFromNeuroscape,
+		loadNeighborsFromNeuroscape,
+		loadBackdropLevelFromNeuroscape,
+		readNeuroscapeBackdropLevelCount,
 		verifyAtlasSiblingDrift,
 		type AtlasDriftEntry
 	} from '$lib/data_package/loader';
+	import { selectIdsInGeometry, type LassoGeometry } from '$lib/geo/lasso_select';
+	import { resolveAtlasSelection, type AtlasSelection } from '$lib/atlas/select';
+	import { loadClusterCentroids } from '$lib/shards';
+	// Spec 019 / FR-002 — full cluster-routed semantic ranker. Wired in
+	// when the `neuroscape_vectors.parquet` sidecar URL is configured;
+	// otherwise the page keeps the KNN-only fallback below.
+	import {
+		initRanker,
+		searchNeuroscape,
+		expandSearchDepth as rankerExpandSearchDepth,
+		defaultSemanticWorker,
+		type RankerState,
+		type KnnEntry
+	} from '$lib/search/neuroscape_ranker';
 
 	// Shapes the AtlasUmapPanel expects. Defined here (not imported
 	// from the .svelte component) because Svelte's type re-export
@@ -81,6 +113,7 @@
 	type AtlasBackdropPoint = {
 		pubmed_id: number;
 		cluster_id: number;
+		umap_2d?: [number, number];
 		umap_3d: [number, number, number];
 		title: string;
 		year: number;
@@ -90,10 +123,16 @@
 		// neighbours.
 		nearest_pubmed_ids?: number[];
 		nearest_distances?: number[];
+		// Quadtree LOD tier (spec 019 follow-up). Present on the
+		// /neuroscape/ build (folded from `coords`); used to cap the
+		// scatter to the blue-noise sample. atlas-root's per-tier rows
+		// don't carry it (they're already the sample for that tier).
+		lod_level?: number;
 	};
 	type AtlasOverlayPoint = {
 		submission_id: number;
 		poster_id: number;
+		umap_2d?: [number, number];
 		umap_3d: [number, number, number];
 		title: string;
 		nearest_cluster_id: number;
@@ -103,6 +142,17 @@
 		title: string;
 		colour_hex: string;
 		palette_tier: 'primary' | 'secondary';
+	};
+	// Minimal shape the lasso point-in-polygon test + focus-coord lookup +
+	// viewport-LOD detail trace need — satisfied by AtlasBackdropPoint and the
+	// lazily-fetched coords (the coords table always carries cluster_id +
+	// lod_level).
+	type CoordPoint = {
+		pubmed_id: number;
+		cluster_id: number;
+		umap_2d?: [number, number];
+		umap_3d?: [number, number, number];
+		lod_level?: number;
 	};
 
 	let manifest: Manifest | null = null;
@@ -120,6 +170,25 @@
 	// in the SiteHeader can open it from any subsite.
 	let semanticScores: Map<number, number> | null = null;
 	let semanticQuerySerial = 0;
+	// Spec 019 — full cluster-routed ranker wiring (FR-002 / T028
+	// follow-up). `rankerReady` flips true once initRanker has run with
+	// the production centroids + worker; until then the page uses the
+	// KNN-only `neuroscapeKnnHits` fallback. `neuroscapeRankerHits` holds
+	// the most recent async ranker result (pubmed_id → cosine).
+	let rankerReady = false;
+	let rankerState: RankerState | null = null;
+	let rankerCapExceeded = false;
+	let neuroscapeRankerHits: Map<number, number> = new Map();
+	let neuroscapeRankerSerial = 0;
+	// True when the most recent ranker query threw. While set, the
+	// semantic-hit selection degrades to the KNN-only fallback instead of
+	// showing empty results — otherwise a ranker that's "ready" but fails
+	// on every query (e.g. a range-fetch/parquet error) would silently
+	// zero out semantic search. The error is still logged loudly.
+	let rankerErrored = false;
+	// Bumped by the "Expand search depth" affordance to force the ranker
+	// async block to re-run after `expandSearchDepth()` lifts the cap.
+	let rankerDepthBump = 0;
 	let showFacets = false; // mobile drawer state; desktop always-shown
 	let cellShard: CellShard | null = null;
 	let cellTopics: TopicShard | null = null;
@@ -466,27 +535,73 @@
 	// overlayPoints list stays empty (the OHBM 2026 overlay only
 	// renders on the bare-root cross-conference page).
 	let atlasBackdrop: AtlasBackdropPoint[] = [];
+	// Spec 019 follow-up — the LIST + search corpus, decoupled from the
+	// SCATTER source (`atlasBackdrop`). On /neuroscape/ both are the same
+	// full 461k articles array (atlasBackdrop carries coords there). On
+	// atlas-root they diverge: `atlasBackdrop` is the decimated 50k landing
+	// scatter (carries umap coords, range-fetched from `backdrop_decimated`),
+	// while `listCorpus` is the FULL ~461k identity table (no coords),
+	// range-fetched from the sibling `articles` table so the result-list count
+	// + lexical search cover the whole corpus rather than just the 50k sample.
+	// Without this split atlas-root's no-query count regressed to ~53k
+	// (50k decimated + 3.2k OHBM overlay) instead of the full corpus.
+	let listCorpus: AtlasBackdropPoint[] = [];
 	let atlasOverlayPoints: AtlasOverlayPoint[] = [];
 	let atlasClusters: AtlasClusterRow[] = [];
+	// Spec 019 follow-up — /neuroscape/ loads the full 461k corpus for
+	// search + result-list, but renders the SCATTER from the quadtree
+	// blue-noise sample only (lod_level <= cap), which preserves the
+	// overall shape while keeping the WebGL scene light. `null` ⇒ older
+	// build with no lod_level → render every point (no cap). The cap is
+	// the highest representative tier (rest tier hidden by default).
+	let neuroscapeLodCap: number | null = null;
+	// Number of representative backdrop tiers (= the rest-tier lod_level).
+	// Drives viewport-LOD: points with lod_level >= this are the rest tier,
+	// revealed inside the zoom window. Set from the manifest on both surfaces.
+	let atlasBackdropLevels: number | null = null;
+	// Full corpus with per-point lod_level for the 2D viewport-LOD trace:
+	// atlasBackdrop on /neuroscape/ (full after coords fold), the lazily-
+	// fetched coords on atlas-root. Empty until resident → feature simply off.
+	//
+	// MUST honour the SAME facet filters as `scatterBackdrop` (the base map
+	// trace) — otherwise unchecking "NeuroScape" (or selecting clusters / a
+	// year range) hides the base dots but the zoom-revealed rest-tier detail
+	// trace keeps drawing the filtered-out NeuroScape points. Filter deps are
+	// referenced directly in this `$:` block (not hidden behind a helper that
+	// reads them internally) so Svelte's reactive dependency tracker re-runs
+	// this when any facet changes. `year` only exists on the neuroscape source
+	// (the atlas-root coords table carries no year, and atlas-root has no year
+	// facet), so the year gate is a no-op there.
+	$: backdropFull = ((): Array<{
+		pubmed_id: number;
+		cluster_id: number;
+		umap_2d?: [number, number];
+		lod_level?: number;
+		year?: number;
+	}> => {
+		const src = (SITE_MODE === 'neuroscape' ? atlasBackdrop : (atlasFullCoords ?? [])) as Array<{
+			pubmed_id: number;
+			cluster_id: number;
+			umap_2d?: [number, number];
+			lod_level?: number;
+			year?: number;
+		}>;
+		if (SITE_MODE === 'atlas-root' && !filterShowNeuro) return [];
+		const needsCluster = filterClusterIds.size > 0;
+		const needsYear = SITE_MODE === 'neuroscape';
+		if (!needsCluster && !needsYear) return src;
+		const yLo = filterMinYear ?? yearBounds.lo;
+		const yHi = filterMaxYear ?? yearBounds.hi;
+		return src.filter((p) => {
+			if (needsCluster && !filterClusterIds.has(p.cluster_id)) return false;
+			if (needsYear && p.year !== undefined && (p.year < yLo || p.year > yHi)) return false;
+			return true;
+		});
+	})();
+	$: lodRestLevel = atlasBackdropLevels ?? Number.POSITIVE_INFINITY;
 	// T046 + T047 — selection state for the slide-in detail panel
 	// and the lasso grouped result list. Both are atlas-root-only.
-	let atlasSelection:
-		| {
-				kind: 'ohbm2026';
-				title: string;
-				poster_id: number;
-				nearest_cluster_id: number;
-				permalink: string;
-		  }
-		| {
-				kind: 'neuroscape';
-				title: string;
-				pubmed_id: number;
-				year: number;
-				cluster_id: number;
-				permalink: string;
-		  }
-		| null = null;
+	let atlasSelection: AtlasSelection | null = null;
 	// Lasso state now lives in `atlasLassoOhbmSet` / `atlasLassoNeuroSet`
 	// declared further down — Sets are the right shape since the
 	// browse panel needs O(1) lookup, and the scatter highlight needs
@@ -494,9 +609,35 @@
 
 	// O(1) lookup maps built whenever the atlas data lands.
 	$: atlasOverlayById = new Map(atlasOverlayPoints.map((p) => [p.poster_id, p]));
+	// `atlasBackdropById` keys the SCATTER points (decimated on atlas-root,
+	// full on /neuroscape/) — used for point-click → detail panel + focus.
 	$: atlasBackdropById = new Map(atlasBackdrop.map((p) => [p.pubmed_id, p]));
+	// `listCorpusById` keys the LIST/search corpus (full ~461k on both
+	// surfaces). The KNN-fallback seed scorer reads year + neighbour graph
+	// from here; on /neuroscape/ this is the same array as atlasBackdrop (so
+	// the neighbour graph is present), on atlas-root it's the identity-only
+	// articles table (no graph → KNN fallback yields nothing, ranker drives
+	// semantic search).
+	$: listCorpusById = new Map(listCorpus.map((p) => [p.pubmed_id, p]));
 	$: atlasClustersById = new Map(
 		atlasClusters.map((c) => [c.cluster_id, { cluster_id: c.cluster_id, title: c.title, colour_hex: c.colour_hex }])
+	);
+
+	// Spec 019 perf — inverted title index over the FULL backdrop, built
+	// ONCE when the corpus lands. `atlasBackdrop` is stable after load (facet
+	// edits narrow `filteredBackdrop` but never mutate the full array), so the
+	// ~461k-title tokenization runs a single time and is cached by array
+	// identity inside `buildTitleIndex`. Both browse panels and the KNN seed
+	// scorer query this via `searchTitleIndex`, which walks the unique-token
+	// vocabulary (length-prefiltered) instead of running Damerau-Levenshtein
+	// across every title's tokens per keystroke — the brute-force scan was a
+	// ~2s main-thread freeze per query (measured at 461,316 articles) and the
+	// root cause of the laggy-typing report. Shares the exact OHBM operator +
+	// typo-tolerance semantics (consistent across all three sites).
+	$: titleSearchIndex = buildTitleIndex(
+		listCorpus,
+		(a) => a.pubmed_id,
+		(a) => a.title
 	);
 
 	// Filtered point lists threaded into AtlasUmapPanel so the
@@ -520,10 +661,44 @@
 			return true;
 		});
 	})();
+	// Spec 019 follow-up — facet-filtered FULL corpus for the RESULT LIST.
+	// Mirrors scatterBackdrop's facet logic but over `listCorpus` (461k) so
+	// the list count reflects the whole corpus, not the 50k scatter sample.
+	// Filter deps are inlined (not factored into a helper) because Svelte's
+	// reactive dependency tracking only sees variables referenced directly in
+	// the `$:` block — a helper call would hide `filterShowNeuro`/year/cluster
+	// from the dependency graph and the list would stop reacting to facets.
+	$: listFacetFiltered = (() => {
+		if (SITE_MODE === 'atlas-root' && !filterShowNeuro) return [];
+		const yLo = filterMinYear ?? yearBounds.lo;
+		const yHi = filterMaxYear ?? yearBounds.hi;
+		const needsYear = SITE_MODE === 'neuroscape';
+		const needsCluster = filterClusterIds.size > 0;
+		if (!needsYear && !needsCluster) return listCorpus;
+		return listCorpus.filter((p) => {
+			if (needsYear && (p.year < yLo || p.year > yHi)) return false;
+			if (needsCluster && !filterClusterIds.has(p.cluster_id)) return false;
+			return true;
+		});
+	})();
 	$: scatterOverlay = (() => {
 		if (SITE_MODE !== 'atlas-root' || !filterShowOhbm) return [] as AtlasOverlayPoint[];
 		if (filterClusterIds.size === 0) return atlasOverlayPoints;
 		return atlasOverlayPoints.filter((p) => filterClusterIds.has(p.nearest_cluster_id));
+	})();
+	// Spec 019 follow-up — the SCATTER-only render set. atlas-root already
+	// renders the LOD sample it range-fetched (no per-point lod_level, no
+	// cap). /neuroscape/ holds the full corpus, so cap the scatter to the
+	// blue-noise representative tiers (lod_level <= cap) while the result
+	// list keeps the full `filteredBackdrop`. Derived from `scatterBackdrop`
+	// so facet filters still apply to the map.
+	$: scatterBackdropForMap = (() => {
+		if (SITE_MODE !== 'neuroscape' || neuroscapeLodCap === null) return scatterBackdrop;
+		const cap = neuroscapeLodCap;
+		return scatterBackdrop.filter((p) => {
+			const lv = (p as { lod_level?: number }).lod_level;
+			return lv === undefined || lv <= cap;
+		});
 	})();
 	// Result-list filters — the same facets plus the lasso. Browse
 	// panel narrows to lassoed ids when the lasso is active.
@@ -536,9 +711,196 @@
 	// lasso region: NeuroScape rows collapse to empty.
 	$: anyLassoActive = atlasLassoOhbmSet.size + atlasLassoNeuroSet.size > 0;
 	$: filteredBackdrop = (() => {
-		if (!anyLassoActive) return scatterBackdrop;
-		return scatterBackdrop.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
+		// No lasso → the RESULT LIST shows the full facet-filtered corpus.
+		// With a lasso active, narrow the FULL corpus to the lassoed ids.
+		// Spec 019 follow-up — `atlasLassoNeuroSet` now holds EVERY abstract
+		// whose coordinate fell inside the polygon (point-in-polygon over the
+		// full coords), not just the rendered LOD sample, so the result list
+		// reflects the whole region — not the downsampled subset on screen.
+		if (!anyLassoActive) return listFacetFiltered;
+		return listFacetFiltered.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
 	})();
+	// Spec 019 / FR-002 — KNN-expansion semantic search on /neuroscape/
+	// + atlas-root. When `$semanticEnabled` is on AND the debounced
+	// query is non-empty, take the top-N articles whose titles loosely
+	// match the query as semantic SEEDS, walk the k=20 nearest-neighbour
+	// graph already attached to each article, aggregate the
+	// (pubmed_id, min-distance) pairs that don't already appear in the
+	// lexical hit set, and pass them to the NeuroscapeBrowsePanel as
+	// the `semanticHits` prop.
+	//
+	// Note: this is the KNN-only branch of the broader cluster-routed
+	// pipeline (research.md §R-007). Without the production
+	// neuroscape_vectors.parquet (a separate spec-019 build artefact
+	// still pending deploy), we can't run the full embed→route→
+	// cosine-rerank steps. The KNN graph alone gives a useful
+	// "semantically related to your lexical hits" signal; the full
+	// ranker drops in via the existing $lib/search/neuroscape_ranker
+	// scaffolding when the production parquet ships.
+	const SEMANTIC_SEED_LIMIT = 25;
+	// Display cap on semantic-only rows. Raised from 60 → 250: a single
+	// routed cluster (or the KNN-expansion fan-out) routinely holds far more
+	// than 60 genuinely-related articles, and capping at 60 made semantic
+	// search "show very few matches" (the reported regression). The cosine-
+	// distance threshold below is the real relevance gate; this cap is just a
+	// sanity bound on list length / render cost.
+	const SEMANTIC_TOP_N = 250;
+	// Relevance gate (cosine DISTANCE = 1 − cosine; lower = more similar).
+	// Semantic-only rows with a distance above this are dropped, so the user
+	// gets "a lot more matches subject to a distance threshold" (their exact
+	// ask) rather than the whole routed cluster padded with unrelated titles.
+	// 0.80 (cosine ≥ 0.20) is deliberately lenient for MiniLM title
+	// embeddings — tightened later if visual review shows weak matches
+	// leaking in. Applied to BOTH the cluster-routed ranker result and the
+	// KNN-graph fallback so the bound is consistent across both paths.
+	const SEMANTIC_MAX_DISTANCE = 0.8;
+	// KNN-only fallback. Used whenever the full cluster-routed ranker
+	// isn't initialised (`rankerReady === false`) — e.g. the vectors
+	// sidecar URL isn't configured for this deploy. Selection between
+	// this and the ranker result happens in `neuroscapeSemanticHits`.
+	$: neuroscapeKnnHits = (() => {
+		if (!$semanticEnabled) return new Map<number, number>();
+		const raw = ($debouncedSearchQuery ?? '').trim();
+		if (raw.length < 3) return new Map<number, number>();
+		if (SITE_MODE !== 'neuroscape' && SITE_MODE !== 'atlas-root') {
+			return new Map<number, number>();
+		}
+		// Lightweight seed selection — token-aware so multi-word natural-
+		// language queries (e.g. "corpus callosum disorders") still seed.
+		// A whole-phrase substring match would require some title to
+		// literally contain the full phrase, which almost never happens for
+		// 3+ word queries → 0 seeds → empty result. Instead: tokenise the
+		// query, score each title by how many distinct query tokens it
+		// contains, keep titles matching ≥1 token, and rank by match-count
+		// (desc) then year (desc). This loose seed is plenty to drive KNN
+		// expansion; the BrowsePanel's full operator + typo path handles
+		// exact ranking downstream.
+		//
+		// seedScores() does a UNION over the query's positive words (≥1 token
+		// qualifies), NOT searchTitleIndex()'s AND-intersection: a bare
+		// multi-word query otherwise requires one title to contain ALL words,
+		// which a titles-only corpus almost never does → 0 seeds → empty
+		// fallback (the bug this fixes). It reuses the shared per-word typo
+		// ladder (lookupWord) so quote/typo handling stays consistent across
+		// sites, and excludes negated clauses so a `-term` can't leak a
+		// positive seed. The returned count of distinct matched words drives
+		// the match-count ranking below. Intersecting with filteredBackdrop
+		// keeps it facet-aware; the BrowsePanel applies full AND/phrase ranking.
+		const seedCounts = seedScores(titleSearchIndex, parseQuery(raw));
+		if (seedCounts.size === 0) return new Map<number, number>();
+		const facetSet = new Set(filteredBackdrop.map((a) => a.pubmed_id));
+		const scored: { id: number; exact: number; year: number }[] = [];
+		for (const [id, cnt] of seedCounts) {
+			if (!facetSet.has(id)) continue;
+			const a = listCorpusById.get(id);
+			if (!a) continue;
+			scored.push({ id, exact: cnt, year: a.year });
+		}
+		if (scored.length === 0) return new Map<number, number>();
+		scored.sort((x, y) => y.exact - x.exact || y.year - x.year);
+		const seedIds = scored.slice(0, SEMANTIC_SEED_LIMIT).map((s) => s.id);
+		// Walk the KNN graph from each seed. The graph is attached to
+		// each article as `nearest_pubmed_ids` + `nearest_distances`
+		// (loader.ts:545 join). For each neighbour, record the minimum
+		// distance across all seeds.
+		const seedSet = new Set(seedIds);
+		const semanticOnly = new Map<number, number>();
+		const articleById = listCorpusById;
+		for (const seed of seedIds) {
+			const a = articleById.get(seed);
+			if (!a?.nearest_pubmed_ids || !a?.nearest_distances) continue;
+			for (let i = 0; i < a.nearest_pubmed_ids.length; i++) {
+				const nb = a.nearest_pubmed_ids[i];
+				if (seedSet.has(nb)) continue;
+				const d = a.nearest_distances[i];
+				const prev = semanticOnly.get(nb);
+				if (prev === undefined || d < prev) semanticOnly.set(nb, d);
+			}
+		}
+		// Apply the relevance gate, then trim to top-N by ascending distance.
+		const sorted = Array.from(semanticOnly.entries())
+			.filter(([, d]) => d <= SEMANTIC_MAX_DISTANCE)
+			.sort((x, y) => x[1] - y[1]);
+		return new Map(sorted.slice(0, SEMANTIC_TOP_N));
+	})();
+	// Spec 019 / FR-002 — full cluster-routed ranker invocation. When the
+	// ranker is initialised, run the embed→route→range-fetch→top-3→KNN-
+	// expand→re-rank pipeline (async, off the main thread via the
+	// semantic worker) and stash the result in `neuroscapeRankerHits`.
+	// Serial-number guard discards stale responses when the user types
+	// faster than the worker resolves. Falls through to the KNN-only
+	// fallback by leaving `neuroscapeRankerHits` empty on any short query
+	// or non-ranker mode.
+	$: (async (_q: string, _on: boolean, _ready: boolean, _depth: number) => {
+		if (!_ready || !_on) {
+			neuroscapeRankerHits = new Map();
+			rankerCapExceeded = false;
+			return;
+		}
+		if (SITE_MODE !== 'neuroscape' && SITE_MODE !== 'atlas-root') return;
+		const trimmed = (_q ?? '').trim();
+		if (trimmed.length < 3) {
+			neuroscapeRankerHits = new Map();
+			return;
+		}
+		const my = ++neuroscapeRankerSerial;
+		try {
+			const parsed = parseQuery(trimmed);
+			const hits = await searchNeuroscape(parsed, SEMANTIC_TOP_N, {
+				onState: (s) => {
+					if (my === neuroscapeRankerSerial) rankerState = s;
+				},
+				onCapExceeded: () => {
+					if (my === neuroscapeRankerSerial) rankerCapExceeded = true;
+				},
+				onError: (e) => console.warn('neuroscape ranker error:', e)
+			});
+			if (my !== neuroscapeRankerSerial) return;
+			const m = new Map<number, number>();
+			// Store DISTANCE (1 − cosine), not cosine similarity, so this map
+			// is the SAME metric as the KNN-fallback map (`nearest_distances`):
+			// both are "lower = better". The browse panels sort ascending on
+			// the value and surface it as `d=` on the ✨ badge. Storing cosine
+			// here would invert the sort order and mislabel the badge whenever
+			// the ranker path is active.
+			// Apply the same cosine-distance relevance gate as the KNN
+			// fallback so a routed cluster padded with weakly-related members
+			// doesn't flood the list — the user wanted "a lot more matches
+			// subject to a distance threshold", not the whole cluster.
+			for (const h of hits) {
+				const d = 1 - h.cosine;
+				if (d <= SEMANTIC_MAX_DISTANCE) m.set(Number(h.id), d);
+			}
+			neuroscapeRankerHits = m;
+			rankerErrored = false;
+		} catch (err) {
+			if (my === neuroscapeRankerSerial) {
+				console.warn('neuroscape ranker query failed:', err);
+				neuroscapeRankerHits = new Map();
+				rankerErrored = true;
+			}
+		}
+	})($debouncedSearchQuery, $semanticEnabled, rankerReady, rankerDepthBump);
+	// Selection: prefer the full ranker when it's initialised AND its last
+	// query succeeded; otherwise the KNN-only fallback. A ranker that's
+	// "ready" but errors on every query (range-fetch/parquet failure) must
+	// not silently zero out semantic search — it degrades to KNN instead.
+	// Both are pubmed_id → DISTANCE maps (lower = better) consumed
+	// identically by NeuroscapeBrowsePanel / AtlasRootBrowsePanel: the
+	// ranker path stores 1 − cosine (above) so it matches the KNN
+	// fallback's `nearest_distances` metric. The panels sort ascending
+	// and render the value as `d=` on the ✨ badge.
+	// A ranker that is "ready" but returns an EMPTY set for a query the
+	// KNN graph can answer (per-query cluster-budget cap, empty routed
+	// cluster) must also degrade to KNN rather than show 0 semantic rows.
+	$: neuroscapeSemanticHits =
+		rankerReady && !rankerErrored && neuroscapeRankerHits.size > 0
+			? neuroscapeRankerHits
+			: neuroscapeKnnHits;
+	// True while the ranker pipeline is mid-flight (any non-terminal
+	// state) — drives the "searching…" toggle hint.
+	$: rankerBusy =
+		rankerState !== null && rankerState !== 'ready' && rankerState !== 'idle' && rankerState !== 'error';
 	$: filteredOverlay = (() => {
 		if (!anyLassoActive) return scatterOverlay;
 		return scatterOverlay.filter((p) => atlasLassoOhbmSet.has(p.poster_id));
@@ -612,28 +974,20 @@
 		ev: CustomEvent<{ kind: 'ohbm2026' | 'neuroscape'; id: number }>
 	) {
 		const { kind, id } = ev.detail;
-		if (kind === 'ohbm2026') {
-			const p = atlasOverlayById.get(id);
-			if (!p) return;
-			atlasSelection = {
-				kind: 'ohbm2026',
-				title: p.title,
-				poster_id: p.poster_id,
-				nearest_cluster_id: p.nearest_cluster_id,
-				permalink: atlasPermalink('ohbm2026', p.poster_id)
-			};
-		} else {
-			const p = atlasBackdropById.get(id);
-			if (!p) return;
-			atlasSelection = {
-				kind: 'neuroscape',
-				title: p.title,
-				pubmed_id: p.pubmed_id,
-				year: p.year,
-				cluster_id: p.cluster_id,
-				permalink: atlasPermalink('neuroscape', p.pubmed_id)
-			};
-		}
+		// Resolve the clicked id to a selection. The neuro lookup consults the
+		// FULL corpus (`listCorpusById`) first, with a sample fallback — a
+		// clicked result row is usually a point that isn't in the rendered LOD
+		// sample, and resolving it against the sample map returned undefined and
+		// silently dropped the click (the regression `atlas_select.test.ts`
+		// guards). `null` ⇒ id in neither lookup → leave the panel as-is.
+		const sel = resolveAtlasSelection(
+			kind,
+			id,
+			(i) => atlasOverlayById.get(i),
+			(i) => listCorpusById.get(i) ?? atlasBackdropById.get(i),
+			atlasPermalink
+		);
+		if (sel) atlasSelection = sel;
 	}
 
 	// Most-similar list for the inline detail panel. On /neuroscape/
@@ -660,17 +1014,99 @@
 		return out;
 	})();
 
-	function onAtlasLasso(
-		ev: CustomEvent<{ ohbm2026_ids: number[]; neuroscape_ids: number[] }>
-	) {
-		atlasLassoOhbmSet = new Set(ev.detail.ohbm2026_ids);
-		atlasLassoNeuroSet = new Set(ev.detail.neuroscape_ids);
+	// Lazily-fetched FULL NeuroScape coords for atlas-root lasso. The
+	// landing scatter renders only the LOD sample, so a lasso must test
+	// its polygon against the whole 461k coordinate set to find every
+	// abstract in the region. /neuroscape/ already holds the full coords
+	// in `atlasBackdrop`; atlas-root fetches the `coords` table (~11 MB)
+	// on the FIRST lasso only. `null` until fetched; a fetch in flight is
+	// tracked so concurrent lassos don't double-fetch.
+	let atlasFullCoords: CoordPoint[] | null = null;
+	let atlasFullCoordsPromise: Promise<CoordPoint[] | null> | null = null;
+
+	async function ensureAtlasFullCoords(): Promise<CoordPoint[] | null> {
+		if (atlasFullCoords) return atlasFullCoords;
+		if (!atlasFullCoordsPromise) {
+			atlasFullCoordsPromise = loadCoordsFromNeuroscape()
+				.then((rows) => {
+					if (!rows || rows.length === 0) {
+						console.warn(
+							'atlas-root: full `coords` unavailable from the NeuroScape sibling — lasso limited to the displayed LOD sample.'
+						);
+						return null;
+					}
+					atlasFullCoords = rows as unknown as CoordPoint[];
+					return atlasFullCoords;
+				})
+				.catch((err) => {
+					console.warn('atlas-root: full `coords` range-fetch failed; lasso limited to the LOD sample:', err);
+					atlasFullCoordsPromise = null; // allow a retry on the next lasso
+					return null;
+				});
+		}
+		return atlasFullCoordsPromise;
+	}
+
+	// Resolve a lasso polygon/box to the selected ids by point-in-polygon
+	// over the FULL corpus (not the rendered LOD sample) — spec 019 follow-up.
+	// OHBM overlay is fully rendered so its own coords suffice; the NeuroScape
+	// backdrop is downsampled, so we test against the full coords: in memory
+	// on /neuroscape/ (`atlasBackdrop`), lazily range-fetched on atlas-root.
+	async function onAtlasLasso(ev: CustomEvent<{ geometry: LassoGeometry }>) {
+		const g = ev.detail.geometry;
+		const getXY = (p: { umap_2d?: [number, number] }) => p.umap_2d;
+		atlasLassoOhbmSet = new Set(
+			selectIdsInGeometry(atlasOverlayPoints, g, (p) => p.poster_id, getXY)
+		);
+		let neuroSource: CoordPoint[];
+		if (SITE_MODE === 'neuroscape') {
+			neuroSource = atlasBackdrop;
+		} else {
+			// atlas-root: prefer the full coords; fall back to the rendered
+			// LOD sample while they load (or if unavailable), then re-resolve
+			// once they land so the selection upgrades to the full region.
+			const full = await ensureAtlasFullCoords();
+			neuroSource = full ?? atlasBackdrop;
+		}
+		atlasLassoNeuroSet = new Set(
+			selectIdsInGeometry(neuroSource, g, (p) => p.pubmed_id, getXY)
+		);
 	}
 
 	function clearAtlasLasso() {
 		atlasLassoOhbmSet = new Set();
 		atlasLassoNeuroSet = new Set();
 	}
+
+	// Spec 019 follow-up — resolve the focus halo's coordinates for the
+	// current selection against the FULL corpus, so clicking a result that
+	// isn't in the rendered LOD sample still highlights + camera-snaps it in
+	// the UMAPs (the detail panel already opens via listCorpusById above).
+	$: atlasFullCoordsById = new Map((atlasFullCoords ?? []).map((p) => [p.pubmed_id, p]));
+	// atlas-root: a selected neuroscape point that isn't in the sample needs
+	// the full coords (identity-only listCorpus has none) — lazily fetch them
+	// (same ~11 MB table the lasso uses). The reactives below re-resolve once
+	// they land. No-op on /neuroscape/ (full coords already in atlasBackdrop).
+	$: if (
+		SITE_MODE === 'atlas-root' &&
+		atlasSelection?.kind === 'neuroscape' &&
+		!atlasBackdropById.has(atlasSelection.pubmed_id) &&
+		!atlasFullCoords
+	) {
+		void ensureAtlasFullCoords();
+	}
+	$: atlasFocusUmap2d = (() => {
+		if (atlasSelection?.kind !== 'neuroscape') return null;
+		const id = atlasSelection.pubmed_id;
+		const c = (atlasBackdropById.get(id) ?? atlasFullCoordsById.get(id))?.umap_2d;
+		return c ? ([c[0], c[1]] as [number, number]) : null;
+	})();
+	$: atlasFocusUmap3d = (() => {
+		if (atlasSelection?.kind !== 'neuroscape') return null;
+		const id = atlasSelection.pubmed_id;
+		const c = (atlasBackdropById.get(id) ?? atlasFullCoordsById.get(id))?.umap_3d;
+		return c ? ([c[0], c[1], c[2]] as [number, number, number]) : null;
+	})();
 	// T043 — drift banner state. Populated by the sibling-state-key
 	// check that fires in the background after atlas.parquet loads.
 	let atlasDrift: AtlasDriftEntry[] = [];
@@ -711,8 +1147,13 @@
 	// Base sources after lasso (the lasso is global — affects every
 	// facet).
 	$: lassoBackdropPoints = (() => {
-		if (!anyLassoActive) return atlasBackdrop;
-		return atlasBackdrop.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
+		// Facet counts over the FULL corpus (`listCorpus`), not the LOD
+		// scatter sample — so cluster/year counts match the full-region
+		// result list. `listCorpus` carries cluster_id + year and is the
+		// whole corpus on both surfaces (identity table on atlas-root,
+		// the same full array as atlasBackdrop on /neuroscape/).
+		if (!anyLassoActive) return listCorpus;
+		return listCorpus.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
 	})();
 	$: lassoOverlayPoints = (() => {
 		if (!anyLassoActive) return atlasOverlayPoints;
@@ -764,7 +1205,11 @@
 	// scatter3d hammers SwiftShader CPU rendering). Visitors flip
 	// it on with the same toggle after reading the admonition near
 	// the top of the page.
-	let atlasSearchQuery = '';
+	// Spec 019 / T028 — the atlas-root + /neuroscape/ search surface
+	// now reuses the shared `$searchQuery` store via <SearchBar>
+	// (FR-025). The previously-local `atlasSearchQuery` declaration is
+	// removed; downstream readers use `$searchQuery` directly. The
+	// store is auto-cleared by SearchBar's own clear-button affordance.
 	let atlasShowMap =
 		typeof window === 'undefined' ? true : window.innerWidth >= 1024;
 	// Mobile-only "🔍 Filters" toggle, mirroring OHBM's pattern: the
@@ -794,21 +1239,253 @@
 	$: atlasLassoActive = atlasLassoOhbmSet.size + atlasLassoNeuroSet.size > 0;
 	void atlasLassoActive;
 	let atlasLoading = false;
+	// Spec 019 follow-up — true while the FULL search corpus is still streaming
+	// in (the result count starts at the coarse first-paint seed and grows to
+	// the full ~461k once the `articles` table lands in the background). Drives
+	// the inline "loading" indicator next to the result count so the count
+	// visibly updating doesn't look like a glitch. Set true at load start,
+	// cleared when the full corpus is resident (or the load errored — guarded
+	// below).
+	let atlasCorpusLoading = false;
 	let atlasError: string | null = null;
+	$: if (atlasError) atlasCorpusLoading = false;
 	let atlasProgressLoaded = 0;
 	let atlasProgressTotal: number | null = null;
 	// Phase string drives the placeholder label so the parsing window
 	// (CPU-bound, no byte progress) doesn't look frozen on fast links.
 	let atlasPhase: 'connecting' | 'downloading' | 'parsing' | 'ready' = 'connecting';
 
+	/**
+	 * Spec 019 / FR-002 — initialise the full cluster-routed semantic
+	 * ranker once the NeuroScape articles + clusters are in memory.
+	 *
+	 * Runs in the background (never blocks first paint) and is a no-op
+	 * unless ALL of these are present:
+	 *   - `VITE_DATA_PACKAGE_URL_NEUROSCAPE_VECTORS` (the INT8 sidecar),
+	 *   - a `cluster_centroids` table in the loaded parquet,
+	 *   - articles carrying `cluster_id` + the k=20 neighbour graph.
+	 * Any missing piece leaves `rankerReady=false` and the page falls
+	 * back to the KNN-only `neuroscapeKnnHits` path — no thrown error,
+	 * no broken search.
+	 *
+	 * The maps (pubmed→cluster, pubmed→KNN) are built from the already-
+	 * loaded `atlasBackdrop` rows rather than re-reading the parquet.
+	 */
+	async function initNeuroscapeRanker() {
+		if (SITE_MODE !== 'neuroscape' && SITE_MODE !== 'atlas-root') return;
+		if (rankerReady) return;
+		const vectorsUrl = getNeuroscapeVectorsUrl();
+		if (!vectorsUrl) return; // KNN-only fallback
+		try {
+			const [manifest, localCentroids] = await Promise.all([
+				loadVectorsManifest(vectorsUrl),
+				loadClusterCentroids()
+			]);
+			// atlas-root's own atlas.parquet carries no centroid table; pull
+			// the cluster_centroids row group that already exists in the
+			// sibling neuroscape.parquet (one Range request, ~268 KB — the
+			// envelope is row_group_size=1). One source of truth, no
+			// duplication, no data rebuild.
+			let centroids = localCentroids;
+			if (!centroids || centroids.length === 0) {
+				centroids = await loadClusterCentroidsFromNeuroscape();
+			}
+			if (!manifest || !centroids || centroids.length === 0) {
+				// CA-006 — never degrade to lexical-only silently. The vectors
+				// sidecar is configured (vectorsUrl present) but no centroids
+				// were found locally or in the neuroscape sibling, so the
+				// cluster-routed ranker can't run.
+				console.warn(
+					`neuroscape ranker: vectors sidecar present but cluster centroids ` +
+						`unavailable (manifest=${!!manifest}, centroids=${centroids?.length ?? 0}) — ` +
+						`semantic search will fall back to KNN-only. Check that ` +
+						`VITE_DATA_PACKAGE_URL_NEUROSCAPE points at a neuroscape.parquet ` +
+						`carrying the cluster_centroids table.`
+				);
+				return;
+			}
+			// Build the pubmed→cluster + pubmed→KNN maps from the in-memory
+			// articles. atlas-root's backdrop rows don't carry neighbours,
+			// so its knnIndex stays empty — the ranker still routes +
+			// brute-forces + re-ranks; only the KNN-expansion step yields
+			// nothing extra there (acceptable: atlas-root search is a
+			// cross-conference convenience, not the primary surface).
+			const pubmedToCluster = new Map<bigint, number>();
+			const knnIndex = new Map<bigint, KnnEntry>();
+			for (const a of atlasBackdrop) {
+				const pid = BigInt(a.pubmed_id);
+				pubmedToCluster.set(pid, a.cluster_id);
+				if (a.nearest_pubmed_ids && a.nearest_distances) {
+					knnIndex.set(pid, {
+						pubmed_id: pid,
+						nearest_pubmed_ids: a.nearest_pubmed_ids.map((n) => BigInt(n)),
+						nearest_distances: a.nearest_distances
+					});
+				}
+			}
+			const worker = await defaultSemanticWorker({
+				dim: manifest.dim,
+				scale: manifest.scale
+			});
+			initRanker({
+				worker,
+				fetchClusterVectors: (clusterId: number) => loadClusterVectors(vectorsUrl, clusterId),
+				centroids: centroids.map((c) => ({
+					cluster_id: c.cluster_id,
+					centroid_vector: c.centroid_vector
+				})),
+				pubmedToCluster,
+				knnIndex
+			});
+			rankerReady = true;
+		} catch (err) {
+			// Loud-but-non-fatal: the page keeps the KNN fallback. Log so
+			// the failure is visible in the console rather than silently
+			// degrading semantic quality.
+			console.warn('neuroscape ranker init failed; using KNN fallback:', err);
+			rankerReady = false;
+		}
+	}
+
+	// Rebuild the cross-site NeuroScape title lookup from the current
+	// `listCorpus` + `atlasClusters`. Sourced from `listCorpus` (the
+	// LIST/search corpus) rather than the SCATTER (`atlasBackdrop`) so it
+	// covers the full corpus once the background `articles` fetch lands —
+	// on atlas-root the scatter is only the LOD sample, so sourcing it
+	// there would shrink the cart's title coverage. Called after first
+	// paint and again when the full corpus swaps in.
+	function refreshNeuroscapeTitleLookup() {
+		const clusterTitleById = new Map<number, string>();
+		for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
+		const neuroMap = new Map<
+			number,
+			{ title: string; year?: number; cluster_title?: string }
+		>();
+		for (const p of listCorpus) {
+			neuroMap.set(p.pubmed_id, {
+				title: p.title,
+				year: p.year,
+				cluster_title: clusterTitleById.get(p.cluster_id)
+			});
+		}
+		neuroscapeTitleLookup.set(neuroMap);
+	}
+
+	// Spec 019 follow-up — progressive /neuroscape/ load. The old path did a
+	// single blocking ~102 MB full GET of neuroscape.parquet before any paint
+	// (so /neuroscape/ felt much slower than atlas-root, which range-fetches
+	// ~½ MB to first paint). Mirror atlas-root: paint a coarse `lod0` tier +
+	// clusters from a tiny range fetch, then stream the full `articles` (list
+	// + search) and `coords` (full scatter geometry) in the background, and
+	// defer the heavy `neighbors` table (detail "similar" only) to a final
+	// wave. Returns true if the fast first paint succeeded; false ⇒ caller
+	// falls back to the full-GET path (so a range-fetch problem can't break
+	// /neuroscape/ — worst case is the prior behaviour).
+	async function loadNeuroscapeProgressive(): Promise<boolean> {
+		let clustersRows: Array<Record<string, unknown>> | null = null;
+		let lod0Rows: Array<Record<string, unknown>> | null = null;
+		let levelCount: number | null = null;
+		try {
+			[clustersRows, lod0Rows, levelCount] = await Promise.all([
+				loadClustersFromNeuroscape(),
+				loadBackdropLevelFromNeuroscape(0),
+				readNeuroscapeBackdropLevelCount()
+			]);
+		} catch {
+			return false; // fall back to full GET
+		}
+		if (!clustersRows || !lod0Rows) return false;
+
+		// First paint: coarse scatter + cluster legend.
+		atlasClusters = clustersRows as unknown as AtlasClusterRow[];
+		atlasBackdrop = lod0Rows as unknown as AtlasBackdropPoint[];
+		listCorpus = lod0Rows as unknown as AtlasBackdropPoint[];
+		atlasOverlayPoints = [];
+		neuroscapeLodCap =
+			typeof levelCount === 'number' && levelCount > 0 ? levelCount - 1 : null;
+		atlasBackdropLevels =
+			typeof levelCount === 'number' && levelCount > 0 ? levelCount : null;
+		refreshNeuroscapeTitleLookup();
+		void initNeuroscapeRanker();
+
+		// Background: full articles + coords → full scatter + search/list.
+		// Then a final wave for neighbours (detail "similar"). Fire-and-forget
+		// so first paint isn't blocked; failures log loudly + leave the coarse
+		// tier in place (CA-006, never a silent wrong-state).
+		void (async () => {
+			try {
+				const [articles, coords] = await Promise.all([
+					loadArticlesFromNeuroscape(),
+					loadCoordsFromNeuroscape()
+				]);
+				if (!articles) {
+					atlasCorpusLoading = false;
+					return;
+				}
+				// Search + result list always get the full corpus.
+				listCorpus = articles as unknown as AtlasBackdropPoint[];
+				// Count is now full — stop the inline loading indicator (the
+				// neighbours wave below only powers the detail "similar" list,
+				// not the count).
+				atlasCorpusLoading = false;
+				refreshNeuroscapeTitleLookup();
+				// The SCATTER only swaps to the full corpus once coords are
+				// folded — articles carry no geometry, so without coords every
+				// point would collapse to (0,0). If coords failed, keep the
+				// coarse lod0 tier on the map (it has real umap_2d/3d).
+				if (coords) {
+					const geoById = new Map(coords.map((c) => [Number(c.pubmed_id), c]));
+					for (const a of articles as Array<Record<string, unknown>>) {
+						const c = geoById.get(Number(a.pubmed_id));
+						if (c) {
+							a.umap_2d = c.umap_2d;
+							a.umap_3d = c.umap_3d;
+							a.lod_level = c.lod_level;
+						}
+					}
+					atlasBackdrop = articles as unknown as AtlasBackdropPoint[];
+				}
+				// Final wave — neighbours for the detail "Most similar" list.
+				const nbrs = await loadNeighborsFromNeuroscape();
+				if (nbrs) {
+					const nbrById = new Map(nbrs.map((n) => [Number(n.pubmed_id), n]));
+					for (const a of articles as Array<Record<string, unknown>>) {
+						const n = nbrById.get(Number(a.pubmed_id));
+						if (n) {
+							a.nearest_pubmed_ids = n.nearest_pubmed_ids;
+							a.nearest_distances = n.nearest_distances;
+						}
+					}
+					// Reassign so the detail "similar" reactive picks up neighbours.
+					atlasBackdrop = [...(articles as unknown as AtlasBackdropPoint[])];
+				}
+			} catch (err) {
+				console.warn('neuroscape progressive background load failed:', err);
+			} finally {
+				// Whatever happened, stop the inline loader — on failure the count
+				// just stays at the coarse seed (logged loudly above, CA-006).
+				atlasCorpusLoading = false;
+			}
+		})();
+		return true;
+	}
+
 	async function loadAtlasData() {
 		if (SITE_MODE === 'ohbm2026') return;
 		if (atlasLoading || atlasBackdrop.length > 0) return;
 		atlasLoading = true;
+		atlasCorpusLoading = true;
 		atlasProgressLoaded = 0;
 		atlasProgressTotal = null;
 		atlasPhase = 'connecting';
 		try {
+			// /neuroscape/ — try the progressive range-fetch path first (fast
+			// coarse paint, then stream the rest). On success we're done; on
+			// failure fall through to the full-GET path below (no regression).
+			if (SITE_MODE === 'neuroscape') {
+				const ok = await loadNeuroscapeProgressive();
+				if (ok) return;
+			}
 			const pkg = await loadDataPackage(
 				fetch,
 				(loaded, total) => {
@@ -820,29 +1497,90 @@
 				}
 			);
 			if (!pkg) {
-				atlasError =
-					SITE_MODE === 'atlas-root'
-						? 'Atlas data package URL not configured.'
-						: 'NeuroScape data package URL not configured.';
+				// `pkg === null` has two distinct causes: the data-package
+				// URL genuinely isn't configured (build-time env missing),
+				// or the fetch failed (network / a 429 from the data host
+				// rate-limiting rapid requests). Distinguish them so the
+				// visitor sees an actionable message instead of a wrong
+				// "not configured" one.
+				const label = SITE_MODE === 'atlas-root' ? 'Atlas' : 'NeuroScape';
+				atlasError = getDataPackageUrl()
+					? `Couldn't load the ${label} data package — the data host may be temporarily rate-limiting requests. Refresh to retry.`
+					: `${label} data package URL not configured.`;
 				return;
 			}
 			if (SITE_MODE === 'atlas-root') {
-				const backdropShard = pkg.get('data/atlas/backdrop_full.json') as
-					| { points: AtlasBackdropPoint[] }
-					| undefined;
 				const overlayShard = pkg.get('data/atlas/ohbm_overlay.json') as
 					| { points: AtlasOverlayPoint[] }
 					| undefined;
-				const clustersShard = pkg.get('data/atlas/clusters.json') as
-					| { clusters: AtlasClusterRow[] }
-					| undefined;
-				if (!backdropShard || !overlayShard || !clustersShard) {
-					atlasError = 'Atlas data package is missing one of the expected row groups.';
+				if (!overlayShard) {
+					atlasError = 'Atlas data package is missing the ohbm_overlay row group.';
 					return;
 				}
-				atlasBackdrop = backdropShard.points;
+				// Spec 019 — atlas.parquet now carries ONLY the OHBM→NeuroScape
+				// overlay. The cluster legend + the landing backdrop are
+				// range-fetched from the sibling neuroscape.parquet (single
+				// source of truth, no 27 MB duplication in atlas.parquet).
+				//
+				// Spec 019 follow-up — the backdrop is range-fetched
+				// progressively as quadtree LOD tiers: `backdrop_lod0` (a
+				// coarse blue-noise cover) paints almost instantly, then the
+				// finer tiers stream in and refine. The full corpus is never
+				// fetched for the backdrop. Clusters + the coarse tier load
+				// together so the first paint already has its legend colours.
+				const [clustersRows, lod0Rows, levelCount] = await Promise.all([
+					loadClustersFromNeuroscape(),
+					loadBackdropLevelFromNeuroscape(0),
+					readNeuroscapeBackdropLevelCount()
+				]);
+				if (!clustersRows || !lod0Rows) {
+					atlasError =
+						'Atlas backdrop/clusters could not be range-fetched from the NeuroScape sibling parquet.';
+					return;
+				}
+				atlasBackdrop = lod0Rows as unknown as AtlasBackdropPoint[];
+				// Seed the LIST/search corpus with the coarse tier so the result
+				// list renders immediately on first paint; the FULL ~461k identity
+				// table is range-fetched in the background below and swapped in
+				// when ready (progressive enhancement — the no-query count ticks
+				// up to the full corpus once the articles land). The SCATTER and
+				// the LIST diverge on atlas-root: the scatter refines through the
+				// LOD tiers (below), the list jumps to the full identity table.
+				listCorpus = lod0Rows as unknown as AtlasBackdropPoint[];
 				atlasOverlayPoints = overlayShard.points;
-				atlasClusters = clustersShard.clusters;
+				atlasClusters = clustersRows as unknown as AtlasClusterRow[];
+				atlasBackdropLevels =
+					typeof levelCount === 'number' && levelCount > 0 ? levelCount : null;
+				// Prefetch the full coords (with lod_level) in the background so
+				// the 2D viewport-LOD (zoom reveals finer points) + lasso + focus
+				// have geometry without waiting for a first interaction. ~11 MB,
+				// fire-and-forget; populates `atlasFullCoords` → `backdropFull`.
+				void ensureAtlasFullCoords();
+				// Refine: stream the remaining tiers (lod1..N-1) and append.
+				// A missing/absent level resolves to null and is skipped — the
+				// scatter still shows every tier that did load (no silent
+				// zero-result; a fully-failed refine just keeps the coarse
+				// cover already painted).
+				const nLevels = levelCount ?? 1;
+				if (nLevels > 1) {
+					void (async () => {
+						const finer = await Promise.all(
+							Array.from({ length: nLevels - 1 }, (_, i) =>
+								loadBackdropLevelFromNeuroscape(i + 1).catch(() => null)
+							)
+						);
+						const extra = finer
+							.filter((r): r is Array<Record<string, unknown>> => !!r && r.length > 0)
+							.flat() as unknown as AtlasBackdropPoint[];
+						if (extra.length > 0) {
+							// Reassign (not push) so Svelte's reactivity repaints
+							// the scatter + rebuilds the derived id maps. The title
+							// lookup is driven by `listCorpus` (the full identity
+							// table), not the scatter, so it isn't rebuilt here.
+							atlasBackdrop = [...atlasBackdrop, ...extra];
+						}
+					})();
+				}
 				// Publish title lookups so the unifying cart drawer can
 				// render rich rows for items from EITHER subsite when
 				// the user is on atlas-root (the only build that loads
@@ -852,20 +1590,7 @@
 					ohbmMap.set(p.poster_id, { title: p.title });
 				}
 				ohbmTitleLookup.set(ohbmMap);
-				const clusterTitleById = new Map<number, string>();
-				for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
-				const neuroMap = new Map<
-					number,
-					{ title: string; year?: number; cluster_title?: string }
-				>();
-				for (const p of atlasBackdrop) {
-					neuroMap.set(p.pubmed_id, {
-						title: p.title,
-						year: p.year,
-						cluster_title: clusterTitleById.get(p.cluster_id)
-					});
-				}
-				neuroscapeTitleLookup.set(neuroMap);
+				refreshNeuroscapeTitleLookup();
 				// T043 — Sibling-state-key drift check. Fires after the
 				// atlas scatter renders, so a slow / unreachable sibling
 				// doesn't block first paint. The check itself retries
@@ -883,6 +1608,37 @@
 				void verifyAtlasSiblingDrift(manifest).then((result) => {
 					if (!result.ok) atlasDrift = result.drift;
 				});
+				// Background upgrade: range-fetch the FULL ~461k `articles`
+				// identity table from the sibling so the result-list count +
+				// lexical search cover the whole corpus (not just the 50k
+				// scatter sample). Fire-and-forget so the scatter's first paint
+				// isn't blocked on this ~20 MB fetch. On failure we keep the
+				// decimated 50k list and log loudly (CA-006) — never silently
+				// pretend the corpus is only 50k.
+				void loadArticlesFromNeuroscape()
+					.then((rows) => {
+						if (!rows || rows.length === 0) {
+							console.warn(
+								'atlas-root: full `articles` table unavailable from the NeuroScape sibling — result list limited to the decimated 50k backdrop.'
+							);
+							return;
+						}
+						listCorpus = rows as unknown as AtlasBackdropPoint[];
+						// Widen the cart's NeuroScape title lookup to the full
+						// corpus now that we have every title (was seeded with the
+						// coarse LOD tier above). Sources `listCorpus`, just set.
+						refreshNeuroscapeTitleLookup();
+					})
+					.catch((err) => {
+						console.warn(
+							'atlas-root: full `articles` range-fetch failed; result list limited to the decimated 50k backdrop:',
+							err
+						);
+					})
+					.finally(() => {
+						// Full corpus resident (or failed) — stop the inline loader.
+						atlasCorpusLoading = false;
+					});
 			} else if (SITE_MODE === 'neuroscape') {
 				const articlesShard = pkg.get('data/neuroscape/articles.json') as
 					| { articles: AtlasBackdropPoint[] }
@@ -897,29 +1653,39 @@
 				}
 				// neuroscape.parquet doesn't ship a pre-decimated row group;
 				// keep the full 461k articles for search + result-list,
-				// decimate at scatter-render time below.
+				// decimate at scatter-render time below. On /neuroscape/ the
+				// scatter source (atlasBackdrop, carries coords from the
+				// coords→articles join) and the list/search corpus (listCorpus)
+				// are the SAME array — only atlas-root splits them.
 				atlasBackdrop = articlesShard.articles;
+				listCorpus = articlesShard.articles;
+				// Full-GET path already has the whole corpus → count is final.
+				atlasCorpusLoading = false;
 				atlasOverlayPoints = [];
 				atlasClusters = clustersShard.clusters;
+				// Cap the scatter to the representative tiers (hide the
+				// rest tier) so the WebGL scene stays light; the full
+				// corpus above still feeds search + the result list. An
+				// older build with no n_backdrop_levels leaves the cap
+				// null → every point renders (prior behaviour).
+				const nsManifest = pkg.get('data/manifest.json') as
+					| { n_backdrop_levels?: number }
+					| undefined;
+				neuroscapeLodCap =
+					typeof nsManifest?.n_backdrop_levels === 'number' &&
+					nsManifest.n_backdrop_levels > 0
+						? nsManifest.n_backdrop_levels - 1
+						: null;
 				// /neuroscape/ publishes only the neuroscape title
 				// lookup; cross-site OHBM rows in the cart render with
 				// a placeholder until the user visits an OHBM page or
 				// atlas-root warms the OHBM lookup.
-				const clusterTitleById = new Map<number, string>();
-				for (const c of atlasClusters) clusterTitleById.set(c.cluster_id, c.title);
-				const neuroMap = new Map<
-					number,
-					{ title: string; year?: number; cluster_title?: string }
-				>();
-				for (const p of atlasBackdrop) {
-					neuroMap.set(p.pubmed_id, {
-						title: p.title,
-						year: p.year,
-						cluster_title: clusterTitleById.get(p.cluster_id)
-					});
-				}
-				neuroscapeTitleLookup.set(neuroMap);
+				refreshNeuroscapeTitleLookup();
 			}
+			// Kick off the full cluster-routed ranker in the background
+			// once the articles + clusters are in memory. Non-blocking;
+			// no-op when the vectors sidecar URL is unset.
+			void initNeuroscapeRanker();
 		} catch (err) {
 			atlasError = `failed to load atlas data: ${(err as Error)?.message ?? String(err)}`;
 		} finally {
@@ -1121,28 +1887,20 @@
 		     panel if needed). -->
 		<div class="top-row">
 			<div class="search-row">
-				<label class="atlas-search" data-testid="atlas-search-label">
-					<span class="visually-hidden">Search</span>
-					<input
-						type="search"
-						bind:value={atlasSearchQuery}
-						placeholder={SITE_MODE === 'atlas-root'
-							? 'Search OHBM 2026 + NeuroScape titles or ids…'
-							: 'Search 461,316 NeuroScape titles…'}
-						data-testid={SITE_MODE === 'atlas-root'
-							? 'atlas-root-search-input'
-							: 'neuroscape-search-input'}
-					/>
-					{#if atlasSearchQuery}
-						<button
-							type="button"
-							class="atlas-search-clear"
-							on:click={() => (atlasSearchQuery = '')}
-							aria-label="Clear search"
-							data-testid="atlas-search-clear"
-						>×</button>
-					{/if}
-				</label>
+				<!-- Spec 019 / T028 / FR-025 — replace the slim local-state
+				     <input> with the shared <SearchBar> so atlas-root and
+				     /neuroscape/ inherit OHBM 2026's operator syntax
+				     verbatim (phrase, negation, OR, id:N). The corpus prop
+				     drives the `id:` autocomplete data source + the
+				     placeholder copy; the value binds via the same
+				     `$searchQuery` store /ohbm2026/ uses. -->
+				<SearchBar
+					corpus={SITE_MODE === 'atlas-root' ? 'atlas-root' : 'neuroscape'}
+					placeholderOverride={SITE_MODE === 'atlas-root'
+						? 'Search OHBM 2026 + NeuroScape titles or ids…'
+						: 'Search 461,316 NeuroScape titles…'}
+					abstractsByPosterId={new Map()}
+				/>
 			</div>
 			<div class="controls" data-testid="atlas-root-controls">
 				<!-- Clear-selection button lives inside the UmapPanel header
@@ -1150,6 +1908,44 @@
 				     does it. The top-row holds the map + filters toggles
 				     (filters is mobile-only — desktop facet sidebar is
 				     always visible via the .layout grid). -->
+				<!-- Spec 019 / FR-001 — ✨ Semantic toggle on atlas-root +
+				     /neuroscape/, parity with the same control on
+				     /ohbm2026/ (OHBM branch below). Click flips the shared
+				     `semanticEnabled` store; when the vectors sidecar is
+				     configured this drives the full cluster-routed ranker
+				     (searchNeuroscape), otherwise the KNN-only fallback. -->
+				<button
+					type="button"
+					class="control-toggle"
+					class:active={$semanticEnabled}
+					on:click={() => semanticEnabled.toggle()}
+					aria-pressed={$semanticEnabled}
+					title={$semanticEnabled
+						? rankerReady
+							? rankerBusy
+								? 'Semantic search is ON — searching…'
+								: 'Semantic search is ON — cluster-routed ranker active'
+							: 'Semantic search is ON — related-article (KNN) mode'
+						: 'Semantic search is OFF — click to enable'}
+					data-testid="toggle-semantic"
+				>
+					✨ Semantic
+				</button>
+				{#if $semanticEnabled && rankerCapExceeded}
+					<button
+						type="button"
+						class="control-toggle"
+						on:click={() => {
+							rankerExpandSearchDepth();
+							rankerCapExceeded = false;
+							rankerDepthBump++;
+						}}
+						title="More clusters are relevant than the per-query cap allows. Expand to search them too."
+						data-testid="expand-search-depth"
+					>
+						↧ Expand search depth
+					</button>
+				{/if}
 				<button
 					type="button"
 					class="control-toggle mobile-only"
@@ -1241,7 +2037,7 @@
 			<div class="atlas-map-wrap">
 				<UmapPanel
 					mode={SITE_MODE === 'atlas-root' ? 'atlas' : 'neuroscape'}
-					backdropPoints={scatterBackdrop}
+					backdropPoints={scatterBackdropForMap}
 					overlayPoints={scatterOverlay}
 					atlasClusters={atlasClusters}
 					showOverlay={SITE_MODE === 'atlas-root' ? filterShowOhbm : false}
@@ -1254,6 +2050,10 @@
 							? atlasSelection.poster_id
 							: atlasSelection.pubmed_id
 						: null}
+					atlasFocusUmap2d={atlasFocusUmap2d}
+					atlasFocusUmap3d={atlasFocusUmap3d}
+					backdropFull={backdropFull}
+					lodRestLevel={lodRestLevel}
 					on:pointclick={onAtlasPointClick}
 					on:lassoselect={onAtlasLasso}
 					on:lassoclear={clearAtlasLasso}
@@ -1352,7 +2152,10 @@
 						<NeuroscapeBrowsePanel
 							articles={filteredBackdrop}
 							clustersById={atlasClustersById}
-							bind:query={atlasSearchQuery}
+							query={$debouncedSearchQuery}
+							loading={atlasCorpusLoading}
+							semanticHits={neuroscapeSemanticHits}
+							searchIndex={titleSearchIndex}
 							on:focus={(ev) => {
 								// Update the URL so deep-link restore + back-button work,
 								// THEN open the detail panel so the inline third pane
@@ -1374,7 +2177,10 @@
 							overlayPoints={filteredOverlay}
 							clustersById={atlasClustersById}
 							permalinkFor={atlasPermalink}
-							bind:query={atlasSearchQuery}
+							query={$debouncedSearchQuery}
+							loading={atlasCorpusLoading}
+							semanticHits={neuroscapeSemanticHits}
+							searchIndex={titleSearchIndex}
 							on:select={(ev) => {
 								onAtlasPointClick(
 									new CustomEvent('pointclick', { detail: ev.detail })
@@ -1668,20 +2474,6 @@
 			border-color: rgba(184, 134, 11, 0.45);
 		}
 	}
-	/* Side-by-side 2D + 3D scatter row, matching OHBM 2026's
-	   UmapPanel layout (2D + 3D side-by-side on desktop, stacked
-	   on mobile). Each pane gets equal width on desktop. */
-	.atlas-umap-row {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 1rem;
-		min-height: 24rem;
-	}
-	@media (max-width: 1024px) {
-		.atlas-umap-row {
-			grid-template-columns: 1fr;
-		}
-	}
 	/* `.atlas-map-wrap` hosts the UmapPanel + an absolutely-positioned
 	   loading overlay so the chart frames are visible as soon as the
 	   map toggle flips on, with the loading status floating over them
@@ -1726,62 +2518,6 @@
 		width: min(20rem, 80%);
 		height: 0.45rem;
 	}
-	/* Atlas-home search input — same visual weight as OHBM's
-	   SearchBar (large, full-width-ish, prominent). */
-	.atlas-search {
-		position: relative;
-		display: flex;
-		align-items: center;
-		width: 100%;
-	}
-	.atlas-search input[type='search'] {
-		width: 100%;
-		padding: 0.6rem 2.25rem 0.6rem 0.85rem;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		background: var(--bg-elevated);
-		color: var(--text);
-		font-size: 1rem;
-	}
-	.atlas-search input[type='search']:focus {
-		outline: 2px solid var(--accent);
-		outline-offset: 1px;
-	}
-	.atlas-search-clear {
-		all: unset;
-		cursor: pointer;
-		position: absolute;
-		right: 0.6rem;
-		font-size: 1.2rem;
-		color: var(--text-muted);
-		padding: 0.1rem 0.4rem;
-		border-radius: 3px;
-	}
-	.atlas-search-clear:hover {
-		background: var(--bg-subtle);
-		color: var(--text);
-	}
-	.visually-hidden {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		margin: -1px;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		border: 0;
-	}
-	.atlas-scatter-placeholder {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: 0.75rem;
-		border: 1px dashed var(--border);
-		border-radius: 6px;
-		min-height: 50vh;
-	}
 	.placeholder-text {
 		color: var(--text-muted);
 		margin: 0;
@@ -1789,15 +2525,6 @@
 	.atlas-progress {
 		width: 16rem;
 		height: 0.6rem;
-	}
-	.neuroscape-tag {
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		margin-left: auto;
-	}
-	.neuroscape-tag em {
-		font-style: italic;
-		opacity: 0.7;
 	}
 
 	.home {

@@ -182,7 +182,7 @@
 
 {#if open}
 	<div class="cart-backdrop" on:click={close} role="presentation"></div>
-	<aside class="cart-drawer" role="dialog" aria-label="Saved list" data-testid="cart-drawer">
+	<div class="cart-drawer" role="dialog" aria-modal="true" aria-label="Saved list" data-testid="cart-drawer">
 		<header class="cart-header">
 			<h2>Your list <span class="muted">({rows.length})</span></h2>
 			<button type="button" class="close" on:click={close} aria-label="Close list">×</button>
@@ -193,6 +193,7 @@
 				No saved items yet. Click the 🛒 icon on any result to save it for later.
 			</p>
 		{:else}
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 			<ul class="items" tabindex="0" aria-label="Your saved items">
 				{#each rows as r (r.item.kind + ':' + r.item.id)}
 					<li class="item">
@@ -317,7 +318,7 @@
 				</div>
 			</footer>
 		{/if}
-	</aside>
+	</div>
 {/if}
 
 <style>

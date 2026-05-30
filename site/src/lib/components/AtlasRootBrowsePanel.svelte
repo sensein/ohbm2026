@@ -14,9 +14,10 @@
 -->
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import { normalize } from '$lib/filter';
+	import { buildTitleIndex, searchTitleIndex, type InvertedIndex } from '$lib/filter';
 	import { cartStore, cartOhbmPosterIds, cartNeuroPubmedIds } from '$lib/stores/cart';
 	import CartIconButton from '$lib/components/CartIconButton.svelte';
+	import InlineLoader from '$lib/components/InlineLoader.svelte';
 
 	type BackdropPoint = {
 		pubmed_id: number;
@@ -42,6 +43,26 @@
 	export let clustersById: Map<number, Cluster> = new Map();
 	export let permalinkFor: (kind: 'ohbm2026' | 'neuroscape', id: number) => string;
 	export let query: string = '';
+	/** True while the full corpus is still streaming in — shows an inline
+	 *  "loading" indicator next to the count so the count growing (seed → full
+	 *  ~461k) reads as progress, not a glitch. */
+	export let loading: boolean = false;
+	/** Spec 019 / FR-002 — KNN-expanded semantic hits for the
+	 *  NeuroScape lane (computed in +page.svelte by walking the per-
+	 *  article nearest_pubmed_ids graph from the lexical seed set).
+	 *  Map<pubmed_id, knn_distance>. OHBM side has no semantic hits
+	 *  yet — that lane requires the production atlas.parquet to gain
+	 *  the ohbm_vectors table, which is a separate spec-019 build
+	 *  step still pending deploy. */
+	export let semanticHits: Map<number, number> = new Map();
+	/** Spec 019 perf — inverted title index over the FULL NeuroScape backdrop
+	 *  corpus, built once by the parent (+page.svelte) and cached by array
+	 *  identity. The per-query backdrop filter runs the shared OHBM
+	 *  operator/typo-tolerant search against it (vocabulary lookup) instead of
+	 *  scanning ~461k titles on every keystroke. The (small) OHBM overlay gets
+	 *  its own locally-built index. When null, search is disabled (the panel
+	 *  shows the unfiltered combined list). */
+	export let searchIndex: InvertedIndex | null = null;
 
 	const dispatch = createEventDispatcher<{
 		select: { kind: 'ohbm2026' | 'neuroscape'; id: number };
@@ -57,32 +78,75 @@
 				title: string;
 				cluster_id: number;
 				subline: string;
+				// Set only on semantic-only (KNN-expanded) rows: the distance
+				// from the nearest lexical match (lower = better). Drives the
+				// ✨ d= badge, matching /ohbm2026/ ResultList + NeuroscapeBrowsePanel.
+				d?: number;
 		  };
 
+	// Spec 019 / FR-025 / FR-026 — operator-aware cross-conference filter.
+	// Both corpora run through the shared `searchTitleIndex` (same operators,
+	// same Damerau-Levenshtein typo ladder as /ohbm2026/'s `lexicalSearch`),
+	// so matching is identical across overlay + backdrop + the sibling sites.
+	//   - implicit-AND multi-word over titles in BOTH corpora
+	//   - "exact phrase" + -negation + word OR word work across both
+	//   - id:N matches `poster_id` (OHBM) OR `pubmed_id` (NeuroScape)
+	// The backdrop uses the parent's full-corpus index (post-filtered to the
+	// facet-narrowed set); the small overlay gets a locally-built index.
+	$: overlaySearchIndex = buildTitleIndex(
+		overlayPoints,
+		(o) => o.poster_id,
+		(o) => o.title
+	);
+	$: backdropById = new Map(backdropPoints.map((b) => [b.pubmed_id, b]));
+	$: overlayById = new Map(overlayPoints.map((o) => [o.poster_id, o]));
 	$: filtered = (() => {
-		const needle = query.trim() ? normalize(query) : '';
+		const trimmed = (query ?? '').trim();
 		const out: Array<{ row: Row; score: number; tie: number }> = [];
 
-		for (const o of overlayPoints) {
-			if (needle) {
-				const hay = normalize(o.title);
-				const idx = hay.indexOf(needle);
-				const pidStr = String(o.poster_id);
-				const pidIdx = pidStr.indexOf(query.trim());
-				if (idx === -1 && pidIdx === -1) continue;
-				const score = idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
-				out.push({
-					row: {
-						kind: 'ohbm2026',
-						id: o.poster_id,
-						title: o.title,
-						cluster_id: o.nearest_cluster_id,
-						subline: `OHBM 2026 · #${o.poster_id}`
-					},
-					score,
-					tie: -o.poster_id
-				});
-			} else {
+		// id:N short-circuit (FR-026) — match across BOTH corpora in parallel.
+		// The id: prefix is parsed from the raw query; if present, return
+		// every overlay/backdrop row whose id matches.
+		const idMatch = trimmed.match(/^id:(\d+)$/i);
+		if (idMatch) {
+			const wanted = Number(idMatch[1]);
+			for (const o of overlayPoints) {
+				if (o.poster_id === wanted) {
+					out.push({
+						row: {
+							kind: 'ohbm2026',
+							id: o.poster_id,
+							title: o.title,
+							cluster_id: o.nearest_cluster_id,
+							subline: `OHBM 2026 · #${o.poster_id}`
+						},
+						score: 0,
+						tie: 0
+					});
+				}
+			}
+			for (const a of backdropPoints) {
+				if (a.pubmed_id === wanted) {
+					out.push({
+						row: {
+							kind: 'neuroscape',
+							id: a.pubmed_id,
+							title: a.title,
+							cluster_id: a.cluster_id,
+							subline: `NeuroScape · PMID ${a.pubmed_id} · ${a.year}`
+						},
+						score: 0,
+						tie: 1
+					});
+				}
+			}
+			out.sort((x, y) => x.tie - y.tie);
+			return out.map((s) => s.row);
+		}
+
+		if (!trimmed) {
+			// Empty query — build every row (everything "matches").
+			for (const o of overlayPoints) {
 				out.push({
 					row: {
 						kind: 'ohbm2026',
@@ -95,28 +159,7 @@
 					tie: o.poster_id
 				});
 			}
-		}
-
-		for (const a of backdropPoints) {
-			if (needle) {
-				const hay = normalize(a.title);
-				const idx = hay.indexOf(needle);
-				const pmidStr = String(a.pubmed_id);
-				const pmidIdx = pmidStr.indexOf(query.trim());
-				if (idx === -1 && pmidIdx === -1) continue;
-				const score = idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
-				out.push({
-					row: {
-						kind: 'neuroscape',
-						id: a.pubmed_id,
-						title: a.title,
-						cluster_id: a.cluster_id,
-						subline: `NeuroScape · PMID ${a.pubmed_id} · ${a.year}`
-					},
-					score,
-					tie: -a.year
-				});
-			} else {
+			for (const a of backdropPoints) {
 				out.push({
 					row: {
 						kind: 'neuroscape',
@@ -129,11 +172,78 @@
 					tie: a.pubmed_id
 				});
 			}
+		} else {
+			// Operator/typo-tolerant search via the shared index. Negative
+			// exactness sorts the higher-exact-count rows first; the kind tie
+			// preserves OHBM-before-NeuroScape ordering at equal exactness.
+			const overlayRes = searchTitleIndex(overlaySearchIndex, trimmed);
+			if (overlayRes) {
+				for (const id of overlayRes.ids) {
+					const o = overlayById.get(id);
+					if (!o) continue;
+					out.push({
+						row: {
+							kind: 'ohbm2026',
+							id: o.poster_id,
+							title: o.title,
+							cluster_id: o.nearest_cluster_id,
+							subline: `OHBM 2026 · #${o.poster_id}`
+						},
+						score: -(overlayRes.exactness.get(id) ?? 0),
+						tie: -o.poster_id
+					});
+				}
+			}
+			const backdropRes = searchIndex ? searchTitleIndex(searchIndex, trimmed) : null;
+			if (backdropRes) {
+				for (const id of backdropRes.ids) {
+					const a = backdropById.get(id);
+					if (!a) continue;
+					out.push({
+						row: {
+							kind: 'neuroscape',
+							id: a.pubmed_id,
+							title: a.title,
+							cluster_id: a.cluster_id,
+							subline: `NeuroScape · PMID ${a.pubmed_id} · ${a.year}`
+						},
+						score: -(backdropRes.exactness.get(id) ?? 0),
+						tie: -a.year
+					});
+				}
+			}
 		}
 
 		out.sort((x, y) => x.score - y.score || x.tie - y.tie);
-		return out.map((s) => s.row);
+		const lexicalRows = out.map((s) => s.row);
+		// Spec 019 / FR-002 — augment with NeuroScape-side semantic-only
+		// rows (KNN-expansion). OHBM-side semantic awaits the production
+		// ohbm_vectors table; for now atlas-root semantic hits are the
+		// NeuroScape lane only — same mechanism as NeuroscapeBrowsePanel.
+		if (semanticHits.size === 0) return lexicalRows;
+		const lexicalIds = new Set(lexicalRows.map((r) => `${r.kind}:${r.id}`));
+		const semanticRows: Array<{ row: Row; d: number }> = [];
+		for (const [pmid, d] of semanticHits) {
+			const key = `neuroscape:${pmid}`;
+			if (lexicalIds.has(key)) continue;
+			const a = backdropById.get(pmid);
+			if (!a) continue;
+			semanticRows.push({
+				row: {
+					kind: 'neuroscape',
+					id: a.pubmed_id,
+					title: a.title,
+					cluster_id: a.cluster_id,
+					subline: `NeuroScape · PMID ${a.pubmed_id} · ${a.year}`,
+					d
+				},
+				d
+			});
+		}
+		semanticRows.sort((x, y) => x.d - y.d);
+		return [...lexicalRows, ...semanticRows.map((s) => s.row)];
 	})();
+	$: semanticHitMap = semanticHits;
 
 	$: visible = filtered.slice(0, limit);
 	$: totalCount = filtered.length;
@@ -188,6 +298,7 @@
 			{#if totalCount > limit}
 				· showing first {limit}
 			{/if}
+			{#if loading}<InlineLoader />{/if}
 		</p>
 		{#if filteredNotInCart.length > 0}
 			<button
@@ -226,6 +337,13 @@
 							{r.kind === 'ohbm2026' ? 'OHBM' : 'NeuroScape'}
 						</span>
 						<span class="ar-subline">{r.subline}</span>
+						{#if r.kind === 'neuroscape' && r.d !== undefined}
+							<span
+								class="ar-semantic-badge"
+								title={`Semantic-only hit — distance ${r.d.toFixed(3)} from nearest lexical match`}
+								data-testid="semantic-only-badge"
+							>✨ d={r.d.toFixed(3)}</span>
+						{/if}
 						{#if cluster}
 							<span class="ar-cluster">
 								<span
@@ -365,6 +483,18 @@
 	}
 	.ar-subline {
 		font-variant-numeric: tabular-nums;
+	}
+	.ar-semantic-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.4rem;
+		font-size: 0.72rem;
+		font-variant-numeric: tabular-nums;
+		border-radius: 9999px;
+		background: var(--accent-soft-bg);
+		color: var(--accent-soft-text);
+		border: 1px solid var(--accent);
 	}
 	.ar-cluster {
 		display: inline-flex;

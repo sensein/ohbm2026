@@ -745,6 +745,7 @@
 				<!-- Wrap the <ul> in a region-roled <div>; putting role="region"
 					 on the <ul> itself strips its implicit list role and axe
 					 then flags the child <li>s as "must be in a <ul>/<ol>". -->
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<div
 					class="cluster-grid-region"
 					tabindex="0"
@@ -778,6 +779,7 @@
 							Most similar
 							<span class="hint">closest 5 shown; scroll for more</span>
 						</h3>
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 						<div class="related-scroll" tabindex="0" role="region" aria-label="Most-similar abstracts list">
 						<ul class="related-list" data-testid="related-nearest-list">
 							{#each nearest as entry, i (entry.abstract.poster_id)}
@@ -868,6 +870,7 @@
 							Most different
 							<span class="hint">farthest 5 shown; scroll for more</span>
 						</h3>
+						<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 						<div class="related-scroll" tabindex="0" role="region" aria-label="Most-different abstracts list">
 						<ul class="related-list" data-testid="related-farthest-list">
 							{#each farthest as entry, i (entry.abstract.poster_id)}
@@ -1596,12 +1599,6 @@
 		display: flex;
 		gap: 0.4rem;
 		align-items: baseline;
-	}
-	.related h2 code {
-		font-size: 0.7rem;
-		text-transform: none;
-		letter-spacing: 0;
-		font-weight: 400;
 	}
 	.related-block {
 		margin-top: 0.4rem;

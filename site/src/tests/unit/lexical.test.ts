@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+	buildTitleIndex,
 	damerauLevenshtein,
 	lexicalSearch,
 	parseQuery,
 	queryForSemantic,
+	searchTitleIndex,
+	seedScores,
 	tokenizeForIndex
 } from '$lib/filter';
 import type { AbstractRecord, AuthorRecord } from '$lib/shards';
@@ -283,5 +286,111 @@ describe('lexicalSearch — OR alternation', () => {
 		// 1001 matches "aging"; 1003 matches the "default mode" phrase
 		// (adjacent in the title "Default mode network in fMRI").
 		expect(r?.ids).toEqual(new Set([1001, 1003]));
+	});
+});
+
+describe('buildTitleIndex + searchTitleIndex (Spec 019 — NeuroScape title search)', () => {
+	const titles = [
+		{ pubmed_id: 10, title: 'Corpus callosum disorders in development' },
+		{ pubmed_id: 11, title: 'Working memory and aging' },
+		{ pubmed_id: 12, title: 'Default mode network in fMRI' },
+		{ pubmed_id: 13, title: 'Memory consolidation during sleep' }
+	];
+	const index = buildTitleIndex(
+		titles,
+		(t) => t.pubmed_id,
+		(t) => t.title
+	);
+
+	it('returns null for an empty query', () => {
+		expect(searchTitleIndex(index, '')).toBeNull();
+		expect(searchTitleIndex(index, '   ')).toBeNull();
+	});
+
+	it('implicit-AND multi-word matches a single title', () => {
+		const r = searchTitleIndex(index, 'corpus callosum disorders');
+		expect(r?.ids).toEqual(new Set([10]));
+	});
+
+	it('single token matches every title containing it', () => {
+		const r = searchTitleIndex(index, 'memory');
+		expect(r?.ids).toEqual(new Set([11, 13]));
+	});
+
+	it('is typo-tolerant via the shared Damerau-Levenshtein ladder', () => {
+		// "memry" (deletion) → "memory"; ≥4-char query, DL budget 1.
+		const r = searchTitleIndex(index, 'memry');
+		expect(r?.ids).toEqual(new Set([11, 13]));
+	});
+
+	it('honors the "exact phrase" operator', () => {
+		const r = searchTitleIndex(index, '"default mode"');
+		expect(r?.hasOperators).toBe(true);
+		expect(r?.ids).toEqual(new Set([12]));
+	});
+
+	it('excludes -negated terms', () => {
+		const r = searchTitleIndex(index, 'memory -aging');
+		expect(r?.ids).toEqual(new Set([13]));
+		expect(r?.negationBlocked.has(11)).toBe(true);
+	});
+
+	it('unions OR groups', () => {
+		const r = searchTitleIndex(index, 'callosum OR sleep');
+		expect(r?.ids).toEqual(new Set([10, 13]));
+	});
+
+	it('caches the index by array identity (same reference returned)', () => {
+		const again = buildTitleIndex(
+			titles,
+			(t) => t.pubmed_id,
+			(t) => t.title
+		);
+		expect(again).toBe(index);
+	});
+});
+
+describe('seedScores (Spec 019 — KNN-fallback union seed selection)', () => {
+	// Words deliberately scattered across DIFFERENT titles: no single title
+	// holds all of corpus+memory+sleep, so searchTitleIndex's AND-intersection
+	// would yield zero. seedScores must still return a seed per matched word.
+	const titles = [
+		{ pubmed_id: 10, title: 'Corpus callosum development' },
+		{ pubmed_id: 11, title: 'Working memory and aging' },
+		{ pubmed_id: 13, title: 'Memory consolidation during sleep' }
+	];
+	const index = buildTitleIndex(
+		titles,
+		(t) => t.pubmed_id,
+		(t) => t.title
+	);
+
+	it('unions across words instead of AND-intersecting (the zero-hit fix)', () => {
+		// The AND path returns nothing for this scattered query…
+		expect(searchTitleIndex(index, 'corpus memory sleep')?.ids).toEqual(new Set());
+		// …but the union seed still surfaces every title matching ≥1 word.
+		const scores = seedScores(index, parseQuery('corpus memory sleep'));
+		expect(new Set(scores.keys())).toEqual(new Set([10, 11, 13]));
+	});
+
+	it('counts distinct query words matched (drives match-count ranking)', () => {
+		// 13 holds both "memory" and "sleep" → 2; 11 holds only "memory" → 1.
+		const scores = seedScores(index, parseQuery('memory sleep'));
+		expect(scores.get(13)).toBe(2);
+		expect(scores.get(11)).toBe(1);
+	});
+
+	it('reuses the shared typo ladder and flattens quoted phrases to words', () => {
+		// Quoted, with a transposition typo in "callosum"; phrase words are
+		// flattened and matched per-word via lookupWord.
+		const scores = seedScores(index, parseQuery('"corpus callsoum"'));
+		expect(scores.get(10)).toBe(2);
+	});
+
+	it('excludes negated clauses so a -term cannot leak a positive seed', () => {
+		const scores = seedScores(index, parseQuery('memory -sleep'));
+		expect(scores.get(11)).toBe(1);
+		expect(scores.has(13)).toBe(true); // 13 still has "memory"
+		expect(scores.get(13)).toBe(1); // but "sleep" was negated, not counted
 	});
 });

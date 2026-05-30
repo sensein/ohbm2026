@@ -30,6 +30,12 @@ class Stage15ExceptionTreeTests(unittest.TestCase):
             exceptions.OhbmProjectionError,
             exceptions.CrossParquetDriftError,
             exceptions.AtlasLinkCheckError,
+            # Spec 019 — semantic-search subtree extends Stage15Error so
+            # existing Stage-15 catchers see Stage-19 errors too.
+            exceptions.Stage19SemanticError,
+            exceptions.EmbeddingComputeError,
+            exceptions.VectorsParquetWriteError,
+            exceptions.VectorsManifestDriftError,
         ):
             with self.subTest(cls=cls.__name__):
                 self.assertTrue(issubclass(cls, exceptions.Stage15Error))
@@ -127,6 +133,53 @@ class AtlasProvenanceErrorContextTests(unittest.TestCase):
         self.assertEqual(err.field, "inputs.ohbm2026_parquet")
         self.assertEqual(err.expected, "<repo-relative>")
         self.assertEqual(err.actual, "/Users/op/abs.parquet")
+
+
+# Spec 019 — semantic-search exception subtree -------------------------------
+
+
+class EmbeddingComputeErrorContextTests(unittest.TestCase):
+    def test_carries_reason_and_n_titles_kwargs(self) -> None:
+        err = exceptions.EmbeddingComputeError(
+            "model download timed out",
+            reason="model_load_timeout",
+            n_titles=461_000,
+        )
+        self.assertEqual(err.reason, "model_load_timeout")
+        self.assertEqual(err.n_titles, 461_000)
+
+
+class VectorsParquetWriteErrorContextTests(unittest.TestCase):
+    def test_carries_path_and_reason_kwargs(self) -> None:
+        err = exceptions.VectorsParquetWriteError(
+            "pubmed_id set mismatch",
+            path="data/outputs/atlas-package__abc12345/neuroscape_vectors.parquet",
+            reason="pubmed_id_set_mismatch",
+        )
+        self.assertEqual(
+            err.path,
+            "data/outputs/atlas-package__abc12345/neuroscape_vectors.parquet",
+        )
+        self.assertEqual(err.reason, "pubmed_id_set_mismatch")
+
+
+class VectorsManifestDriftErrorContextTests(unittest.TestCase):
+    def test_carries_path_and_reason_kwargs(self) -> None:
+        # The matched-pair invariant (research.md R-010): if the
+        # loaded MiniLM file sha256 doesn't equal the value pinned in
+        # the vectors-parquet manifest, the browser-side ranker must
+        # surface this loudly via VectorsManifestDriftError rather
+        # than silently degrading to a different embedding space.
+        err = exceptions.VectorsManifestDriftError(
+            "model sha256 drift",
+            path="https://abstractatlas.brainkb.org/neuroscape_vectors.parquet",
+            reason="model_sha256_mismatch",
+        )
+        self.assertEqual(
+            err.path,
+            "https://abstractatlas.brainkb.org/neuroscape_vectors.parquet",
+        )
+        self.assertEqual(err.reason, "model_sha256_mismatch")
 
 
 if __name__ == "__main__":

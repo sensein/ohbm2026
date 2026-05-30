@@ -86,6 +86,7 @@
 					<span class="facet-count">{options.length}</span>
 				</button>
 				{#if isOpen}
+					<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 					<ul
 						class="options"
 						class:scroll={useScroll}

@@ -211,9 +211,15 @@
 					attachTo: { element: '[data-testid="toggle-cart"]', on: place('bottom') }
 				},
 				{
+					id: 'home-sites',
+					title: 'Three connected sites',
+					text: 'This OHBM 2026 atlas is one of three sibling sites. The ⌂ home icon takes you up to the cross-conference Abstract Atlas, where the OHBM 2026 abstracts are overlaid on the full NeuroScape PubMed corpus (~461k neuroscience articles). From there you can cross into the standalone NeuroScape atlas. Navigation is hub-and-spoke: subsites link up to the root, the root links back down — so the home icon is always your way across.',
+					attachTo: { element: '[data-testid="header-home"]', on: place('bottom') }
+				},
+				{
 					id: 'home-about',
 					title: 'About + methodology',
-					text: 'The "About" link in the header opens a page describing how the data + the AI surfaces are produced — a short lay paragraph per stage, plus a "Technical details" toggle that expands code-grounded specifics (algorithms, parameters, file paths, cache keys). Every external citation is HEAD-checked at build time so the references stay live.',
+					text: 'The "About" link in the header opens a page describing how the data + the AI surfaces are produced — a short lay paragraph per stage, plus a "Technical details" toggle that expands code-grounded specifics (algorithms, parameters, file paths, cache keys). The Changes panel there tracks every major update. Every external citation is HEAD-checked at build time so the references stay live.',
 					attachTo: { element: '[data-testid="header-about-link"]', on: place('bottom') }
 				},
 				{
@@ -347,7 +353,7 @@
 				{
 					id: 'neuro-home',
 					title: 'Cross-conference root',
-					text: 'The home icon in the header is the only way back to the Abstract Atlas landing page — this site is a "spoke" so it doesn\'t link sideways to other corpora. Future subsites would just add another link from the root, no rewiring here.',
+					text: 'The ⌂ home icon connects the three sibling sites. It takes you up to the Abstract Atlas landing page, where this NeuroScape corpus is the backdrop and the OHBM 2026 abstracts are overlaid on top — and from there you can cross into the OHBM 2026 atlas. This site is a "spoke": it links up to the root, never sideways, so the home icon is always the way across. Future subsites just add another link from the root, no rewiring here.',
 					attachTo: { element: '[data-testid="header-home"]', on: place('bottom') }
 				}
 			);
@@ -380,19 +386,21 @@
 	});
 </script>
 
-<style global>
-	.ohbm-shepherd {
+<style>
+	/* Shepherd injects its tour DOM at document.body, outside this
+	   component's scope — these must be :global() to actually apply. */
+	:global(.ohbm-shepherd) {
 		--shepherd-primary: var(--accent, #2c5fa3);
 	}
-	.shepherd-element {
+	:global(.shepherd-element) {
 		border-radius: 6px;
 		max-width: min(28rem, 90vw);
 	}
-	.shepherd-text {
+	:global(.shepherd-text) {
 		font-size: 0.92rem;
 		line-height: 1.55;
 	}
-	.shepherd-button {
+	:global(.shepherd-button) {
 		background: var(--accent);
 		color: var(--accent-text, white);
 		padding: 0.4rem 0.9rem;
@@ -400,7 +408,7 @@
 		border-radius: 4px;
 		margin-right: 0.4rem;
 	}
-	.shepherd-button-secondary {
+	:global(.shepherd-button-secondary) {
 		background: var(--bg-elevated);
 		color: var(--text);
 		border: 1px solid var(--border);

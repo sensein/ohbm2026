@@ -3,8 +3,8 @@
 Orchestrates the ``ohbmcli build-atlas-package`` pipeline: NeuroScape
 release loader → deterministic 2D + 3D UMAP fit → OHBM 2026 projection
 via ``umap.transform`` → k=20 neighbour index → palette assignment →
-backdrop decimation → ``neuroscape.parquet`` + ``atlas.parquet`` writer
-→ provenance JSON.
+quadtree blue-noise LOD backdrop (progressive tiers) →
+``neuroscape.parquet`` + ``atlas.parquet`` writer → provenance JSON.
 
 Module surface is intentionally narrow at scaffold time; sub-modules
 land per Phase-3 tasks (T022 onward in

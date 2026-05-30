@@ -74,10 +74,15 @@ __all__ = [
     "NeuroScapeInputError",
     "UmapFitError",
     "UmapCacheError",
+    "KnnCacheError",
     "OhbmProjectionError",
     "CrossParquetDriftError",
     "AtlasProvenanceError",
     "AtlasLinkCheckError",
+    "Stage19SemanticError",
+    "EmbeddingComputeError",
+    "VectorsParquetWriteError",
+    "VectorsManifestDriftError",
 ]
 
 
@@ -453,6 +458,32 @@ class UmapCacheError(Stage15Error):
         self.reason = reason
 
 
+class KnnCacheError(Stage15Error):
+    """The k-NN neighbour-index on-disk cache is unreadable or
+    inconsistent.
+
+    Raised by :func:`ohbm2026.atlas_package.neighbour_index.build_knn`
+    when a cache entry exists at the expected
+    ``<cache_root>/<state_key>/`` path but cannot be loaded (missing
+    companion array, unreadable ``.npy``, shape mismatch with the
+    requested ``k``). Like :class:`UmapCacheError` the builder treats
+    this as precise + recoverable: delete the offending directory and
+    re-run to recompute the brute-force k-NN cleanly. Carries
+    (``path``, ``reason``).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.path = path
+        self.reason = reason
+
+
 class OhbmProjectionError(Stage15Error):
     """One or more OHBM 2026 abstracts could not be projected into the
     NeuroScape UMAP space.
@@ -551,6 +582,90 @@ class AtlasLinkCheckError(Stage15Error):
         super().__init__(message)
         self.url = url
         self.status = status
+
+
+class Stage19SemanticError(Stage15Error):
+    """Base for any failure originating inside the spec-019 semantic-search
+    build step or browser-side ranker.
+
+    Subclasses `Stage15Error` so any existing Stage-15 catcher catches
+    Stage-19 errors too — the semantic-index step is wired into the
+    `ohbmcli build-atlas-package` orchestrator that Stage 15 established.
+    """
+
+
+class EmbeddingComputeError(Stage19SemanticError):
+    """The corpus-side MiniLM embedding compute failed.
+
+    Raised by ``ohbm2026.atlas_package.vectors_compute`` when
+    sentence-transformers fails to load the pinned model
+    (``Xenova/all-MiniLM-L6-v2``), or inference produces a vector matrix
+    with the wrong shape / non-finite values. Carries (``reason``,
+    ``n_titles``) so the orchestrator can include the failure in
+    provenance.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        n_titles: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.n_titles = n_titles
+
+
+class VectorsParquetWriteError(Stage19SemanticError):
+    """The semantic-vectors parquet writer detected an invariant violation
+    before/during write.
+
+    Raised by ``ohbm2026.atlas_package.semantic_index.write_neuroscape_vectors_parquet``
+    when the set of ``pubmed_id`` rows about to be written does not
+    match the articles table on ``neuroscape.parquet`` (INV-003), or
+    when the per-cluster row-group sort order would defeat predicate
+    pushdown. Carries (``path``, ``reason``) so the message points at
+    the exact file.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.path = path
+        self.reason = reason
+
+
+class VectorsManifestDriftError(Stage19SemanticError):
+    """The browser-side semantic-index manifest drifted from its parent
+    `neuroscape.parquet` manifest, or the loaded MiniLM model's sha256
+    does not match the value pinned in the vectors-parquet manifest.
+
+    The "matched-pair invariant" (research.md R-010): cosine similarity
+    across corpus + query embeddings is only meaningful when both
+    halves use byte-identical model weights. Raised by the browser
+    loader's drift check (extending the existing
+    ``site/src/lib/data_package/loader.ts::verifyAtlasSiblingDrift``
+    pattern) and by the worker's init handshake. Carries (``path``,
+    ``reason``) so the user-visible message can name the offending
+    artifact.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.path = path
+        self.reason = reason
 
 
 class CommunityResolutionDegenerate(Warning):

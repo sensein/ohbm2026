@@ -168,14 +168,60 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/015-neuroscape-context/plan.md`. The companion design
+at `specs/019-neuroscape-semantic-search/plan.md`. The companion design
 artefacts under the same directory — `research.md`, `data-model.md`,
-`contracts/parquet-schemas.md`, `contracts/atlas-root-ui.md`,
-`contracts/cli-build-atlas-package.md`, and `quickstart.md` — pin
-Stage 15: a cross-conference atlas landing page at the bare root
-(replacing the Stage 9 meta-refresh redirect) plus a new NeuroScape
-PubMed subsite at `/neuroscape/`, with the existing `/ohbm2026/`
-site **untouched** beyond a data-loader path string change.
+`contracts/parquet-schemas.md`, `contracts/cli-build-atlas-package.md`,
+`contracts/search-ranking-pipeline.md`,
+`contracts/atlas-root-search-ui.md`, and `quickstart.md` — pin Stage 19:
+the deferred semantic-search lane for `/neuroscape/` plus a new
+cross-conference search bar on atlas-root that ranks OHBM 2026 +
+NeuroScape together. Reuses the existing `/ohbm2026/` Xenova/MiniLM-L6-v2
+worker; adds a cluster-routed + KNN-expansion pipeline that bounds
+per-query cost (~4 MB cold-cache range fetch instead of full 50 MB
+sidecar).
+
+**Per-table range fetch — never download a whole envelope parquet.**
+The nested-envelope parquets (`ohbm2026.parquet`, `neuroscape.parquet`,
+`atlas.parquet`) are written with `row_group_size=1`
+(`_OUTER_PARQUET_KWARGS` in `atlas_package/parquet_writer.py`)
+specifically so a browser can fetch ONE inner table via hyparquet
+predicate pushdown: a `{ table_name: { $eq: '<table>' } }` filter skips
+every other row group via row-group stats, so only that table's blob
+crosses the network (e.g. ~268 KB for `cluster_centroids`, not the 97 MB
+file). The flat `neuroscape_vectors.parquet` sidecar uses the same trick
+on `cluster_id`. When a browser surface needs one table from a sibling
+parquet, range-fetch it — do not download or duplicate the whole file.
+
+**Geometry / identity split (spec 019 follow-up).** `neuroscape.parquet`
+keeps geometry OUT of the `articles` table: `articles` carries only
+identity/search columns (`pubmed_id`, `title`, `year`, `cluster_id`),
+while a standalone `coords` table holds `(pubmed_id, cluster_id, umap_2d,
+umap_3d)`. A self-contained `backdrop_decimated` table (`pubmed_id,
+cluster_id, umap_2d, umap_3d, title, year`) is the default landing
+scatter sample. The TS loader folds `coords` → `articles` after the
+neuroscape full-GET so existing render code (`a.umap_2d` / `a.umap_3d`)
+is unchanged. `atlas.parquet` carries ONLY `manifest` + `ohbm_overlay`
+(the OHBM→NeuroScape projection — the one thing impossible to derive
+from either sibling alone). It deliberately carries NO `cluster_centroids`,
+NO `clusters`, NO backdrop, and NO `cross_pointers` table: atlas-root
+range-fetches the cluster legend (`loadClustersFromNeuroscape`), the
+landing backdrop (`loadBackdropDecimatedFromNeuroscape`), and the
+centroids (`loadClusterCentroidsFromNeuroscape`) from the sibling
+`neuroscape.parquet` (the sibling URL is already known for cache-prefetch
++ drift detection); permalinks are derived from `(kind, id)` in the
+browser. The atlas-root backdrop ships no KNN neighbour graph, so the
+ranker uses an adaptive seed count (`max(topK, TOP_K_SEEDS)` when
+`knnIndex` is empty). NeuroScape minilm vectors embed `title+abstract`
+reusing the OHBM seq-length window + `chunk_mean_pool`. NeuroScape v1.0.1
+build inputs live at `data/inputs/neuroscape-source/v101/` +
+`data/inputs/neuroscape/`; `ohbmcli build-atlas-package` runs locally
+end-to-end (built package under `data/outputs/atlas-package__*/`).
+
+The earlier Stage-15 baseline (the three-sibling-deployment architecture
++ three-parquet data layout this spec extends) is documented in
+`specs/015-neuroscape-context/plan.md` — that plan remains the canonical
+reference for atlas-root, `/ohbm2026/`, and `/neuroscape/` structurally;
+spec 019 only adds the semantic search lane to the existing surfaces.
 
 **Architecture — three sibling deployments on one gh-pages host**:
 `abstractatlas.brainkb.org/` (atlas-root mode; binary "Show OHBM
@@ -185,13 +231,16 @@ by cluster); `/ohbm2026/` (unchanged); `/neuroscape/` (new; full
 project, three build modes via `SITE_MODE` env + `BASE_PATH`.
 
 **Three-parquet data layout**: `ohbm2026.parquet` (renamed from
-`data.parquet`, content-identical), `neuroscape.parquet` (new — full
-NeuroScape 1999–2023 corpus + cluster table + k=20 neighbours +
-lexical search index), `atlas.parquet` (new — landing-page scatter
-rows pointing into the two siblings by stable id; bodies NOT
-duplicated). `atlas.parquet`'s `build_info` embeds the two sibling
-state-keys for drift detection — the browser-side loader surfaces a
-visible error banner on mismatch, never a silent partial scatter.
+`data.parquet`, content-identical), `neuroscape.parquet` (full
+NeuroScape 1999–2023 corpus — `articles` identity/search + `coords`
+geometry + self-contained `backdrop_decimated` + cluster table +
+k=20 neighbours + lexical search index + `cluster_centroids`),
+`atlas.parquet` (slimmed to ONLY `manifest` + `ohbm_overlay`, the
+OHBM→NeuroScape projection; cluster legend / backdrop / centroids are
+range-fetched from the neuroscape sibling, never duplicated).
+`atlas.parquet`'s `build_info` embeds the two sibling state-keys for
+drift detection — the browser-side loader surfaces a visible error
+banner on mismatch, never a silent partial scatter.
 
 **New Python orchestrator `ohbmcli build-atlas-package`** reads the
 NeuroScape v1.0.1 release (HDF5 shards + CSVs + checkpoint, same

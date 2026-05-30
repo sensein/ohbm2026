@@ -307,6 +307,37 @@ export function queryForSemantic(parsed: ParsedQuery): string {
 	return parts.join(' ');
 }
 
+/**
+ * Loose UNION seed scoring for the NeuroScape / atlas-root KNN fallback.
+ *
+ * {@link searchInvertedIndex} AND-intersects the positive words in a bare
+ * multi-word query — correct for ranked search, but far too strict to pick
+ * KNN seeds over a titles-only corpus: a 3-word query like
+ * "corpus callosum disorders" would require one ~10-token title to contain all
+ * three words, which almost never happens → zero seeds → empty fallback. The
+ * seed only needs to be loose enough to drive KNN expansion (the BrowsePanel
+ * applies the full AND/phrase/typo ranking downstream), so this scores each
+ * id by how many DISTINCT query words it contains (≥1 to qualify), reusing the
+ * same per-word typo ladder ({@link lookupWord}) as every other surface.
+ * Negated clauses are excluded, matching {@link queryForSemantic}.
+ */
+export function seedScores(index: InvertedIndex, parsed: ParsedQuery): Map<number, number> {
+	const words: string[] = [];
+	for (const g of parsed.groups) {
+		for (const c of g.clauses) {
+			if (c.negate) continue;
+			if (c.kind === 'word') words.push(c.word);
+			else words.push(...c.words);
+		}
+	}
+	const counts = new Map<number, number>();
+	for (const w of words) {
+		const { all } = lookupWord(w, index);
+		for (const id of all) counts.set(id, (counts.get(id) ?? 0) + 1);
+	}
+	return counts;
+}
+
 // ─── Evaluation ────────────────────────────────────────────────────────────
 
 /** Set of poster_ids whose corpus contains a token within DL threshold of `qword`. */
@@ -453,7 +484,17 @@ export function lexicalSearch(
 		};
 	}
 	const index = buildInvertedIndex(abstracts, authorsById);
+	return searchInvertedIndex(index, parsed);
+}
 
+/**
+ * Generic query evaluation against any prebuilt {@link InvertedIndex}.
+ * Shared by {@link lexicalSearch} (full OHBM abstract corpus) and
+ * {@link searchTitleIndex} (NeuroScape title-only corpus) so both surfaces
+ * apply identical operator + typo-tolerance semantics. `parsed` is taken
+ * pre-parsed so callers can short-circuit empty queries before building work.
+ */
+function searchInvertedIndex(index: InvertedIndex, parsed: ParsedQuery): LexicalResult {
 	const unionIds = new Set<number>();
 	const unionExact = new Map<number, number>();
 	const negationBlocked = new Set<number>();
@@ -498,6 +539,79 @@ export function lexicalSearch(
 		}
 	}
 	return { ids: unionIds, exactness: unionExact, negationBlocked, hasOperators: parsed.hasOperators };
+}
+
+// ─── Title-only index (NeuroScape / atlas-root backdrop) ─────────────────────
+//
+// The NeuroScape backdrop is ~461k articles with only a title + year + cluster.
+// A per-keystroke brute-force scan that ran Damerau-Levenshtein over every
+// title's tokens (461k × ~10 tokens × query words) froze the main thread for
+// ~2s on every debounced query. Building the same inverted index the OHBM
+// search uses collapses that to a vocabulary lookup (`lookupWord` walks the
+// unique-token set, length-prefiltered) plus posting-set unions — milliseconds
+// instead of seconds. Built once on the stable full corpus and cached by array
+// identity, so facet edits and keystrokes reuse it.
+
+export type { InvertedIndex };
+
+const titleIndexCache = new WeakMap<object, InvertedIndex>();
+
+/**
+ * Build (or return cached) inverted index over a title-only corpus. Keyed on
+ * the `items` array identity — pass the stable full backdrop array so the
+ * ~461k-title tokenization runs exactly once per corpus load. `getId` /
+ * `getTitle` adapt whatever record shape the caller holds (e.g. NeuroScape
+ * backdrop points expose `pubmed_id`) without an intermediate `.map()` that
+ * would defeat the identity cache.
+ */
+export function buildTitleIndex<T>(
+	items: ReadonlyArray<T>,
+	getId: (item: T) => number,
+	getTitle: (item: T) => string
+): InvertedIndex {
+	const cached = titleIndexCache.get(items as object);
+	if (cached) return cached;
+	const postings = new Map<string, Set<number>>();
+	const tokenStreams = new Map<number, string[]>();
+	for (const it of items) {
+		const id = getId(it);
+		const stream = tokenizeForIndex(getTitle(it));
+		tokenStreams.set(id, stream);
+		const seen = new Set<string>();
+		for (const tok of stream) {
+			if (seen.has(tok)) continue;
+			seen.add(tok);
+			let postingList = postings.get(tok);
+			if (!postingList) {
+				postingList = new Set();
+				postings.set(tok, postingList);
+			}
+			postingList.add(id);
+		}
+	}
+	const index: InvertedIndex = {
+		tokens: [...postings.keys()],
+		postings,
+		tokenStreams,
+		allIds: new Set(tokenStreams.keys())
+	};
+	titleIndexCache.set(items as object, index);
+	return index;
+}
+
+/**
+ * Run an operator-aware, typo-tolerant query against a prebuilt title index.
+ * Returns `null` for an empty query (caller should fall back to its
+ * unfiltered list). Identical operator semantics to {@link lexicalSearch}.
+ */
+export function searchTitleIndex(index: InvertedIndex, query: string): LexicalResult | null {
+	const trimmed = (query ?? '').trim();
+	if (!trimmed) return null;
+	const parsed = parseQuery(trimmed);
+	if (parsed.groups.length === 0) {
+		return { ids: new Set(), exactness: new Map(), negationBlocked: new Set(), hasOperators: parsed.hasOperators };
+	}
+	return searchInvertedIndex(index, parsed);
 }
 
 interface SearchHaystack {

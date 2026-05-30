@@ -16,6 +16,19 @@
 	// nothing useful, but the rest of the bar still works).
 	export let abstractsByPosterId: Map<number, AbstractRecord> = new Map();
 
+	// Spec 019 — corpus parameterisation (FR-025). The default
+	// `'ohbm2026'` preserves the pre-spec-019 behaviour byte-identically
+	// (T007 regression gate). `'neuroscape'` and `'atlas-root'` are
+	// consumed by the mounts that ship in US1 (T028) and US4 (T044);
+	// the only per-corpus differences are (a) the placeholder text
+	// override below and (b) which `id:` autocomplete source the
+	// downstream `filterSuggestions` call uses (NeuroScape passes a
+	// pubmed-id-keyed map via `abstractsByPosterId` since the map
+	// signature is corpus-agnostic; the dropdown rendering doesn't care
+	// whether the numeric id is a poster_id or a pubmed_id).
+	export let corpus: 'ohbm2026' | 'neuroscape' | 'atlas-root' = 'ohbm2026';
+	export let placeholderOverride: string | null = null;
+
 	// The input value lives in the `searchQuery` store. Binding the
 	// `<input bind:value={$searchQuery}>` directly handles both
 	// directions via Svelte's auto-subscription: user keystrokes
@@ -163,14 +176,14 @@
 -->
 <svelte:window on:keydown={onWindowKeydown} />
 
-<div class="searchbar" role="search">
+<div class="searchbar" role="search" data-corpus={corpus}>
 	<label for="search-input" class="visually-hidden">Search abstracts</label>
 	<input
 		id="search-input"
 		bind:this={inputEl}
 		type="search"
 		bind:value={$searchQuery}
-		placeholder='Search… try "phrase", -exclude, word OR word, id:1234 (typos OK)'
+		placeholder={placeholderOverride ?? 'Search… try "phrase", -exclude, word OR word, id:1234 (typos OK)'}
 		autocomplete="off"
 		spellcheck="false"
 		data-testid="search-input"
@@ -212,6 +225,7 @@
 			data-testid="search-id-listbox"
 		>
 			{#each result.visible as s, i (s.posterId)}
+				<!-- svelte-ignore a11y_click_events_have_key_events -->
 				<li
 					id={`search-id-option-${s.posterId}`}
 					class="id-option"

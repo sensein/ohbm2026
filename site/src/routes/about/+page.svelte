@@ -58,6 +58,123 @@
 			url: 'https://github.com/sensein/ohbm2026'
 		}
 	};
+
+	const repoBase = 'https://github.com/sensein/ohbm2026';
+	const pr = (n: number) => `${repoBase}/pull/${n}`;
+	const commit = (sha: string) => `${repoBase}/commit/${sha}`;
+
+	// CHANGES — reverse-chronological log of major user-visible changes.
+	// MAINTENANCE: prepend a new entry here in the SAME PR that ships the
+	// change. `refs` link to the PR (or a specific commit when there's no
+	// PR). Keep summaries one or two sentences and user-facing — this is a
+	// public changelog, not a commit dump.
+	const changes: Array<{
+		date: string;
+		title: string;
+		summary: string;
+		refs: Array<{ label: string; url: string }>;
+	}> = [
+		{
+			date: '2026-05',
+			title: 'Readable large-corpus map + live loading',
+			summary:
+				'The PubMed backdrop now paints a coarse quadtree tier instantly and refines as finer detail streams in on zoom, with per-point opacity that scales to how many points are on screen so the cloud stays readable at every zoom level. The map opens fitted to the whole corpus, facet toggles (including hiding NeuroScape) clear every layer, and the result count shows a live loading indicator while the full ~461k-article corpus streams in. Cross-site navigation warms sibling data more cheaply.',
+			refs: [
+				{ label: 'PR #47', url: pr(47) },
+				{ label: 'PR #49', url: pr(49) }
+			]
+		},
+		{
+			date: '2026-05',
+			title: 'Cross-conference semantic search',
+			summary:
+				'Semantic search ✨ now runs on the NeuroScape PubMed atlas and the cross-conference root, not just OHBM 2026 — reusing the same in-browser MiniLM model. Search gained Damerau-Levenshtein typo tolerance and a debounced input so typing stays smooth on the 461k-article corpus.',
+			refs: [{ label: 'PR #47', url: pr(47) }]
+		},
+		{
+			date: '2026-05',
+			title: 'Privacy-respecting analytics',
+			summary:
+				'Added Google Analytics gated behind a consent banner that honours Do-Not-Track and Global-Privacy-Control signals; theme variables were fixed so the banner reads correctly in dark mode.',
+			refs: [
+				{ label: 'PR #45', url: pr(45) },
+				{ label: 'PR #46', url: pr(46) }
+			]
+		},
+		{
+			date: '2026-04',
+			title: 'Atlas rebuild + provenance speed-ups',
+			summary:
+				'The UMAP fit is now cached so atlas rebuilds complete in under a minute, and per-abstract AI provenance is plumbed through the parquet manifest.',
+			refs: [
+				{ label: 'PR #43', url: pr(43) },
+				{ label: 'PR #44', url: pr(44) }
+			]
+		},
+		{
+			date: '2026-04',
+			title: 'Large-corpus performance + mobile WebGL',
+			summary:
+				'Performance wins for the 461k-point scatter, a graceful 2D-only fallback when a browser exposes no WebGL, and a bulk "Add N to cart" action on the root + NeuroScape sites.',
+			refs: [
+				{ label: 'PR #40', url: pr(40) },
+				{ label: 'PR #41', url: pr(41) },
+				{ label: 'PR #42', url: pr(42) }
+			]
+		},
+		{
+			date: '2026-03',
+			title: 'Cross-conference atlas + NeuroScape subsite',
+			summary:
+				'Introduced the three-site hub-and-spoke layout: a cross-conference Abstract Atlas landing page, a standalone NeuroScape PubMed atlas (~461k articles, 175 clusters), and the existing OHBM 2026 site — built from one codebase via three site modes, with deep links routed correctly across subsites.',
+			refs: [
+				{ label: 'PR #36', url: pr(36) },
+				{ label: 'PR #37', url: pr(37) },
+				{ label: 'PR #38', url: pr(38) },
+				{ label: 'PR #39', url: pr(39) }
+			]
+		},
+		{
+			date: '2026-02',
+			title: 'Poster-id search navigator',
+			summary:
+				'The search bar gained an id: operator with an autocomplete dropdown to jump straight to a poster by its program id.',
+			refs: [{ label: 'PR #35', url: pr(35) }]
+		},
+		{
+			date: '2026-02',
+			title: 'Book of abstracts (PDF)',
+			summary:
+				'A deterministic book-of-abstracts PDF generator, layout polish, an acknowledgments section, and authoritative standby times wired into the UI with deep links.',
+			refs: [
+				{ label: 'PR #26', url: pr(26) },
+				{ label: 'PR #31', url: pr(31) },
+				{ label: 'PR #34', url: pr(34) }
+			]
+		},
+		{
+			date: '2026-01',
+			title: 'Conference subpaths + single-file data export',
+			summary:
+				'Moved every OHBM 2026 surface under /ohbm2026/ to make room for sibling conferences, and redesigned the data package as a single-file Parquet with a tight schema and a poster-id as the sole user-facing identifier.',
+			refs: [
+				{ label: 'PR #19', url: pr(19) },
+				{ label: 'PR #20', url: pr(20) }
+			]
+		},
+		{
+			date: '2025-12',
+			title: 'Static atlas launch',
+			summary:
+				'First public release: a static SvelteKit site with typo-tolerant lexical + semantic search, a 2D + 3D UMAP with lasso selection, a saved-list cart with email export, a guided tour, and this About page with link-checked references.',
+			refs: [{ label: 'PRs #9–#18', url: `${repoBase}/pulls?q=is%3Apr+is%3Amerged` }]
+		}
+	];
+
+	const sections = [
+		{ id: 'pipeline', label: 'How it works' },
+		{ id: 'changes', label: 'Changes' }
+	];
 </script>
 
 <svelte:head>
@@ -73,6 +190,17 @@
 <div class="about-page">
 	<nav class="back"><a href={`${base}/`}>← back to atlas</a></nav>
 
+	<div class="about-layout">
+		<aside class="about-toc" aria-label="On this page">
+			<p class="toc-label">On this page</p>
+			<nav>
+				{#each sections as s (s.id)}
+					<a href={`#${s.id}`}>{s.label}</a>
+				{/each}
+			</nav>
+		</aside>
+
+		<div class="about-content">
 	<header>
 		{#if SITE_MODE === 'atlas-root'}
 			<h1>About Abstract Atlas</h1>
@@ -81,14 +209,32 @@
 		{:else}
 			<h1>About the OHBM 2026 Atlas</h1>
 		{/if}
-		<p class="lead">
-			A search-and-browse interface for every accepted OHBM 2026 abstract. Each abstract
-			is the submitter's own text; everything else on the site — clusters, related-abstract
-			suggestions, figure interpretations, claim extractions — is computed from those
-			abstracts by an automated pipeline. The pipeline is open-source and reproducible.
-		</p>
+		{#if SITE_MODE === 'atlas-root'}
+			<p class="lead">
+				A search-and-browse interface that places every accepted OHBM 2026 abstract in
+				the context of a neuroscience-wide PubMed literature map. The OHBM abstracts are
+				the submitters' own text; the clusters, related-abstract suggestions, figure
+				interpretations, and claim extractions are computed by an automated pipeline. It
+				is open-source and reproducible.
+			</p>
+		{:else if SITE_MODE === 'neuroscape'}
+			<p class="lead">
+				A search-and-browse interface for the NeuroScape PubMed neuroscience corpus —
+				~461,000 article titles from 1999–2023, clustered into 175 topical groups.
+				Article metadata is fetched live from PubMed; the embedding + clusters come from
+				the NeuroScape model. The atlas pipeline is open-source and reproducible.
+			</p>
+		{:else}
+			<p class="lead">
+				A search-and-browse interface for every accepted OHBM 2026 abstract. Each abstract
+				is the submitter's own text; everything else on the site — clusters, related-abstract
+				suggestions, figure interpretations, claim extractions — is computed from those
+				abstracts by an automated pipeline. The pipeline is open-source and reproducible.
+			</p>
+		{/if}
 	</header>
 
+	<section id="pipeline" class="pipeline-section">
 	<section class="overview">
 		{#if SITE_MODE === 'atlas-root'}
 			<p>
@@ -550,15 +696,37 @@
 						{/if}
 					{:else if stage.key === 'ui'}
 						<p>
-							This site is a static SvelteKit app deployed to GitHub Pages. The data
-							package is a single gzipped tarball fetched from a stable CDN URL at
-							page load — no server, no database, no per-query backend round-trip.
+							Stage 6 turns the pipeline outputs into the browsable atlas — and it
+							now builds <strong>three sibling sites from one SvelteKit codebase</strong>
+							(selected by a build-time site mode): the per-conference OHBM 2026
+							site, the cross-conference <strong>Abstract Atlas</strong> hub, and the
+							neuroscience-wide <strong>NeuroScape PubMed atlas</strong> (~461,000
+							articles, 1999–2023, 175 topic clusters). The hub projects the 3,240
+							OHBM 2026 abstracts into the same UMAP as the NeuroScape corpus, so
+							conference work can be read against the broader neuroscience literature;
+							a toggle shows or hides the OHBM overlay on the PubMed backdrop.
+						</p>
+						<p>
+							Every site is static on GitHub Pages — no server, no database, no
+							per-query backend round-trip. Each one's data is a single-file
+							<strong>Parquet</strong> on a stable CDN URL, and the browser
+							<em>range-fetches one inner table at a time</em> (predicate pushdown
+							over a nested-envelope layout) instead of downloading the whole file.
+							The neuroscience-wide map is far too large to draw at once, so its
+							backdrop paints from a coarse quadtree tier first and refines as finer
+							tiers stream into view on zoom, with per-point opacity that scales to
+							the on-screen density so the cloud stays readable at any zoom.
+						</p>
+						<p>
 							Lexical typo-tolerant search runs in the main thread; semantic search
-							runs in a Web Worker using
+							<span class="ai-pill-demo">✨</span> runs in a Web Worker using
 							<a href={references.minilm.url} target="_blank" rel="noopener noreferrer">
 								MiniLM-L6</a
-							> ONNX through transformers.js, against an int8-quantised vector matrix
-							also shipped in the tarball.
+							> ONNX through transformers.js, against int8-quantised vectors. On the
+							small per-conference corpus it scores every abstract directly; on the
+							461k-article neuroscience map it routes each query to the nearest topic
+							cluster and expands through a precomputed neighbour graph, so it stays
+							fast without holding every vector in memory.
 						</p>
 						<p class="muted">
 							Source: <a href={references.repo.url} target="_blank" rel="noopener noreferrer"
@@ -587,15 +755,36 @@
 										localStorage-backed Svelte store with a system-pref watcher.
 									</li>
 									<li>
-										<strong>Data delivery.</strong> A single gzipped tarball at
-										<code>VITE_DATA_PACKAGE_URL</code> (Dropbox shared link rewritten
-										to <code>dl.dropboxusercontent.com</code> at runtime to avoid the
-										<code>www.dropbox.com</code> 302 that drops CORS). Body is
-										decoded via native <code>DecompressionStream('gzip')</code> + a
-										hand-rolled ~50-line tar parser
-										(<code>site/src/lib/data_package.ts</code>) into a
-										<code>Map&lt;path, JsonValue | Uint8Array&gt;</code> resident in
-										memory.
+										<strong>Data delivery.</strong> Each site loads a single-file
+										<strong>Parquet</strong> from a per-mode URL
+										(<code>VITE_DATA_PACKAGE_URL_OHBM2026 / _NEUROSCAPE / _ATLAS</code>;
+										Dropbox links are rewritten to
+										<code>dl.dropboxusercontent.com</code> at runtime to skip the
+										<code>www.dropbox.com</code> 302 that drops CORS). The parquets use
+										a nested-envelope layout (an outer row per inner table, written
+										<code>row_group_size=1</code>) so the browser can HTTP-range-fetch
+										ONE inner table via hyparquet predicate pushdown — the cluster
+										legend, one quadtree backdrop tier, the OHBM→NeuroScape overlay —
+										instead of pulling the whole ~100&nbsp;MB file. The
+										cross-conference hub range-fetches the NeuroScape backdrop +
+										clusters + overlay from the sibling parquets; nothing is
+										duplicated across files.
+									</li>
+									<li>
+										<strong>Neuroscience-wide map.</strong> A Python orchestrator
+										(<code>ohbmcli build-atlas-package</code>) fits a deterministic 2D
+										+ 3D UMAP on the NeuroScape Stage-2 vectors and projects the OHBM
+										2026 abstracts into it via <code>umap.transform</code>, so the
+										conference overlay and the ~461k PubMed backdrop share one
+										coordinate space. The backdrop is decimated into quadtree
+										blue-noise LOD tiers (a coarse cover paints first, finer tiers
+										stream in on zoom, capped by a viewport budget) and the 3D scene
+										renders a thinned sample to stay interactive. Semantic search on
+										this corpus is cluster-routed: the query embeds, picks the
+										nearest cluster centroid, range-fetches that cluster's int8
+										vectors, brute-forces seeds, then expands through the k=20
+										neighbour graph — bounded per-query cost instead of a full-corpus
+										scan.
 									</li>
 									<li>
 										<strong>Lexical search.</strong>
@@ -712,11 +901,38 @@
 			{/if}
 		</section>
 	{/each}
+	</section>
+
+	<section id="changes" class="changes-section">
+		<h2 class="changes-heading">Changes</h2>
+		<p class="changes-intro">
+			Major user-visible updates, newest first. Each entry links to the pull
+			request (or commit) that shipped it.
+		</p>
+		<ol class="changelog">
+			{#each changes as c (c.title + c.date)}
+				<li class="changelog-entry">
+					<div class="changelog-meta">
+						<time>{c.date}</time>
+						<span class="changelog-refs">
+							{#each c.refs as r (r.url)}
+								<a href={r.url} target="_blank" rel="noopener noreferrer">{r.label}</a>
+							{/each}
+						</span>
+					</div>
+					<h3 class="changelog-title">{c.title}</h3>
+					<p class="changelog-summary">{c.summary}</p>
+				</li>
+			{/each}
+		</ol>
+	</section>
+		</div>
+	</div>
 </div>
 
 <style>
 	.about-page {
-		max-width: 56rem;
+		max-width: 70rem;
 		margin: 0 auto;
 		display: flex;
 		flex-direction: column;
@@ -735,6 +951,142 @@
 		color: var(--accent);
 		text-decoration: none;
 		font-size: 0.9rem;
+	}
+	.about-layout {
+		display: grid;
+		grid-template-columns: 12rem minmax(0, 1fr);
+		gap: 1.5rem;
+		align-items: start;
+	}
+	.about-content {
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.about-toc {
+		position: sticky;
+		top: 1rem;
+		align-self: start;
+	}
+	.about-toc .toc-label {
+		margin: 0 0 0.4rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--text-muted);
+	}
+	.about-toc nav {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+		border-left: 2px solid var(--border);
+	}
+	.about-toc nav a {
+		color: var(--text);
+		text-decoration: none;
+		font-size: 0.88rem;
+		padding: 0.25rem 0.6rem;
+		border-left: 2px solid transparent;
+		margin-left: -2px;
+	}
+	.about-toc nav a:hover {
+		color: var(--accent);
+		border-left-color: var(--accent);
+	}
+	#pipeline,
+	#changes {
+		scroll-margin-top: 1rem;
+	}
+	.pipeline-section {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	@media (max-width: 48rem) {
+		.about-layout {
+			grid-template-columns: 1fr;
+			gap: 0.75rem;
+		}
+		.about-toc {
+			position: static;
+		}
+		.about-toc nav {
+			flex-direction: row;
+			border-left: none;
+			border-bottom: 1px solid var(--border);
+			padding-bottom: 0.4rem;
+		}
+		.about-toc nav a {
+			border-left: none;
+			margin-left: 0;
+		}
+	}
+	.changes-section {
+		border-top: 1px solid var(--border);
+		padding-top: 0.75rem;
+	}
+	.changes-heading {
+		margin: 0 0 0.3rem;
+		font-size: 1.15rem;
+		color: var(--text);
+	}
+	.changes-intro {
+		margin: 0 0 0.85rem;
+		font-size: 0.9rem;
+		line-height: 1.55;
+		color: var(--text-muted);
+	}
+	.changelog {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+	.changelog-entry {
+		border-left: 3px solid var(--accent);
+		padding: 0.1rem 0 0.1rem 0.85rem;
+	}
+	.changelog-meta {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+	.changelog-meta time {
+		font-size: 0.78rem;
+		font-weight: 600;
+		color: var(--text-muted);
+		letter-spacing: 0.03em;
+	}
+	.changelog-refs {
+		display: inline-flex;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.changelog-refs a {
+		font-size: 0.78rem;
+		color: var(--accent);
+		text-decoration: none;
+		white-space: nowrap;
+	}
+	.changelog-refs a:hover {
+		text-decoration: underline;
+	}
+	.changelog-title {
+		margin: 0.2rem 0 0.25rem;
+		font-size: 0.98rem;
+		color: var(--text);
+	}
+	.changelog-summary {
+		margin: 0;
+		font-size: 0.9rem;
+		line-height: 1.6;
+		color: var(--text);
 	}
 	.back a:hover {
 		text-decoration: underline;

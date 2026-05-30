@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { derived, type Readable, writable } from 'svelte/store';
 
 export interface CellSelection {
 	model: string;
@@ -8,6 +8,31 @@ export interface CellSelection {
 export const selectedCell = writable<CellSelection>({ model: 'neuroscape', input: 'abstract' });
 
 export const searchQuery = writable<string>('');
+
+/**
+ * Spec 019 — debounced search query for big-corpus consumers
+ * (`/neuroscape/` 461k + atlas-root cross-conference). The raw
+ * `searchQuery` updates on every keystroke; filter recomputation on
+ * that many rows blocks the main thread + makes typing feel laggy.
+ * Components that filter heavy corpora subscribe to
+ * `$debouncedSearchQuery` instead — typing in the input stays
+ * instant (the input itself binds to `searchQuery`), while the
+ * downstream filter only re-runs after a brief pause.
+ *
+ * 250 ms is the same threshold the OHBM 2026 SearchBar uses for its
+ * `id:` autocomplete debounce; that interval keeps the UI feeling
+ * snappy on desktop while sparing slow keyboards from N intermediate
+ * filter passes.
+ */
+const DEBOUNCE_MS = 250;
+export const debouncedSearchQuery: Readable<string> = derived(
+	searchQuery,
+	($q, set) => {
+		const handle = setTimeout(() => set($q), DEBOUNCE_MS);
+		return () => clearTimeout(handle);
+	},
+	''
+);
 
 export const activeFilters = writable<Map<string, Set<string>>>(new Map());
 

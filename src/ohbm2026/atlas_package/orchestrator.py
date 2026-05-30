@@ -16,7 +16,7 @@ The orchestrator is the single function the
 5. Builds the k=20 neighbour index over the NeuroScape Stage-2
    vectors.
 6. Assigns the deterministic cluster palette.
-7. Per-cluster stratified decimation of the backdrop.
+7. Quadtree blue-noise LOD of the backdrop (progressive tiers).
 8. Writes ``neuroscape.parquet`` + ``atlas.parquet`` + asserts the
    cluster-table cross-parquet invariant.
 9. HEAD-checks the small fixed set of non-PubMed-record URLs.
@@ -44,8 +44,8 @@ from ohbm2026.exceptions import NeuroScapeInputError
 
 from . import (
     cluster_palette as palette_mod,
-    decimation,
     link_check as link_check_mod,
+    lod,
     neighbour_index,
     neuroscape_loader,
     ohbm_projector,
@@ -87,8 +87,18 @@ class AtlasBuildConfig:
     ohbm2026_state_key: str
     output_root: Path
     umap_cache_root: Path
+    # On-disk cache for the brute-force k-NN neighbour index, keyed by
+    # sha256(pmids‖vectors‖k). None ⇒ no cache (recompute every run).
+    # The CLI defaults it to data/cache/atlas-knn so rebuilds with
+    # unchanged inputs skip the ~20-30 min O(n²) search (constitution III).
+    knn_cache_root: Path | None = None
     voyage_bundle_id: str = "voyage_stage2_published"
-    decimated_backdrop_size: int = 50_000
+    # Quadtree LOD resolutions (coarse → fine) for the progressive
+    # landing backdrop. One self-contained ``backdrop_lod{k}`` tier is
+    # emitted per resolution; everything not selected as a tier
+    # representative falls to the rest tier (full corpus, kept only in
+    # ``coords``). See ``lod.assign_lod_levels``.
+    lod_resolutions: tuple[int, ...] = lod.DEFAULT_RESOLUTIONS
     neighbors_k: int = 20
     umap_params_3d: umap_fit.UmapFitParams | None = None
     umap_params_2d: umap_fit.UmapFitParams | None = None
@@ -109,6 +119,12 @@ class AtlasBuildConfig:
     # The provenance JSON always records wall-clock timestamps
     # separately so the audit trail is complete regardless of pin.
     pinned_built_at: str | None = None
+    # Spec 019 — semantic-search index step. Default False to preserve
+    # existing Stage-15 test surface; the CLI defaults to True (per
+    # contracts/cli-build-atlas-package.md §1) when run by operators.
+    semantic_index_enabled: bool = False
+    semantic_cache_root: Path | None = None
+    semantic_model_id: str = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 def _state_key(parts: Sequence[str]) -> str:
@@ -216,19 +232,28 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
     else:
         ohbm_2d = np.empty((0, 2), dtype=np.float32)
 
-    # 5. Neighbour index.
-    knn = neighbour_index.build_knn(pmids, vectors, k=cfg.neighbors_k)
+    # 5. Neighbour index. Cached on disk (like the UMAP fit) so a rebuild
+    # with unchanged vectors skips the brute-force k-NN entirely.
+    knn = neighbour_index.build_knn(
+        pmids, vectors, k=cfg.neighbors_k, cache_root=cfg.knn_cache_root
+    )
 
     # 6. Palette.
     from collections import Counter
     cluster_counts: dict[int, int] = dict(Counter(a.cluster_id for a in articles))
     palette = palette_mod.assign_palette(cluster_counts, primary_size=cfg.primary_palette_size)
 
-    # 7. Decimation.
-    cluster_id_arr = np.array([a.cluster_id for a in articles], dtype=np.int16)
-    decimated_indices = decimation.stratified_sample(
-        cluster_id_arr, target_size=cfg.decimated_backdrop_size, seed=cfg.seed
+    # 7. Quadtree blue-noise LOD over the 2D embedding. Tiebreak by
+    # pubmed_id so the assignment is order-independent + reproducible.
+    # Each cumulative prefix is a blue-noise cover → the backdrop can be
+    # painted coarse-first and refined; the rest tier holds the full-
+    # corpus remainder (kept only in ``coords``).
+    lod_levels = lod.assign_lod_levels(
+        fit2d.embedded,
+        resolutions=cfg.lod_resolutions,
+        tiebreak_keys=pmids,
     )
+    n_backdrop_levels = len(cfg.lod_resolutions)
 
     # 8. Per-OHBM-record nearest-cluster assignment (in UMAP space).
     # For each projected OHBM record, find the nearest backdrop point
@@ -269,12 +294,113 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
     out_root.mkdir(parents=True, exist_ok=True)
     neuroscape_path = out_root / "neuroscape.parquet"
     atlas_path = out_root / "atlas.parquet"
+    vectors_path = out_root / "neuroscape_vectors.parquet"
 
     # Use the pinned timestamp (test path) OR wall clock (production)
     # in the parquet manifests so byte-identity holds across rebuilds
     # when the caller pins.
     manifest_started = cfg.pinned_built_at or started
     manifest_finished = cfg.pinned_built_at or _utcnow()
+
+    # Spec 019 — semantic-index step (optional; default-off in the
+    # AtlasBuildConfig dataclass so existing Stage-15 tests are
+    # unaffected). When enabled, computes corpus MiniLM vectors,
+    # cluster centroids, and emits neuroscape_vectors.parquet
+    # alongside neuroscape.parquet. The semantic_index_provenance
+    # block is folded into the final provenance JSON below (T022).
+    semantic_index_provenance: dict[str, Any] | None = None
+    cluster_centroids: dict[int, np.ndarray] = {}
+    if cfg.semantic_index_enabled:
+        from . import semantic_index, vectors_compute
+
+        # Embed title + abstract (the same field set the /ohbm2026/
+        # corpus vectors use). Abstracts are loaded build-time-only and
+        # never written to neuroscape.parquet (R-015) — they ride into
+        # the INT8 vectors and are then discarded.
+        text_recipe = "title+abstract"
+        abstracts = neuroscape_loader.load_article_abstracts(bundle)
+        article_texts = [
+            f"{a.title}\n\n{abstracts.get(a.pubmed_id, '')}".strip() for a in articles
+        ]
+        sk = vectors_compute.compute_state_key(
+            article_set_hash=neuroscape_state_key,
+            model_id=cfg.semantic_model_id,
+            text_recipe=text_recipe,
+        )
+        cache_root = cfg.semantic_cache_root or (Path("data") / "cache" / "atlas-vectors")
+        vectors_result = vectors_compute.compute_cluster_vectors(
+            article_texts=article_texts,
+            pubmed_ids=[a.pubmed_id for a in articles],
+            cluster_ids=[a.cluster_id for a in articles],
+            state_key=sk,
+            cache_root=cache_root,
+            model_id=cfg.semantic_model_id,
+        )
+        # Compute cluster centroids from dequantised INT8 vectors so
+        # the float32 centroids in neuroscape.parquet are derivable
+        # from the bytes in neuroscape_vectors.parquet (INV-001 +
+        # data-model.md §1 build-side invariant).
+        for cv in vectors_result.clusters:
+            # The mean is L2-renormalised immediately below, so dividing
+            # the INT8 rows by `vectors_result.scale` first is mathematically
+            # redundant (per-row scaling cancels in the unit-norm step).
+            # Skipping it saves a float32 allocation + per-element div across
+            # the cluster (Gemini review on PR #47).
+            mean = cv.vectors_int8.astype(np.float32).mean(axis=0)
+            n = float(np.linalg.norm(mean))
+            cluster_centroids[cv.cluster_id] = (mean / (n if n != 0.0 else 1.0)).astype(np.float32)
+        # Flatten the per-cluster vectors back to a single corpus-wide
+        # arrangement for the semantic-index parquet writer.
+        all_cluster_ids = np.concatenate(
+            [np.full(cv.pubmed_ids.shape[0], cv.cluster_id, dtype=np.int16) for cv in vectors_result.clusters]
+        )
+        all_pubmed_ids = np.concatenate([cv.pubmed_ids for cv in vectors_result.clusters])
+        all_vectors = np.concatenate([cv.vectors_int8 for cv in vectors_result.clusters], axis=0)
+        vectors_manifest = {
+            "schema_version": "semantic_vectors.v1",
+            "corpus": "neuroscape",
+            "state_key": sk,
+            "parent_state_key": neuroscape_state_key,
+            "code_revision": cfg.code_revision,
+            "command_line": cfg.command_line,
+            "seed": cfg.seed,
+            "model_id": cfg.semantic_model_id,
+            "model_sha256": vectors_result.model_sha256,
+            "text_recipe": text_recipe,
+            "vector_dim": vectors_compute.VECTOR_DIM,
+            "quantization": "int8-global-scale",
+            "scale": vectors_result.scale,
+            "max_abs_original": vectors_result.max_abs_original,
+            "n_vectors": int(all_pubmed_ids.shape[0]),
+            "cluster_count": len(vectors_result.clusters),
+            "row_group_size": semantic_index.ROW_GROUP_SIZE,
+            "build_started_utc": manifest_started,
+            "build_finished_utc": manifest_finished,
+        }
+        semantic_index.write_neuroscape_vectors_parquet(
+            out_path=vectors_path,
+            cluster_ids=all_cluster_ids,
+            pubmed_ids=all_pubmed_ids,
+            vectors=all_vectors,
+            expected_pubmed_id_set=[a.pubmed_id for a in articles],
+            manifest=vectors_manifest,
+        )
+        semantic_index_provenance = {
+            "enabled": True,
+            "state_key": sk,
+            "model_id": cfg.semantic_model_id,
+            "model_sha256": vectors_result.model_sha256,
+            "text_recipe": text_recipe,
+            "vector_dim": vectors_compute.VECTOR_DIM,
+            "quantization": "int8-global-scale",
+            "scale": vectors_result.scale,
+            "max_abs_original": vectors_result.max_abs_original,
+            "n_neuroscape_vectors": int(all_pubmed_ids.shape[0]),
+            "n_ohbm_vectors": 0,  # populated when US4 lands
+            "cluster_count": len(vectors_result.clusters),
+            "cache_hits": vectors_result.cache_hits,
+            "cache_misses": vectors_result.cache_misses,
+        }
 
     neuroscape_build_info = {
         "state_key": neuroscape_state_key,
@@ -301,9 +427,12 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
         palette=palette,
         embedded_3d=fit3d.embedded,
         embedded_2d=fit2d.embedded,
+        lod_levels=lod_levels,
+        n_backdrop_levels=n_backdrop_levels,
         knn=knn,
         titles_index_bin=cfg.titles_index_bin,
         titles_index_meta=titles_meta,
+        cluster_centroids=cluster_centroids if cluster_centroids else None,
     )
 
     atlas_build_info = {
@@ -326,13 +455,6 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
             "ohbm2026": cfg.ohbm2026_state_key,
             "neuroscape": neuroscape_state_key,
         },
-        articles=articles,
-        clusters=clusters,
-        cluster_counts=cluster_counts,
-        palette=palette,
-        embedded_3d=fit3d.embedded,
-        embedded_2d=fit2d.embedded,
-        decimated_indices=decimated_indices,
         ohbm_overlay=projection,
         ohbm_overlay_2d=ohbm_2d,
         ohbm_poster_ids=poster_ids,
@@ -340,8 +462,13 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
         ohbm_nearest_cluster=nearest_cluster,
     )
 
-    # 11. Cross-parquet invariant.
-    parquet_writer.assert_cluster_tables_match(neuroscape_path, atlas_path)
+    # 11. Cross-parquet invariant — atlas.parquet must declare the
+    # sibling state-keys it was projected against (browser drift check
+    # depends on these being present + correct).
+    parquet_writer.assert_atlas_sibling_keys(
+        atlas_path,
+        {"ohbm2026": cfg.ohbm2026_state_key, "neuroscape": neuroscape_state_key},
+    )
 
     # 12. Link check.
     link_report: dict[str, Any]
@@ -404,5 +531,28 @@ def build_atlas_package(cfg: AtlasBuildConfig) -> dict[str, Any]:
             "ohbm2026_state_key": cfg.ohbm2026_state_key,
         },
         "link_check": link_report,
+        # Spec 019 follow-up — progressive LOD backdrop. `coverage[k]`
+        # is the fraction of the full corpus's occupied cells (at the
+        # finest reference resolution) already covered by tiers ≤ k —
+        # the quantitative "overall shape maintained" check (VIII).
+        "lod": {
+            "resolutions": list(cfg.lod_resolutions),
+            "n_backdrop_levels": n_backdrop_levels,
+            "backdrop_lod_sizes": [
+                int((lod_levels == k).sum()) for k in range(n_backdrop_levels)
+            ],
+            "rest_tier_size": int((lod_levels >= n_backdrop_levels).sum()),
+            "coverage_reference_resolution": lod.COVERAGE_REFERENCE_RESOLUTION,
+            "coverage": lod.lod_coverage(
+                fit2d.embedded,
+                lod_levels,
+                reference_resolution=lod.COVERAGE_REFERENCE_RESOLUTION,
+            ),
+        },
+        # Spec 019 — semantic-index provenance. Populated only when
+        # cfg.semantic_index_enabled is True; absent (None) means the
+        # builder ran with --no-semantic-index and no vectors parquet
+        # was written.
+        "semantic_index": semantic_index_provenance,
     }
     return provenance

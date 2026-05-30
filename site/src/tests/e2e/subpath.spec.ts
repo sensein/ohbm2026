@@ -51,7 +51,7 @@ test.describe('US1 — subpath canonical', () => {
 		const posterId = await firstCard.getAttribute('data-poster-id');
 		expect(posterId).toBeTruthy();
 		await page.goto(`./abstract/${encodeURIComponent(posterId!)}/`);
-		await expect(page.getByTestId('detail-poster-id')).toBeVisible({ timeout: 5000 });
+		await expect(page.getByTestId('detail-poster-id')).toBeVisible({ timeout: 15_000 });
 		const headerPosterId = (await page.getByTestId('detail-poster-id').textContent())?.trim();
 		expect(headerPosterId).toBe(posterId);
 		expect(page.url()).toMatch(/\/ohbm2026\/abstract\/[^/]+\/?$/);
@@ -138,10 +138,15 @@ test.describe('US2 — direct-load deep-link', () => {
 		const posterId = await card.getAttribute('data-poster-id');
 		expect(posterId).toBeTruthy();
 		await page.goto(`./abstract/${encodeURIComponent(posterId!)}/`);
-		await expect(page.getByTestId('detail-poster-id')).toBeVisible();
+		await expect(page.getByTestId('detail-poster-id')).toBeVisible({ timeout: 15_000 });
 		const before = page.url();
 		await page.reload();
-		await expect(page.getByTestId('detail-poster-id')).toBeVisible();
+		// A hard reload busts in-memory state and re-fetches the full data
+		// package from the (rate-limit-prone) data host before the detail
+		// panel can re-render. The default 5s expect timeout is too tight on
+		// a cold, throttled fetch — give it the same headroom as the initial
+		// data-dependent waits in this file.
+		await expect(page.getByTestId('detail-poster-id')).toBeVisible({ timeout: 30_000 });
 		expect(page.url()).toBe(before);
 	});
 
