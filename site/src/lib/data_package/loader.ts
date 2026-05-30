@@ -1039,6 +1039,38 @@ export async function loadArticlesFromNeuroscape(): Promise<Array<
 }
 
 /**
+ * Spec 019 follow-up — range-fetch the FULL `coords` geometry table
+ * (`pubmed_id, cluster_id, umap_2d, umap_3d, lod_level`) from the sibling
+ * `neuroscape.parquet`. Used by atlas-root ONLY, and only lazily: the
+ * landing scatter renders the LOD sample, but a lasso must find every
+ * abstract in the drawn region — which needs the full 461k coordinates.
+ * atlas-root fetches this on the first lasso (≈11 MB) rather than eagerly,
+ * so a visitor who never lassos never pays for it. `/neuroscape/` already
+ * has the full coords in memory (folded onto `articles`) so it never calls
+ * this. Returns `null` when the sibling URL is unset or the table is
+ * absent (older build) — the caller then falls back to selecting only the
+ * rendered LOD sample and logs loudly (CA-006).
+ */
+export async function loadCoordsFromNeuroscape(): Promise<Array<
+	Record<string, unknown>
+> | null> {
+	const url = neuroscapeSiblingUrl();
+	if (!url) return null;
+	const file = await asyncBufferFromUrl({ url });
+	const outer = (await parquetReadObjects({
+		file,
+		compressors,
+		utf8: false,
+		filter: { table_name: { $eq: 'coords' } }
+	})) as Array<{ table_name?: string; table_bytes?: Uint8Array }>;
+	const match = outer.find((r) => r.table_name === 'coords');
+	if (!match?.table_bytes) return null;
+	const rows = (await decodeBlob(match.table_bytes)) as Array<Record<string, unknown>>;
+	if (rows.length === 0) return null;
+	return rows;
+}
+
+/**
  * Verify that the sibling parquets currently published match what
  * `atlas.parquet` was built against. Returns `{ok: true}` on match,
  * `{ok: false, drift: [...]}` on any mismatch / fetch error so the

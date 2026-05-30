@@ -85,11 +85,13 @@
 		loadClusterCentroidsFromNeuroscape,
 		loadClustersFromNeuroscape,
 		loadArticlesFromNeuroscape,
+		loadCoordsFromNeuroscape,
 		loadBackdropLevelFromNeuroscape,
 		readNeuroscapeBackdropLevelCount,
 		verifyAtlasSiblingDrift,
 		type AtlasDriftEntry
 	} from '$lib/data_package/loader';
+	import { selectIdsInGeometry, type LassoGeometry } from '$lib/geo/lasso_select';
 	import { loadClusterCentroids } from '$lib/shards';
 	// Spec 019 / FR-002 — full cluster-routed semantic ranker. Wired in
 	// when the `neuroscape_vectors.parquet` sidecar URL is configured;
@@ -109,6 +111,7 @@
 	type AtlasBackdropPoint = {
 		pubmed_id: number;
 		cluster_id: number;
+		umap_2d?: [number, number];
 		umap_3d: [number, number, number];
 		title: string;
 		year: number;
@@ -127,6 +130,7 @@
 	type AtlasOverlayPoint = {
 		submission_id: number;
 		poster_id: number;
+		umap_2d?: [number, number];
 		umap_3d: [number, number, number];
 		title: string;
 		nearest_cluster_id: number;
@@ -137,6 +141,9 @@
 		colour_hex: string;
 		palette_tier: 'primary' | 'secondary';
 	};
+	// Minimal shape the lasso point-in-polygon test needs — satisfied by
+	// AtlasBackdropPoint, AtlasOverlayPoint, and the lazily-fetched coords.
+	type CoordPoint = { pubmed_id: number; umap_2d?: [number, number] };
 
 	let manifest: Manifest | null = null;
 	let abstracts: AbstractRecord[] = [];
@@ -666,13 +673,14 @@
 	// lasso region: NeuroScape rows collapse to empty.
 	$: anyLassoActive = atlasLassoOhbmSet.size + atlasLassoNeuroSet.size > 0;
 	$: filteredBackdrop = (() => {
-		// No lasso → the RESULT LIST shows the full facet-filtered corpus
-		// (461k on atlas-root, not the 50k scatter sample). With a lasso
-		// active, only points the user actually drew over are listable, and
-		// those are the rendered scatter points (decimated on atlas-root) — so
-		// the lasso narrows the SCATTER set, not the full corpus.
+		// No lasso → the RESULT LIST shows the full facet-filtered corpus.
+		// With a lasso active, narrow the FULL corpus to the lassoed ids.
+		// Spec 019 follow-up — `atlasLassoNeuroSet` now holds EVERY abstract
+		// whose coordinate fell inside the polygon (point-in-polygon over the
+		// full coords), not just the rendered LOD sample, so the result list
+		// reflects the whole region — not the downsampled subset on screen.
 		if (!anyLassoActive) return listFacetFiltered;
-		return scatterBackdrop.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
+		return listFacetFiltered.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
 	})();
 	// Spec 019 / FR-002 — KNN-expansion semantic search on /neuroscape/
 	// + atlas-root. When `$semanticEnabled` is on AND the debounced
@@ -976,11 +984,63 @@
 		return out;
 	})();
 
-	function onAtlasLasso(
-		ev: CustomEvent<{ ohbm2026_ids: number[]; neuroscape_ids: number[] }>
-	) {
-		atlasLassoOhbmSet = new Set(ev.detail.ohbm2026_ids);
-		atlasLassoNeuroSet = new Set(ev.detail.neuroscape_ids);
+	// Lazily-fetched FULL NeuroScape coords for atlas-root lasso. The
+	// landing scatter renders only the LOD sample, so a lasso must test
+	// its polygon against the whole 461k coordinate set to find every
+	// abstract in the region. /neuroscape/ already holds the full coords
+	// in `atlasBackdrop`; atlas-root fetches the `coords` table (~11 MB)
+	// on the FIRST lasso only. `null` until fetched; a fetch in flight is
+	// tracked so concurrent lassos don't double-fetch.
+	let atlasFullCoords: CoordPoint[] | null = null;
+	let atlasFullCoordsPromise: Promise<CoordPoint[] | null> | null = null;
+
+	async function ensureAtlasFullCoords(): Promise<CoordPoint[] | null> {
+		if (atlasFullCoords) return atlasFullCoords;
+		if (!atlasFullCoordsPromise) {
+			atlasFullCoordsPromise = loadCoordsFromNeuroscape()
+				.then((rows) => {
+					if (!rows || rows.length === 0) {
+						console.warn(
+							'atlas-root: full `coords` unavailable from the NeuroScape sibling — lasso limited to the displayed LOD sample.'
+						);
+						return null;
+					}
+					atlasFullCoords = rows as unknown as CoordPoint[];
+					return atlasFullCoords;
+				})
+				.catch((err) => {
+					console.warn('atlas-root: full `coords` range-fetch failed; lasso limited to the LOD sample:', err);
+					atlasFullCoordsPromise = null; // allow a retry on the next lasso
+					return null;
+				});
+		}
+		return atlasFullCoordsPromise;
+	}
+
+	// Resolve a lasso polygon/box to the selected ids by point-in-polygon
+	// over the FULL corpus (not the rendered LOD sample) — spec 019 follow-up.
+	// OHBM overlay is fully rendered so its own coords suffice; the NeuroScape
+	// backdrop is downsampled, so we test against the full coords: in memory
+	// on /neuroscape/ (`atlasBackdrop`), lazily range-fetched on atlas-root.
+	async function onAtlasLasso(ev: CustomEvent<{ geometry: LassoGeometry }>) {
+		const g = ev.detail.geometry;
+		const getXY = (p: { umap_2d?: [number, number] }) => p.umap_2d;
+		atlasLassoOhbmSet = new Set(
+			selectIdsInGeometry(atlasOverlayPoints, g, (p) => p.poster_id, getXY)
+		);
+		let neuroSource: CoordPoint[];
+		if (SITE_MODE === 'neuroscape') {
+			neuroSource = atlasBackdrop;
+		} else {
+			// atlas-root: prefer the full coords; fall back to the rendered
+			// LOD sample while they load (or if unavailable), then re-resolve
+			// once they land so the selection upgrades to the full region.
+			const full = await ensureAtlasFullCoords();
+			neuroSource = full ?? atlasBackdrop;
+		}
+		atlasLassoNeuroSet = new Set(
+			selectIdsInGeometry(neuroSource, g, (p) => p.pubmed_id, getXY)
+		);
 	}
 
 	function clearAtlasLasso() {
@@ -1027,8 +1087,13 @@
 	// Base sources after lasso (the lasso is global — affects every
 	// facet).
 	$: lassoBackdropPoints = (() => {
-		if (!anyLassoActive) return atlasBackdrop;
-		return atlasBackdrop.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
+		// Facet counts over the FULL corpus (`listCorpus`), not the LOD
+		// scatter sample — so cluster/year counts match the full-region
+		// result list. `listCorpus` carries cluster_id + year and is the
+		// whole corpus on both surfaces (identity table on atlas-root,
+		// the same full array as atlasBackdrop on /neuroscape/).
+		if (!anyLassoActive) return listCorpus;
+		return listCorpus.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
 	})();
 	$: lassoOverlayPoints = (() => {
 		if (!anyLassoActive) return atlasOverlayPoints;

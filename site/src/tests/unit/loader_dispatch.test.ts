@@ -352,6 +352,32 @@ describe('loader atlas-root dispatch (T042)', () => {
 		expect(await loadArticlesFromNeuroscape()).toBeNull();
 	});
 
+	it('range-fetches the FULL coords table from the sibling (atlas-root lasso find-all)', async () => {
+		// atlas-root lazily pulls the full `coords` geometry on the first
+		// lasso so the polygon test covers all 461k abstracts, not just the
+		// rendered LOD sample.
+		__innerByName = {
+			coords: [
+				{ pubmed_id: 100, cluster_id: 0, umap_2d: [1.0, 2.0], umap_3d: [1, 2, 3], lod_level: 0 },
+				{ pubmed_id: 101, cluster_id: 1, umap_2d: [3.0, 4.0], umap_3d: [3, 4, 5], lod_level: 5 }
+			]
+		};
+		__outerNames = ['clusters', 'articles', 'coords', 'backdrop_lod0'];
+		vi.stubEnv('VITE_DATA_PACKAGE_URL_NEUROSCAPE', 'https://example.test/neuroscape.parquet');
+		const { loadCoordsFromNeuroscape } = await import('$lib/data_package/loader');
+		const coords = await loadCoordsFromNeuroscape();
+		expect(coords).not.toBeNull();
+		expect(coords!.length).toBe(2);
+		expect(coords!.map((c) => c.pubmed_id)).toEqual([100, 101]);
+		expect(coords![0].umap_2d).toEqual([1.0, 2.0]);
+	});
+
+	it('returns null from loadCoordsFromNeuroscape when the sibling URL is unset', async () => {
+		vi.stubEnv('VITE_DATA_PACKAGE_URL_NEUROSCAPE', '');
+		const { loadCoordsFromNeuroscape } = await import('$lib/data_package/loader');
+		expect(await loadCoordsFromNeuroscape()).toBeNull();
+	});
+
 	it('leaves ai_provenance keys null when the manifest carries no enrichment attribution', async () => {
 		__innerByName = {
 			manifest: [

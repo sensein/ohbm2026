@@ -4,6 +4,10 @@
 	import { effectiveTheme } from '$lib/stores/theme';
 	import { loadCell, loadTopics, type CellShard, type TopicShard } from '$lib/shards';
 	import type { AbstractRecord } from '$lib/shards';
+	import {
+		geometryFromPlotlySelection,
+		type LassoGeometry
+	} from '$lib/geo/lasso_select';
 
 	/**
 	 * Stage 15 — unified UMAP panel. Drives all three subsites:
@@ -105,7 +109,12 @@
 
 	const dispatch = createEventDispatcher<{
 		pointclick: { kind: 'ohbm2026' | 'neuroscape'; id: number };
-		lassoselect: { ohbm2026_ids: number[]; neuroscape_ids: number[] };
+		// Spec 019 follow-up — dispatch the lasso GEOMETRY (polygon / box)
+		// rather than the rendered points' ids. With the LOD backdrop the
+		// scatter only renders a sample, so the parent runs a point-in-
+		// polygon test against the FULL coords (which it holds) to find
+		// every abstract in the region, not just the drawn sample.
+		lassoselect: { geometry: LassoGeometry };
 		lassoclear: void;
 	}>();
 
@@ -1492,17 +1501,17 @@
 					}
 				});
 				node.on('plotly_selected', (e: unknown) => {
-					const ev = e as { points?: Array<{ customdata?: unknown }> } | null;
-					if (!ev || !ev.points || ev.points.length === 0) return;
-					const ohbm: number[] = [];
-					const neuro: number[] = [];
-					for (const pt of ev.points) {
-						const cd = pt.customdata as { kind?: string; id?: number } | undefined;
-						if (!cd || typeof cd.id !== 'number') continue;
-						if (cd.kind === 'ohbm2026') ohbm.push(cd.id);
-						else if (cd.kind === 'neuroscape') neuro.push(cd.id);
-					}
-					dispatch('lassoselect', { ohbm2026_ids: ohbm, neuroscape_ids: neuro });
+					// Spec 019 follow-up — dispatch the lasso GEOMETRY, not the
+					// rendered points. The backdrop on screen is only the LOD
+					// sample; the parent tests this polygon against the full
+					// coords so the lasso finds every abstract in the region.
+					// Plotly fires a spurious empty `plotly_selected` after its
+					// internal relayout — geometryFromPlotlySelection returns
+					// null for it (no lassoPoints / range), so we ignore it and
+					// DON'T clear (the real clear is `plotly_deselect`).
+					const geometry = geometryFromPlotlySelection(e);
+					if (!geometry) return;
+					dispatch('lassoselect', { geometry });
 				});
 				node.on('plotly_deselect', () => dispatch('lassoclear'));
 				// Zoom-aware backdrop opacity: every pan/zoom emits a
