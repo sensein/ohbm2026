@@ -1,4 +1,4 @@
 {
-  "key": "coords-split",
-  "_comment": "Selects which key of the OHBM2026_UI_DATA_PACKAGE_URLS GitHub Actions variable supplies this branch's parquet URLs (see .github/scripts/resolve-data-channel.sh). This branch (spec 019 semantic-search) ships the coords/identity-split parquet layout, so it points at the 'coords-split' channel rather than 'baseline'. The choice merges with the code: preview, sandbox, and prod for this ref all resolve coords-split."
+  "key": "lod-backdrop",
+  "_comment": "Selects which key of the OHBM2026_UI_DATA_PACKAGE_URLS GitHub Actions variable supplies this branch's parquet URLs (see .github/scripts/resolve-data-channel.sh). The 019-progressive-lod-backdrop branch ships the quadtree-LOD backdrop layout (coords.lod_level + per-tier backdrop_lod0..N) on top of the coords/identity split, so it needs its own channel: 'lod-backdrop' points at the rebuilt neuroscape.parquet + atlas.parquet while reusing the byte-identical ohbm2026.parquet. NOTE: this channel's neuroscape.parquet was built --no-semantic-index (no cluster_centroids table), so semantic search resolves to the KNN-only fallback and neuroscape_vectors is omitted. The choice merges with the code: preview, sandbox, and prod for this ref all resolve lod-backdrop."
 }
