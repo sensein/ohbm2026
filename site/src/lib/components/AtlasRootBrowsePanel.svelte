@@ -17,6 +17,7 @@
 	import { buildTitleIndex, searchTitleIndex, type InvertedIndex } from '$lib/filter';
 	import { cartStore, cartOhbmPosterIds, cartNeuroPubmedIds } from '$lib/stores/cart';
 	import CartIconButton from '$lib/components/CartIconButton.svelte';
+	import InlineLoader from '$lib/components/InlineLoader.svelte';
 
 	type BackdropPoint = {
 		pubmed_id: number;
@@ -42,6 +43,10 @@
 	export let clustersById: Map<number, Cluster> = new Map();
 	export let permalinkFor: (kind: 'ohbm2026' | 'neuroscape', id: number) => string;
 	export let query: string = '';
+	/** True while the full corpus is still streaming in — shows an inline
+	 *  "loading" indicator next to the count so the count growing (seed → full
+	 *  ~461k) reads as progress, not a glitch. */
+	export let loading: boolean = false;
 	/** Spec 019 / FR-002 — KNN-expanded semantic hits for the
 	 *  NeuroScape lane (computed in +page.svelte by walking the per-
 	 *  article nearest_pubmed_ids graph from the lexical seed set).
@@ -293,6 +298,7 @@
 			{#if totalCount > limit}
 				· showing first {limit}
 			{/if}
+			{#if loading}<InlineLoader />{/if}
 		</p>
 		{#if filteredNotInCart.length > 0}
 			<button

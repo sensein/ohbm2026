@@ -13,6 +13,7 @@
 	import { parseIdOperator } from '$lib/goto_poster';
 	import { cartStore, cartNeuroPubmedIds } from '$lib/stores/cart';
 	import CartIconButton from '$lib/components/CartIconButton.svelte';
+	import InlineLoader from '$lib/components/InlineLoader.svelte';
 
 	type Article = {
 		pubmed_id: number;
@@ -33,6 +34,9 @@
 	export let articles: Article[] = [];
 	export let clustersById: Map<number, Cluster> = new Map();
 	export let query: string = '';
+	/** True while the full corpus is still streaming in — shows an inline
+	 *  "loading" indicator next to the count (uniform with atlas-root). */
+	export let loading: boolean = false;
 	/** Spec 019 / FR-002 — when set + non-empty, the panel renders
 	 *  these as additional `✨ Semantic` rows below the lexical hits.
 	 *  Each entry maps a pubmed_id to its KNN distance from the
@@ -182,6 +186,7 @@
 			{#if filtered.length > limit}
 				· showing first {limit}
 			{/if}
+			{#if loading}<InlineLoader />{/if}
 		</p>
 		{#if filteredNotInCart.length > 0}
 			<button

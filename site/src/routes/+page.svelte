@@ -1239,7 +1239,16 @@
 	$: atlasLassoActive = atlasLassoOhbmSet.size + atlasLassoNeuroSet.size > 0;
 	void atlasLassoActive;
 	let atlasLoading = false;
+	// Spec 019 follow-up — true while the FULL search corpus is still streaming
+	// in (the result count starts at the coarse first-paint seed and grows to
+	// the full ~461k once the `articles` table lands in the background). Drives
+	// the inline "loading" indicator next to the result count so the count
+	// visibly updating doesn't look like a glitch. Set true at load start,
+	// cleared when the full corpus is resident (or the load errored — guarded
+	// below).
+	let atlasCorpusLoading = false;
 	let atlasError: string | null = null;
+	$: if (atlasError) atlasCorpusLoading = false;
 	let atlasProgressLoaded = 0;
 	let atlasProgressTotal: number | null = null;
 	// Phase string drives the placeholder label so the parsing window
@@ -1409,9 +1418,16 @@
 					loadArticlesFromNeuroscape(),
 					loadCoordsFromNeuroscape()
 				]);
-				if (!articles) return;
+				if (!articles) {
+					atlasCorpusLoading = false;
+					return;
+				}
 				// Search + result list always get the full corpus.
 				listCorpus = articles as unknown as AtlasBackdropPoint[];
+				// Count is now full — stop the inline loading indicator (the
+				// neighbours wave below only powers the detail "similar" list,
+				// not the count).
+				atlasCorpusLoading = false;
 				refreshNeuroscapeTitleLookup();
 				// The SCATTER only swaps to the full corpus once coords are
 				// folded — articles carry no geometry, so without coords every
@@ -1445,6 +1461,10 @@
 				}
 			} catch (err) {
 				console.warn('neuroscape progressive background load failed:', err);
+			} finally {
+				// Whatever happened, stop the inline loader — on failure the count
+				// just stays at the coarse seed (logged loudly above, CA-006).
+				atlasCorpusLoading = false;
 			}
 		})();
 		return true;
@@ -1454,6 +1474,7 @@
 		if (SITE_MODE === 'ohbm2026') return;
 		if (atlasLoading || atlasBackdrop.length > 0) return;
 		atlasLoading = true;
+		atlasCorpusLoading = true;
 		atlasProgressLoaded = 0;
 		atlasProgressTotal = null;
 		atlasPhase = 'connecting';
@@ -1613,6 +1634,10 @@
 							'atlas-root: full `articles` range-fetch failed; result list limited to the decimated 50k backdrop:',
 							err
 						);
+					})
+					.finally(() => {
+						// Full corpus resident (or failed) — stop the inline loader.
+						atlasCorpusLoading = false;
 					});
 			} else if (SITE_MODE === 'neuroscape') {
 				const articlesShard = pkg.get('data/neuroscape/articles.json') as
@@ -1634,6 +1659,8 @@
 				// are the SAME array — only atlas-root splits them.
 				atlasBackdrop = articlesShard.articles;
 				listCorpus = articlesShard.articles;
+				// Full-GET path already has the whole corpus → count is final.
+				atlasCorpusLoading = false;
 				atlasOverlayPoints = [];
 				atlasClusters = clustersShard.clusters;
 				// Cap the scatter to the representative tiers (hide the
@@ -2126,6 +2153,7 @@
 							articles={filteredBackdrop}
 							clustersById={atlasClustersById}
 							query={$debouncedSearchQuery}
+							loading={atlasCorpusLoading}
 							semanticHits={neuroscapeSemanticHits}
 							searchIndex={titleSearchIndex}
 							on:focus={(ev) => {
@@ -2150,6 +2178,7 @@
 							clustersById={atlasClustersById}
 							permalinkFor={atlasPermalink}
 							query={$debouncedSearchQuery}
+							loading={atlasCorpusLoading}
 							semanticHits={neuroscapeSemanticHits}
 							searchIndex={titleSearchIndex}
 							on:select={(ev) => {
