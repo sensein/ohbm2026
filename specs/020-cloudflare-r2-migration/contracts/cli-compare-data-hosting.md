@@ -39,14 +39,23 @@ pairs per artifact may be passed directly for ad-hoc comparison.
 
 1. **Range**: `GET` with `Range: bytes=0-<range-bytes-1>`. Pass = `206` + a
    `Content-Range` whose length matches. `200` (range ignored) = **fail**.
-2. **CORS**: `GET` (and `OPTIONS` preflight) with `Origin: <origin>` + a `Range`
-   request header. Pass = response carries `Access-Control-Allow-Origin` equal
-   to `<origin>` or `*`.
-3. **Byte-parity**: unless `--trust-recorded-sha256`, stream-download both URLs,
+2. **CORS (range GET)**: `GET` with `Origin: <origin>` + a `Range` request
+   header. Pass = response carries `Access-Control-Allow-Origin` equal to
+   `<origin>` or `*`.
+3. **CORS (revalidation)** — `revalidation_cors`: an `OPTIONS` preflight for the
+   browser cache's conditional `HEAD` + `If-None-Match` revalidation
+   (`Access-Control-Request-Method: HEAD`, `Access-Control-Request-Headers:
+   if-none-match`). Pass = `2xx/3xx` + matching `Access-Control-Allow-Origin` +
+   `HEAD` in `Access-Control-Allow-Methods` + `if-none-match` (or `*`) in
+   `Access-Control-Allow-Headers`. This is a SEPARATE preflight from the range
+   GET — a plain GET passing CORS does NOT imply it (the gap that let a
+   missing-`If-None-Match` bucket rule ship and freeze warm-cache reloads).
+4. **Byte-parity**: unless `--trust-recorded-sha256`, stream-download both URLs,
    sha256 each, compare. With the flag, compare recorded `sha256` values / R2
    key. Pass = hashes equal.
-4. **Latency**: wall-time of the range probe, recorded (informational only).
-5. Aggregate into `ArtifactComparison.pass` and the report's `overall_pass`.
+5. **Latency**: wall-time of the range probe, recorded (informational only).
+6. Aggregate into `ArtifactComparison.pass` (byte-parity ∧ R2 range ∧ R2 CORS ∧
+   R2 revalidation_cors ∧ R2 reachable) and the report's `overall_pass`.
 
 A probe verdict that fails is **recorded** (`error` set), never omitted
 (FR-015). A probe that cannot be attempted at all (malformed URL, channel

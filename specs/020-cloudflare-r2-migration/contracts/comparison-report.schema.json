@@ -55,6 +55,7 @@
         "status",
         "range_supported",
         "cors_allowed",
+        "revalidation_cors",
         "latency_ms",
         "error"
       ],
@@ -65,6 +66,10 @@
         "status": { "type": ["integer", "null"] },
         "range_supported": { "type": "boolean" },
         "cors_allowed": { "type": "boolean" },
+        "revalidation_cors": {
+          "type": "boolean",
+          "description": "CORS preflight for the conditional HEAD + If-None-Match revalidation the browser cache layer issues; a plain-GET CORS pass does not imply this."
+        },
         "latency_ms": { "type": ["number", "null"], "minimum": 0 },
         "error": {
           "type": ["string", "null"],

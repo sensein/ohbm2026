@@ -25,8 +25,8 @@ SCHEMA_VERSION = "data_hosting_comparison.v1"
 _ORDER = ("ohbm2026", "neuroscape", "atlas", "neuroscape_vectors")
 _REACHABLE_STATUSES = {200, 206, 301, 302, 303, 307, 308}
 
-#: http_get(url, headers) -> response with .status_code, .headers, .content
-HttpGet = Callable[[str, dict], object]
+#: http_request(method, url, headers) -> response with .status_code, .headers, .content
+HttpRequest = Callable[[str, str, dict], object]
 
 
 @dataclass
@@ -37,6 +37,11 @@ class EndpointProbe:
     status: Optional[int]
     range_supported: bool
     cors_allowed: bool
+    # CORS preflight for the browser cache's conditional revalidation
+    # (HEAD + If-None-Match). A plain GET passing CORS does NOT imply this
+    # passes — they're separate preflights (this is the gap that let the
+    # If-None-Match CORS failure ship; see r2-storage-layout.md).
+    revalidation_cors: bool
     latency_ms: Optional[float]
     error: Optional[str]
 
@@ -48,6 +53,7 @@ class EndpointProbe:
             "status": self.status,
             "range_supported": self.range_supported,
             "cors_allowed": self.cors_allowed,
+            "revalidation_cors": self.revalidation_cors,
             "latency_ms": self.latency_ms,
             "error": self.error,
         }
@@ -103,10 +109,10 @@ def _header(headers, name: str) -> Optional[str]:
     return lowered.get(name.lower())
 
 
-def _default_http_get(url: str, headers: dict):
+def _default_http_request(method: str, url: str, headers: dict):
     import requests
 
-    return requests.get(url, headers=headers, timeout=30)
+    return requests.request(method, url, headers=headers, timeout=30)
 
 
 def probe_endpoint(
@@ -116,7 +122,7 @@ def probe_endpoint(
     range_bytes: int = 100,
     compute_sha: bool = True,
     recorded_sha256: Optional[str] = None,
-    http_get: HttpGet = _default_http_get,
+    http_request: HttpRequest = _default_http_request,
 ) -> EndpointProbe:
     """Probe one URL for reachability, Range support, CORS, and (optionally)
     its content hash.
@@ -138,12 +144,14 @@ def probe_endpoint(
     reachable = False
     range_supported = False
     cors_allowed = False
+    revalidation_cors = False
     latency_ms: Optional[float] = None
     error: Optional[str] = None
 
     started = time.perf_counter()
     try:
-        resp = http_get(
+        resp = http_request(
+            "GET",
             url,
             {"Range": f"bytes=0-{range_bytes - 1}", "Origin": origin},
         )
@@ -163,6 +171,42 @@ def probe_endpoint(
     except Exception as exc:  # noqa: BLE001 — a network/HTTP failure is a RECORDED verdict, not a raise
         error = f"{type(exc).__name__}: {exc}"
 
+    # CORS preflight for the browser cache's conditional revalidation:
+    # an OPTIONS for a `HEAD` + `If-None-Match` request. A plain GET passing
+    # CORS does NOT cover this — they're separate preflights, and the
+    # If-None-Match one is what the loader's cache layer (cache.ts) actually
+    # issues on a warm-cache reload. Probing it here closes the gap that let
+    # the missing-`If-None-Match` CORS rule ship undetected.
+    try:
+        pf = http_request(
+            "OPTIONS",
+            url,
+            {
+                "Origin": origin,
+                "Access-Control-Request-Method": "HEAD",
+                "Access-Control-Request-Headers": "if-none-match",
+            },
+        )
+        pf_status = int(getattr(pf, "status_code"))
+        pf_acao = _header(pf.headers, "access-control-allow-origin")
+        pf_methods = (_header(pf.headers, "access-control-allow-methods") or "").upper()
+        pf_headers = (_header(pf.headers, "access-control-allow-headers") or "").lower()
+        revalidation_cors = (
+            200 <= pf_status < 400
+            and pf_acao in ("*", origin)
+            and "HEAD" in pf_methods
+            and ("if-none-match" in pf_headers or "*" in pf_headers)
+        )
+        if reachable and not revalidation_cors:
+            rv = (
+                f"revalidation preflight not allowed (status={pf_status}, "
+                f"acao={pf_acao!r}, allow-headers={pf_headers!r})"
+            )
+            error = f"{error} | {rv}" if error else rv
+    except Exception as exc:  # noqa: BLE001 — recorded, not raised
+        rv = f"revalidation preflight failed: {type(exc).__name__}: {exc}"
+        error = f"{error} | {rv}" if error else rv
+
     # Verify byte-parity whenever the URL is REACHABLE — a CORS or Range
     # failure doesn't affect file integrity, so it must not block the hash
     # check (PR #53 review). Any download failure is appended to `error`,
@@ -171,7 +215,7 @@ def probe_endpoint(
     sha256: Optional[str] = None
     if compute_sha and reachable:
         try:
-            full = http_get(url, {"Origin": origin})
+            full = http_request("GET", url, {"Origin": origin})
             sha256 = hashlib.sha256(getattr(full, "content")).hexdigest()
         except Exception as exc:  # noqa: BLE001 — recorded, not raised
             sha_err = f"sha256 download failed: {type(exc).__name__}: {exc}"
@@ -184,6 +228,7 @@ def probe_endpoint(
         status=status,
         range_supported=range_supported,
         cors_allowed=cors_allowed,
+        revalidation_cors=revalidation_cors,
         latency_ms=latency_ms,
         error=error,
     )
@@ -199,7 +244,7 @@ def compare_channels(
     r2_channel_key: str = "",
     range_bytes: int = 100,
     trust_recorded_sha256: bool = False,
-    http_get: Optional[HttpGet] = None,
+    http_request: Optional[HttpRequest] = None,
 ) -> ComparisonReport:
     """Compare two registry channels and return a :class:`ComparisonReport`.
 
@@ -207,18 +252,18 @@ def compare_channels(
     present in only ONE channel is unattemptable →
     :class:`HostingComparisonError`.
 
-    When ``http_get`` is not injected, a shared :class:`requests.Session` is
-    used so the up-to-16 probes reuse one TCP/TLS connection (keep-alive)
-    instead of reconnecting per request (PR #53 review). The session's
-    connection pool is released when the function returns (single CLI use).
+    When ``http_request`` is not injected, a shared :class:`requests.Session`
+    is used so the probes reuse one TCP/TLS connection (keep-alive) instead of
+    reconnecting per request (PR #53 review). The session's connection pool is
+    released when the function returns (single CLI use).
     """
 
-    if http_get is None:
+    if http_request is None:
         import requests
 
         _session = requests.Session()
-        http_get = lambda url, headers: _session.get(  # noqa: E731
-            url, headers=headers, timeout=30
+        http_request = lambda method, url, headers: _session.request(  # noqa: E731
+            method, url, headers=headers, timeout=30
         )
 
     comparisons: list[ArtifactComparison] = []
@@ -242,7 +287,7 @@ def compare_channels(
             range_bytes=range_bytes,
             compute_sha=not trust_recorded_sha256,
             recorded_sha256=d.get("sha256"),
-            http_get=http_get,
+            http_request=http_request,
         )
         r_probe = probe_endpoint(
             r["url"],
@@ -250,7 +295,7 @@ def compare_channels(
             range_bytes=range_bytes,
             compute_sha=not trust_recorded_sha256,
             recorded_sha256=r.get("sha256"),
-            http_get=http_get,
+            http_request=http_request,
         )
 
         d_sha = d_probe.sha256 or d.get("sha256")
@@ -260,6 +305,7 @@ def compare_channels(
             byte_parity
             and r_probe.range_supported
             and r_probe.cors_allowed
+            and r_probe.revalidation_cors
             and r_probe.reachable
         )
         comparisons.append(
