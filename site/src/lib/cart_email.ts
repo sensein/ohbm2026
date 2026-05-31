@@ -43,73 +43,110 @@ function siblingPermalink(siteRoot: string, kind: 'ohbm2026' | 'neuroscape', id:
 }
 
 /**
- * Plain-text rendering for a mixed-kind cart. Each row gets the
- * same four-line block as the OHBM-only formatter, with a
- * `[OHBM 2026]` / `[NeuroScape]` kind tag in the headline so the
- * recipient can spot which corpus each item came from.
+ * Build the cart-restore deep-link for a mixed-kind cart, GROUPED by kind so
+ * the URL stays compact AND extends to any future conference/year. Format:
+ *
+ *   <root>/?cart=ohbm2026:42,101+neuroscape:123,456
+ *
+ * — each kind appears ONCE, followed by its comma-separated ids; groups are
+ * joined with `+`. This mirrors the cart store's own `kind:id` key space, so
+ * adding a new corpus (e.g. `ohbm2027`) needs no URL-scheme change. The home
+ * route's `?cart=` handler parses this back into `cartStore.addManyItems`
+ * (and still accepts the legacy bare-number `?cart=0042,0101` = ohbm2026).
+ */
+export function buildUnifiedCartRestoreUrl(items: UnifiedCartRow[], siteRoot: string): string {
+	// A Set per kind so duplicate ids never bloat the URL. The cart store
+	// already dedups by `kind:id`, so this is defensive — but it keeps the
+	// restore link minimal regardless of the input. Set preserves insertion
+	// order, so group + id ordering stays stable.
+	const byKind = new Map<string, Set<number>>();
+	for (const r of items) {
+		if (!Number.isFinite(r.id) || r.id <= 0) continue;
+		let ids = byKind.get(r.kind);
+		if (!ids) byKind.set(r.kind, (ids = new Set<number>()));
+		ids.add(r.id);
+	}
+	const groups = [...byKind.entries()].map(([kind, ids]) => `${kind}:${[...ids].join(',')}`);
+	const base = trimSlash(siteRoot);
+	return groups.length ? `${base}/?cart=${groups.join('+')}` : `${base}/`;
+}
+
+/** One numbered four-line block for a unified cart row, with a
+ *  `[OHBM 2026]` / `[NeuroScape]` kind tag (shared by the email + clipboard
+ *  formatters). */
+function unifiedBlock(r: UnifiedCartRow, root: string, index: number): string {
+	const tag = r.kind === 'ohbm2026' ? 'OHBM 2026' : 'NeuroScape';
+	const id = r.kind === 'ohbm2026' ? String(r.id).padStart(4, '0') : `PMID ${r.id}`;
+	const url = siblingPermalink(root, r.kind, r.id);
+	const lines: string[] = [`${index + 1}. [${tag} · ${id}] ${r.title}`];
+	if (r.subline) lines.push(`   — ${r.subline}`);
+	lines.push(`   → Open: ${url}`);
+	return lines.join('\n');
+}
+
+/**
+ * Greedy-fit a mailto body: keep as many per-item blocks as fit under
+ * `MAX_MAILTO_LENGTH`, trimming from the TAIL with a "+N more" marker rather
+ * than dropping the whole list. The header carries the ★ restore link, so even
+ * a fully-trimmed body (shown === 0) recovers the entire cart in one click.
+ * Returns the chosen body string (caller wraps it in the subject part).
+ */
+function fitMailtoBody(opts: {
+	subjectPart: string;
+	header: string;
+	intro: string;
+	footer: string;
+	blocks: string[];
+	totalItems: number;
+}): string {
+	const moreMarker = (n: number) =>
+		`\n\n…(${n} more item${n === 1 ? '' : 's'} not shown — open the ★ link above to restore the full cart, or use the "Copy" button for the complete list)`;
+	for (let shown = opts.blocks.length; shown >= 0; shown--) {
+		const more = opts.totalItems - shown;
+		const listPart = shown > 0 ? opts.intro + opts.blocks.slice(0, shown).join('\n\n') : '';
+		const body = opts.header + listPart + (more > 0 ? moreMarker(more) : '') + opts.footer;
+		if (shown === 0 || (opts.subjectPart + encodeURIComponent(body)).length <= MAX_MAILTO_LENGTH) {
+			return body;
+		}
+	}
+	return opts.header + opts.footer; // unreachable — the shown===0 case always returns
+}
+
+/**
+ * Plain-text rendering for a mixed-kind cart (clipboard). No length budget, so
+ * it includes EVERY item; leads with the ★ restore link for one-click rebuild.
  */
 export function buildUnifiedPlainTextList(items: UnifiedCartRow[], siteRoot: string): string {
 	const root = trimSlash(siteRoot);
+	const restoreUrl = buildUnifiedCartRestoreUrl(items, root);
+	const n = items.length;
 	const header =
-		`Saved abstracts from Abstract Atlas (${items.length} item${items.length === 1 ? '' : 's'}).\n\n` +
+		`Saved abstracts from Abstract Atlas (${n} item${n === 1 ? '' : 's'}).\n\n` +
+		`★ Open all ${n} item${n === 1 ? '' : 's'} in the Atlas (restores the cart): ${restoreUrl}\n\n` +
 		`Each entry below has an "Open:" link that lands directly on its full-detail page.\n\n`;
-	const blocks = items.map((r, i) => {
-		const tag = r.kind === 'ohbm2026' ? 'OHBM 2026' : 'NeuroScape';
-		const id =
-			r.kind === 'ohbm2026'
-				? String(r.id).padStart(4, '0')
-				: `PMID ${r.id}`;
-		const url = siblingPermalink(root, r.kind, r.id);
-		const lines: string[] = [`${i + 1}. [${tag} · ${id}] ${r.title}`];
-		if (r.subline) lines.push(`   — ${r.subline}`);
-		lines.push(`   → Open: ${url}`);
-		return lines.join('\n');
-	});
+	const blocks = items.map((r, i) => unifiedBlock(r, root, i));
 	return header + blocks.join('\n\n') + `\n\n— Browse the atlas at ${root}/`;
 }
 
 /**
- * Mailto: URL for a mixed-kind cart. Same length-budget logic as the
- * OHBM-only `buildMailtoLink`: full body up to `MAX_EMAIL_ITEMS` rows;
- * compact body (no per-item list, just a copy hint) when the full body
- * would push the URL past `MAX_MAILTO_LENGTH`.
+ * Mailto: URL for a mixed-kind cart. Leads with the ★ restore link (so the cart
+ * is recoverable even when the body is trimmed), then fits as many per-item
+ * blocks as the URL budget allows (tail-trimmed with a "+N more" marker).
  */
 export function buildUnifiedMailtoLink(items: UnifiedCartRow[], siteRoot: string): string {
 	const subject = 'My Abstract Atlas saved list';
 	const subjectPart = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=';
 	const root = trimSlash(siteRoot);
+	const restoreUrl = buildUnifiedCartRestoreUrl(items, root);
+	const n = items.length;
 	const header =
-		`Saved abstracts from Abstract Atlas (${items.length} item${items.length === 1 ? '' : 's'}).\n\n`;
+		`Saved abstracts from Abstract Atlas (${n} item${n === 1 ? '' : 's'}).\n\n` +
+		`★ Open all ${n} item${n === 1 ? '' : 's'} in the Atlas (restores the cart): ${restoreUrl}\n\n`;
+	const intro = `Each entry below has an "Open:" link that lands directly on its full-detail page.\n\n`;
 	const footer = `\n\n— Browse the atlas at ${root}/`;
-	const visibleCount = Math.min(items.length, MAX_EMAIL_ITEMS);
-	const allItemsFit = items.length <= MAX_EMAIL_ITEMS;
-	const blocks = items.slice(0, visibleCount).map((r, i) => {
-		const tag = r.kind === 'ohbm2026' ? 'OHBM 2026' : 'NeuroScape';
-		const id =
-			r.kind === 'ohbm2026' ? String(r.id).padStart(4, '0') : `PMID ${r.id}`;
-		const url = siblingPermalink(root, r.kind, r.id);
-		const lines: string[] = [`${i + 1}. [${tag} · ${id}] ${r.title}`];
-		if (r.subline) lines.push(`   — ${r.subline}`);
-		lines.push(`   → Open: ${url}`);
-		return lines.join('\n');
-	});
-	const truncation = !allItemsFit
-		? `\n\n…(${items.length - visibleCount} more items not shown — use the "Copy" button to export the full list)`
-		: '';
-	const fullBody =
-		header +
-		`Each entry below has an "Open:" link that lands directly on its full-detail page.\n\n` +
-		blocks.join('\n\n') +
-		truncation +
-		footer;
-	const fullUrl = subjectPart + encodeURIComponent(fullBody);
-	if (fullUrl.length <= MAX_MAILTO_LENGTH) return fullUrl;
-	// Compact body — no per-item list.
-	const compactBody =
-		header +
-		`(This cart is too large to fit the full list in an email. Use the "Copy" button on the cart drawer to copy every item as plain text — the clipboard has no length limit.)` +
-		footer;
-	return subjectPart + encodeURIComponent(compactBody);
+	const blocks = items.slice(0, MAX_EMAIL_ITEMS).map((r, i) => unifiedBlock(r, root, i));
+	const body = fitMailtoBody({ subjectPart, header, intro, footer, blocks, totalItems: n });
+	return subjectPart + encodeURIComponent(body);
 }
 
 /** Item-based cap for the email body. Beyond this many items the

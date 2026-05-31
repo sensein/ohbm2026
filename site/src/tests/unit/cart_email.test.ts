@@ -2,9 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
 	buildMailtoLink,
 	buildPlainTextList,
-	MAX_MAILTO_LENGTH
+	buildUnifiedMailtoLink,
+	buildUnifiedPlainTextList,
+	buildUnifiedCartRestoreUrl,
+	MAX_MAILTO_LENGTH,
+	type UnifiedCartRow
 } from '$lib/cart_email';
 import type { AbstractRecord } from '$lib/shards';
+
+function urow(kind: 'ohbm2026' | 'neuroscape', id: number, title = 'Untitled'): UnifiedCartRow {
+	return { kind, id, title, subline: '' };
+}
 
 function rec(posterId: number, title: string): AbstractRecord {
 	return {
@@ -118,5 +126,94 @@ describe('buildPlainTextList', () => {
 		expect(txt).toContain(pad(101));
 		expect(txt).toContain('Memory in aging');
 		expect(txt).toContain(`https://example.org/abstract/${pad(101)}/`);
+	});
+});
+
+describe('buildUnifiedCartRestoreUrl — grouped, extensible kind:id format', () => {
+	it('groups ids by kind, one prefix per kind, groups joined by +', () => {
+		const url = buildUnifiedCartRestoreUrl(
+			[
+				urow('ohbm2026', 42, 'a'),
+				urow('neuroscape', 123, 'b'),
+				urow('ohbm2026', 101, 'c'),
+				urow('neuroscape', 456, 'd')
+			],
+			'https://example.org/'
+		);
+		// Each kind appears ONCE (not repeated per item); ids comma-joined.
+		expect(url).toBe('https://example.org/?cart=ohbm2026:42,101+neuroscape:123,456');
+	});
+
+	it('emits a single group when the cart is one kind', () => {
+		expect(buildUnifiedCartRestoreUrl([urow('neuroscape', 9)], 'https://x.org')).toBe(
+			'https://x.org/?cart=neuroscape:9'
+		);
+	});
+
+	it('deduplicates repeated ids per kind so the URL stays compact', () => {
+		const url = buildUnifiedCartRestoreUrl(
+			[urow('ohbm2026', 42), urow('ohbm2026', 42), urow('neuroscape', 7), urow('ohbm2026', 101)],
+			'https://x.org'
+		);
+		expect(url).toBe('https://x.org/?cart=ohbm2026:42,101+neuroscape:7');
+	});
+
+	it('drops non-positive / non-finite ids and returns the bare root for an empty cart', () => {
+		expect(buildUnifiedCartRestoreUrl([], 'https://x.org/')).toBe('https://x.org/');
+		expect(
+			buildUnifiedCartRestoreUrl([urow('ohbm2026', 0), urow('ohbm2026', 7)], 'https://x.org')
+		).toBe('https://x.org/?cart=ohbm2026:7');
+	});
+});
+
+describe('buildUnifiedMailtoLink — restore link + greedy tail-trim', () => {
+	function urows(kind: 'ohbm2026' | 'neuroscape', n: number, base = 100): UnifiedCartRow[] {
+		return Array.from({ length: n }, (_, i) =>
+			urow(kind, base + i, `A reasonably long neuroscience abstract title number ${i} about memory`)
+		);
+	}
+
+	it('always embeds the grouped ★ restore link (recoverable even when trimmed)', () => {
+		const big = urows('neuroscape', 400);
+		const url = buildUnifiedMailtoLink(big, 'https://example.org');
+		expect(url.length).toBeLessThanOrEqual(MAX_MAILTO_LENGTH);
+		const body = decodeURIComponent(url.split('&body=')[1]);
+		expect(body).toContain('restores the cart');
+		expect(body).toMatch(/\?cart=neuroscape:\d+(,\d+)+/);
+		// Body was trimmed but NOT emptied of the restore affordance.
+		expect(body).toContain('more item');
+	});
+
+	it('keeps as many per-item rows as fit, trimming from the tail (not drop-all)', () => {
+		const big = urows('neuroscape', 400);
+		const url = buildUnifiedMailtoLink(big, 'https://example.org');
+		const body = decodeURIComponent(url.split('&body=')[1]);
+		// At least the first item survives (greedy-fit), unlike the old
+		// all-or-nothing compact form.
+		expect(body).toContain('1. [NeuroScape · PMID 100]');
+		expect(body).toContain('→ Open: https://example.org/neuroscape/abstract/100/');
+	});
+
+	it('includes the full list (no "more" marker) when it fits the budget', () => {
+		const small = [urow('ohbm2026', 42, 'Memory'), urow('neuroscape', 123, 'Vision')];
+		const url = buildUnifiedMailtoLink(small, 'https://example.org');
+		const body = decodeURIComponent(url.split('&body=')[1]);
+		expect(body).not.toContain('more item');
+		expect(body).toContain('1. [OHBM 2026 · 0042] Memory');
+		expect(body).toContain('2. [NeuroScape · PMID 123] Vision');
+		expect(body).toContain('?cart=ohbm2026:42+neuroscape:123');
+	});
+});
+
+describe('buildUnifiedPlainTextList', () => {
+	it('leads with the restore link and lists every item', () => {
+		const txt = buildUnifiedPlainTextList(
+			[urow('ohbm2026', 42, 'Memory'), urow('neuroscape', 123, 'Vision')],
+			'https://example.org'
+		);
+		expect(txt).toContain('?cart=ohbm2026:42+neuroscape:123');
+		expect(txt).toContain('1. [OHBM 2026 · 0042] Memory');
+		expect(txt).toContain('2. [NeuroScape · PMID 123] Vision');
+		expect(txt).toContain('Browse the atlas at https://example.org/');
 	});
 });

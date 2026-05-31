@@ -224,13 +224,38 @@
 			const sp = new URLSearchParams(window.location.search);
 			const cartParam = sp.get('cart');
 			if (cartParam) {
-				const ids = cartParam
-					.split(',')
-					.map((s) => Number.parseInt(s.trim(), 10))
-					.filter((n) => Number.isFinite(n) && n > 0);
-				if (ids.length) {
-					cartStore.addMany(ids);
+				// Two formats, both supported:
+				//   - GROUPED (current): `ohbm2026:42,101+neuroscape:123,456` —
+				//     each kind once + its comma-separated ids, groups joined by
+				//     `+`. NOTE: URLSearchParams.get() decodes a literal `+` to a
+				//     space, so we split groups on `+` OR whitespace.
+				//   - LEGACY: bare comma-separated numbers (`0042,0101`) → all
+				//     treated as ohbm2026 poster_ids (back-compat with old links).
+				const kindItems: { kind: 'ohbm2026' | 'neuroscape'; id: number }[] = [];
+				const legacyIds: number[] = [];
+				for (const group of cartParam.split(/[+\s]+/)) {
+					const g = group.trim();
+					if (!g) continue;
+					const colon = g.indexOf(':');
+					if (colon > 0) {
+						const kind = g.slice(0, colon);
+						if (kind === 'ohbm2026' || kind === 'neuroscape') {
+							for (const s of g.slice(colon + 1).split(',')) {
+								const id = Number.parseInt(s.trim(), 10);
+								if (Number.isFinite(id) && id > 0) kindItems.push({ kind, id });
+							}
+						}
+						// Unknown kind → skip (future-proof: a corpus this build
+						// doesn't know about simply isn't restored, never crashes).
+					} else {
+						for (const s of g.split(',')) {
+							const n = Number.parseInt(s.trim(), 10);
+							if (Number.isFinite(n) && n > 0) legacyIds.push(n);
+						}
+					}
 				}
+				if (kindItems.length) cartStore.addManyItems(kindItems);
+				if (legacyIds.length) cartStore.addMany(legacyIds);
 				// Strip the param from the visible URL so the user sees a
 				// clean home URL after the restore (the cart is now in
 				// localStorage; no need to keep the param around).
