@@ -3,6 +3,10 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- Base-path-aware favicon: /pr-55/neuroscape resolves to the per-mode
+		     base (/ohbm2026, /neuroscape, or atlas-root), so each deployment
+		     serves its own copy and the bare /favicon.ico request is suppressed. -->
+		<link rel="icon" href="/pr-55/neuroscape/favicon.svg" type="image/svg+xml" />
 		<script>
 			// Theme boot — runs before any rendering to avoid FOUC.
 			// Resolves `light` | `dark` | `auto` from localStorage and sets
@@ -103,20 +107,20 @@
 				document.head.appendChild(s);
 			})();
 		</script>
-		<link href="/pr-55/neuroscape/_app/immutable/entry/start.CUJ93Nav.js" rel="modulepreload">
-		<link href="/pr-55/neuroscape/_app/immutable/chunks/DPIpwE25.js" rel="modulepreload">
+		<link href="/pr-55/neuroscape/_app/immutable/entry/start.DLzfQc_h.js" rel="modulepreload">
+		<link href="/pr-55/neuroscape/_app/immutable/chunks/bEdLgQEE.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/Db9XsndZ.js" rel="modulepreload">
-		<link href="/pr-55/neuroscape/_app/immutable/chunks/BIz4REv5.js" rel="modulepreload">
-		<link href="/pr-55/neuroscape/_app/immutable/entry/app.PSdo5Zm-.js" rel="modulepreload">
+		<link href="/pr-55/neuroscape/_app/immutable/chunks/CNSAkMkl.js" rel="modulepreload">
+		<link href="/pr-55/neuroscape/_app/immutable/entry/app.De7iMh2k.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/DQNJSxD3.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/BKT_6NDN.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/B_uEPX93.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/SMgBhM2j.js" rel="modulepreload">
-		<link href="/pr-55/neuroscape/_app/immutable/nodes/0.CWV5BxNw.js" rel="modulepreload">
+		<link href="/pr-55/neuroscape/_app/immutable/nodes/0.BAW_zMN5.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/1QVuF32-.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/DdeDTspS.js" rel="modulepreload">
-		<link href="/pr-55/neuroscape/_app/immutable/chunks/AoYkFjtd.js" rel="modulepreload">
-		<link href="/pr-55/neuroscape/_app/immutable/chunks/BzTe_ryw.js" rel="modulepreload">
+		<link href="/pr-55/neuroscape/_app/immutable/chunks/BMslMdFy.js" rel="modulepreload">
+		<link href="/pr-55/neuroscape/_app/immutable/chunks/eOUlVir0.js" rel="modulepreload">
 		<link href="/pr-55/neuroscape/_app/immutable/chunks/CpPKRz6P.js" rel="modulepreload">
 		
 		<link href="/pr-55/neuroscape/_app/immutable/assets/0.BbK3ZzTM.css" rel="stylesheet">
@@ -125,7 +129,7 @@
 		<div style="display: contents">
 			<script>
 				{
-					__sveltekit_8k22ye = {
+					__sveltekit_2g4x83 = {
 						base: "/pr-55/neuroscape",
 						assets: "/pr-55/neuroscape"
 					};
@@ -133,8 +137,8 @@
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/pr-55/neuroscape/_app/immutable/entry/start.CUJ93Nav.js"),
-						import("/pr-55/neuroscape/_app/immutable/entry/app.PSdo5Zm-.js")
+						import("/pr-55/neuroscape/_app/immutable/entry/start.DLzfQc_h.js"),
+						import("/pr-55/neuroscape/_app/immutable/entry/app.De7iMh2k.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});

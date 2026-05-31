@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Abstract Atlas">
+  <rect width="32" height="32" rx="7" fill="#1f6feb"/>
+  <!-- folded map paper (accordion fold: top/bottom edges zig-zag) -->
+  <path d="M6 9 L13 7 L19 9 L26 7 L26 23 L19 25 L13 23 L6 25 Z" fill="#ffffff"/>
+  <!-- fold creases -->
+  <path d="M13 7 V23 M19 9 V25" stroke="#9bb7e0" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+  <!-- location pin -->
+  <path d="M16 10.5 a3.2 3.2 0 0 1 3.2 3.2 c0 2.3 -3.2 5.3 -3.2 5.3 s-3.2 -3 -3.2 -5.3 a3.2 3.2 0 0 1 3.2 -3.2 Z" fill="#ff5252"/>
+  <circle cx="16" cy="13.7" r="1.15" fill="#ffffff"/>
+</svg>
