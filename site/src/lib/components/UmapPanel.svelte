@@ -4,6 +4,7 @@
 	import { effectiveTheme } from '$lib/stores/theme';
 	import { loadCell, loadTopics, type CellShard, type TopicShard } from '$lib/shards';
 	import type { AbstractRecord } from '$lib/shards';
+	import { decimate3dBackdrop } from '$lib/lod3d';
 	import {
 		geometryFromPlotlySelection,
 		type LassoGeometry
@@ -1860,8 +1861,16 @@
 		// 461k-point scatter3d stable without triggering the documented
 		// plotly.js#6365 WebGL-context leak. The magenta focus halo
 		// below still highlights any single-clicked point.
+		// Cap the 3D scatter to a bounded, mode-independent point budget so
+		// the scene stays responsive. atlas-root was fine only because its
+		// backdrop is the ~50k decimated landing sample; /neuroscape/ fed the
+		// full representative-tier union, so its scatter3d hung the main
+		// thread on zoom/rotate. Decimating here (coarse LOD tiers first) makes
+		// both modes go through the SAME bounded path. Focus lookup below still
+		// uses the full `backdrop` so any single point can be highlighted.
+		const backdrop3d = decimate3dBackdrop(backdrop);
 		const traces: unknown[] = [
-			buildAtlasBackdropTrace(backdrop, clusters, opacity, useShapes, true, new Set())
+			buildAtlasBackdropTrace(backdrop3d, clusters, opacity, useShapes, true, new Set())
 		];
 		const overlayTrace = buildAtlasOverlayTrace(
 			overlay,
