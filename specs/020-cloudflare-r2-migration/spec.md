@@ -13,7 +13,11 @@ The pieces in play (verified against the repo, not assumed):
 
 - The parquet artifacts that make up "the data bundle" are produced locally by
   `ohbmcli build-atlas-package`: `ohbm2026.parquet`, `neuroscape.parquet`,
-  `atlas.parquet`, and the optional `neuroscape_vectors.parquet` sidecar.
+  `atlas.parquet`, and the `neuroscape_vectors.parquet` semantic-index
+  sidecar (all four required — the production build keeps the semantic index
+  on). `ohbm2026.parquet` is the Stage-10 build (lives apart, under
+  `data/outputs/parquets/<key>/`); the other three are the
+  `build-atlas-package` output.
 - URLs are not hardcoded in the site. One GitHub Actions variable,
   `OHBM2026_UI_DATA_PACKAGE_URLS`, holds a **keyed JSON registry of channels**;
   each channel maps `ohbm2026` / `neuroscape` / `atlas` / `neuroscape_vectors`
@@ -181,10 +185,11 @@ surfaced as a failure (non-zero / explicit), not a silent omission.
 
 **Hosting on R2 (US1)**
 
-- **FR-001**: The system MUST publish the four data-bundle artifacts
-  (`ohbm2026.parquet`, `neuroscape.parquet`, `atlas.parquet`, and the optional
+- **FR-001**: The system MUST publish the four required data-bundle artifacts
+  (`ohbm2026.parquet`, `neuroscape.parquet`, `atlas.parquet`, and
   `neuroscape_vectors.parquet`) to a Cloudflare R2 bucket such that each is
-  fetchable over public, unauthenticated HTTPS.
+  fetchable over public, unauthenticated HTTPS. (The production build keeps the
+  semantic index on, so the vectors sidecar is always part of the bundle.)
 - **FR-002**: R2-served artifacts MUST support HTTP Range requests (returning
   `206 Partial Content` for a requested byte range) so the browser can read a
   single inner table without downloading the whole file, preserving the current
@@ -255,8 +260,8 @@ surfaced as a failure (non-zero / explicit), not a silent omission.
 ### Key Entities *(include if feature involves data)*
 
 - **Data bundle / atlas package**: the coherent set of parquet artifacts the
-  site consumes (`ohbm2026`, `neuroscape`, `atlas`, optional
-  `neuroscape_vectors`), produced by one `build-atlas-package` run; identified
+  site consumes (`ohbm2026`, `neuroscape`, `atlas`, `neuroscape_vectors` — all
+  required), produced by one `build-atlas-package` run; identified
   by build `state_key`s already embedded in each parquet's `build_info`.
 - **Content-addressed object**: a single artifact stored in R2 at a key derived
   from its content hash; immutable once written; the unit of dedup and

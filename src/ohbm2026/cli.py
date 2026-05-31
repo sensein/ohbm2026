@@ -16,6 +16,7 @@ from ohbm2026.enrich import stage as enrich_stage
 from ohbm2026.fetch import stage as fetch_stage
 from ohbm2026.embed import stage as embed_stage
 from ohbm2026.atlas_package import cli as atlas_cli
+from ohbm2026.atlas_hosting import cli as atlas_hosting_cli
 
 
 def _copy_actions(target: argparse.ArgumentParser, source: argparse.ArgumentParser) -> None:
@@ -60,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stage 15: build neuroscape.parquet + atlas.parquet from the NeuroScape v1.0.1 release + voyage_stage2_published recipe",
     )
     _copy_actions(build_atlas_package_parser, atlas_cli.build_parser())
+
+    upload_atlas_package_parser = subparsers.add_parser(
+        "upload-atlas-package",
+        help="Stage 20: upload the built atlas-package parquets to Cloudflare R2 under content-hashed immutable keys",
+    )
+    _copy_actions(upload_atlas_package_parser, atlas_hosting_cli.build_upload_parser())
 
     embed_matrix_parser = subparsers.add_parser(
         "embed-matrix",
@@ -254,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
         return enrich_stage.main(subcommand_argv)
     if command == "build-atlas-package":
         return atlas_cli.main(subcommand_argv)
+    if command == "upload-atlas-package":
+        return atlas_hosting_cli.upload_main(subcommand_argv)
     if command == "embed-matrix":
         return embed_stage.main(subcommand_argv)
     if command == "analyze-matrix":

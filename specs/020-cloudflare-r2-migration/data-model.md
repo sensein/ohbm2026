@@ -77,8 +77,7 @@ channel value** so it drops in unchanged (see `resolve-data-channel.sh`).
 
 | Rule | |
 |---|---|
-| required keys | `ohbm2026`, `neuroscape`, `atlas` (resolver fails loudly if any required url missing) |
-| optional key | `neuroscape_vectors` — present only if the package included it (`--semantic-index` build) |
+| required keys | `ohbm2026`, `neuroscape`, `atlas`, `neuroscape_vectors` (the production build keeps the semantic index on, so all four are always published) |
 | each value | `{"url": https-url, "sha256": 64-hex}` |
 
 ---
@@ -147,7 +146,8 @@ raises `HostingComparisonError`.
 | absent key (404) → `uploaded`, one PUT | `test_atlas_hosting_uploader.py` (Stubber) |
 | existing object size ≠ local → `ContentHashMismatchError` | `test_atlas_hosting_uploader.py` |
 | missing required artifact in package dir → `ArtifactDiscoveryError` | `test_atlas_hosting_uploader.py` |
-| optional `neuroscape_vectors` absent → manifest omits it; channel entry omits it | `test_atlas_hosting_uploader.py` |
+| required `neuroscape_vectors` absent → `ArtifactDiscoveryError` (it is no longer optional) | `test_atlas_hosting_uploader.py` |
+| `ohbm2026.parquet` supplied separately (Stage-10 build), not in the package dir | `test_atlas_hosting_uploader.py` |
 | manifest contains no absolute/`~` path | `test_atlas_hosting_uploader.py` |
 | missing `R2_*` env var → `R2CredentialsError` before any network call | `test_atlas_hosting_uploader.py` |
 | comparison verdicts: parity/Range/CORS booleans + `overall_pass` AND | `test_atlas_hosting_compare.py` |

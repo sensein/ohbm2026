@@ -9,6 +9,7 @@ manifest. Local, idempotent, non-destructive.
 ```bash
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli upload-atlas-package \
   --package-dir data/outputs/atlas-package__<state-key> \
+  --ohbm2026-parquet data/outputs/parquets/<state-key>/ohbm2026.parquet \
   [--env-file .env] \
   [--manifest-out data/provenance/] \
   [--dry-run]
@@ -18,8 +19,9 @@ PYTHONPATH=src .venv/bin/python -m ohbm2026.cli upload-atlas-package \
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--package-dir` | path | **required** | Directory holding the built parquets (the `--output-root` of `build-atlas-package`). |
-| `--env-file` | path | `.env` | File the R2 credentials are read from (via `get_api_key`). |
+| `--package-dir` | path | **required** | The `build-atlas-package --output-root`: holds `neuroscape.parquet`, `atlas.parquet`, and `neuroscape_vectors.parquet` (all required). |
+| `--ohbm2026-parquet` | path | **required** | Path to `ohbm2026.parquet` (the Stage-10 build — it lives apart from the atlas-package output, typically `data/outputs/parquets/<key>/ohbm2026.parquet`). |
+| `--env-file` | path | `.env` | File the R2 credentials are read from. |
 | `--manifest-out` | path | `data/provenance/` | Directory for the upload manifest. |
 | `--dry-run` | flag | off | Compute hashes/keys/URLs, run `head_object` existence checks, print the would-be channel entry + per-artifact action — but issue **no** PUT and write **no** manifest. |
 
@@ -39,11 +41,12 @@ network call.
 
 ## Behaviour
 
-1. **Discover artifacts** in `--package-dir` at runtime (Constitution VII):
-   required `ohbm2026.parquet`, `neuroscape.parquet`, `atlas.parquet`; optional
-   `neuroscape_vectors.parquet`. A missing required file → `ArtifactDiscoveryError`.
-   An unexpected `*.parquet` not in the known set → `ArtifactDiscoveryError`
-   (no silent inclusion).
+1. **Discover artifacts** at runtime (Constitution VII): `ohbm2026.parquet`
+   from `--ohbm2026-parquet`; `neuroscape.parquet`, `atlas.parquet`, and
+   `neuroscape_vectors.parquet` from `--package-dir` — all four required. A
+   missing required file → `ArtifactDiscoveryError`. An unexpected `*.parquet`
+   in `--package-dir` (including a stray `ohbm2026.parquet`, which belongs at
+   `--ohbm2026-parquet`) → `ArtifactDiscoveryError` (no silent inclusion).
 2. **Hash** each file (streamed sha256) → derive `object_key` = `[prefix/]<sha256>/<filename>`.
 3. **Read** each artifact's `build_info.state_key` from its parquet for the
    manifest's `source_build_state_key` (best-effort; null if unreadable, logged).
@@ -67,9 +70,10 @@ network call.
 ```json
 {
   "channel_entry": {
-    "ohbm2026":   {"url": "https://pub-….r2.dev/<sha>/ohbm2026.parquet",   "sha256": "<sha>"},
-    "neuroscape": {"url": "https://pub-….r2.dev/<sha>/neuroscape.parquet", "sha256": "<sha>"},
-    "atlas":      {"url": "https://pub-….r2.dev/<sha>/atlas.parquet",      "sha256": "<sha>"}
+    "ohbm2026":           {"url": "https://aadata.cirrusscience.org/<sha>/ohbm2026.parquet",           "sha256": "<sha>"},
+    "neuroscape":         {"url": "https://aadata.cirrusscience.org/<sha>/neuroscape.parquet",         "sha256": "<sha>"},
+    "atlas":              {"url": "https://aadata.cirrusscience.org/<sha>/atlas.parquet",              "sha256": "<sha>"},
+    "neuroscape_vectors": {"url": "https://aadata.cirrusscience.org/<sha>/neuroscape_vectors.parquet", "sha256": "<sha>"}
   },
   "manifest_path": "data/provenance/atlas_upload_provenance__<key>.json",
   "summary": {"uploaded": 1, "skipped": 2}

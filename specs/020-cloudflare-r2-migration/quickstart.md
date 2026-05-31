@@ -30,6 +30,7 @@ Configure the bucket once for public read + CORS + Range (see
 ```bash
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli upload-atlas-package \
   --package-dir data/outputs/atlas-package__<state-key> \
+  --ohbm2026-parquet data/outputs/parquets/<corpus-key>/ohbm2026.parquet \
   --dry-run
 ```
 
@@ -40,10 +41,14 @@ URL, and `head_object` action (`uploaded`/`skipped`). No PUTs, no manifest.
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m ohbm2026.cli upload-atlas-package \
-  --package-dir data/outputs/atlas-package__<state-key>
+  --package-dir data/outputs/atlas-package__<state-key> \
+  --ohbm2026-parquet data/outputs/parquets/<corpus-key>/ohbm2026.parquet
 ```
 
-Emits the **channel entry** JSON to stdout and writes
+The bundle spans two locations: `--package-dir` holds `neuroscape.parquet` +
+`atlas.parquet` + `neuroscape_vectors.parquet` (all required); `ohbm2026.parquet`
+is the Stage-10 build supplied via `--ohbm2026-parquet`. Emits the **channel
+entry** JSON to stdout and writes
 `data/provenance/atlas_upload_provenance__<key>.json`. Idempotent: re-running
 on the same package uploads zero bytes.
 

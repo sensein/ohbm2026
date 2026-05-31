@@ -34,7 +34,7 @@
     },
     "artifacts": {
       "type": "array",
-      "minItems": 3,
+      "minItems": 4,
       "items": { "$ref": "#/$defs/contentAddressedObject" }
     },
     "channel_entry": { "$ref": "#/$defs/channelEntry" }
@@ -72,7 +72,7 @@
     "channelEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ohbm2026", "neuroscape", "atlas"],
+      "required": ["ohbm2026", "neuroscape", "atlas", "neuroscape_vectors"],
       "properties": {
         "ohbm2026": { "$ref": "#/$defs/urlSha" },
         "neuroscape": { "$ref": "#/$defs/urlSha" },

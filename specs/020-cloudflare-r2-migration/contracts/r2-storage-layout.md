@@ -31,7 +31,7 @@ Example:
 a3f1…d9/ohbm2026.parquet
 b7c2…04/neuroscape.parquet
 c91e…7a/atlas.parquet
-d042…11/neuroscape_vectors.parquet   # only when the build had --semantic-index
+d042…11/neuroscape_vectors.parquet   # required — production build keeps the semantic index on
 ```
 
 ## Public URL
