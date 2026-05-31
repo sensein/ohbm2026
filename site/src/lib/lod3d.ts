@@ -40,10 +40,12 @@ export function decimate3dBackdrop<T>(points: T[]): T[] {
 	}
 
 	if (!anyLod) {
-		// Uniform stride — bounded and spatially even.
-		const stride = Math.ceil(n / MAX_3D_BACKDROP_POINTS);
-		const out: T[] = [];
-		for (let i = 0; i < n; i += stride) out.push(points[i]);
+		// Fractional-step uniform sampling — always selects exactly the
+		// budget, avoiding the "density cliff" a `ceil(n/budget)` stride
+		// causes when n just exceeds a stride boundary (e.g. 100_001 → ~33k).
+		const out: T[] = new Array(MAX_3D_BACKDROP_POINTS);
+		const step = n / MAX_3D_BACKDROP_POINTS;
+		for (let i = 0; i < MAX_3D_BACKDROP_POINTS; i++) out[i] = points[Math.floor(i * step)];
 		return out;
 	}
 

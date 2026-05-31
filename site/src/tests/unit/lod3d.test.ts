@@ -48,10 +48,12 @@ describe('decimate3dBackdrop', () => {
 		expect(maxKept).toBeLessThan(maxAvail);
 	});
 
-	it('falls back to a bounded uniform stride when no lod_level present', () => {
-		const pts = Array.from({ length: MAX_3D_BACKDROP_POINTS * 3 }, (_, i) => ({ tag: i }));
+	it('falls back to fractional-step sampling (exactly the budget, no cliff) when no lod_level', () => {
+		// 1 over a stride boundary: a ceil(n/budget) stride would drop to ~33k;
+		// fractional-step must yield exactly the budget.
+		const pts = Array.from({ length: MAX_3D_BACKDROP_POINTS * 2 + 1 }, (_, i) => ({ tag: i }));
 		const out = decimate3dBackdrop(pts as { lod_level?: number; tag: number }[]);
-		expect(out.length).toBeLessThanOrEqual(MAX_3D_BACKDROP_POINTS);
-		expect(out.length).toBeGreaterThan(0);
+		expect(out.length).toBe(MAX_3D_BACKDROP_POINTS);
+		expect(out.every((p) => p !== undefined)).toBe(true);
 	});
 });
