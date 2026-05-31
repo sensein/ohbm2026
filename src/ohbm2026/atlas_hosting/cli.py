@@ -17,14 +17,16 @@ import json
 import sys
 from pathlib import Path
 
+from ohbm2026.artifacts import utc_now_isoformat
 from ohbm2026.exceptions import (
     ArtifactDiscoveryError,
     ContentHashMismatchError,
+    HostingComparisonError,
     R2CredentialsError,
     R2UploadError,
 )
 
-from . import r2_client, uploader
+from . import compare, r2_client, uploader
 
 # Exit codes (contracts/cli-upload-atlas-package.md).
 _UPLOAD_EXIT_CODES: dict[type[BaseException], int] = {
@@ -112,7 +114,88 @@ def upload_main(argv: list[str] | None = None) -> int:
     return 0
 
 
-# ``compare-data-hosting`` (US3) is wired in a later task.
+def build_compare_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="ohbmcli compare-data-hosting",
+        description=(
+            "Probe the Dropbox- and R2-served copies of each artifact for "
+            "byte-parity, HTTP Range support, and CORS; write a pass/fail report."
+        ),
+    )
+    parser.add_argument(
+        "--registry",
+        type=Path,
+        required=True,
+        help="JSON registry (value of OHBM2026_UI_DATA_PACKAGE_URLS); local only, never committed.",
+    )
+    parser.add_argument("--dropbox-channel", required=True, help="Channel key on the Dropbox side.")
+    parser.add_argument("--r2-channel", required=True, help="Channel key on the R2 side.")
+    parser.add_argument(
+        "--origin",
+        required=True,
+        help="Origin used in the CORS probe (the production site origin).",
+    )
+    parser.add_argument(
+        "--report-out",
+        type=Path,
+        default=Path("data/outputs"),
+        help="Directory for the comparison report (default: data/outputs/).",
+    )
+    parser.add_argument(
+        "--trust-recorded-sha256",
+        action="store_true",
+        help="Skip downloads; compare each channel's recorded sha256 instead of re-hashing bytes.",
+    )
+    parser.add_argument("--range-bytes", type=int, default=100, help="Range probe window size.")
+    return parser
+
+
+def _load_channel(registry: dict, key: str) -> dict:
+    channel = registry.get(key)
+    if not isinstance(channel, dict):
+        raise HostingComparisonError(
+            f"channel {key!r} not found in registry",
+            probe="channel",
+            reason="unknown_channel",
+        )
+    return channel
+
+
+def compare_main(argv: list[str] | None = None) -> int:
+    parser = build_compare_parser()
+    args = parser.parse_args(argv)
+
+    try:
+        registry = json.loads(Path(args.registry).read_text())
+        report = compare.compare_channels(
+            dropbox_channel=_load_channel(registry, args.dropbox_channel),
+            r2_channel=_load_channel(registry, args.r2_channel),
+            origin=args.origin,
+            generated_utc=utc_now_isoformat(),
+            dropbox_channel_key=args.dropbox_channel,
+            r2_channel_key=args.r2_channel,
+            range_bytes=args.range_bytes,
+            trust_recorded_sha256=args.trust_recorded_sha256,
+        )
+    except HostingComparisonError as exc:
+        sys.stderr.write(f"compare-data-hosting: {type(exc).__name__}: {exc}\n")
+        return 2
+
+    out_dir = Path(args.report_out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = utc_now_isoformat().replace(":", "").replace("-", "").split(".")[0] + "Z"
+    out_path = out_dir / f"data-hosting-comparison__{stamp}.json"
+    out_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+
+    for art in report.artifacts:
+        mark = lambda ok: "✓" if ok else "✗"  # noqa: E731
+        sys.stdout.write(
+            f"{art.logical_name:18s} parity {mark(art.byte_parity)}  "
+            f"range {mark(art.r2.range_supported)}  cors {mark(art.r2.cors_allowed)}  "
+            f"=> {'PASS' if art.passed else 'FAIL'}\n"
+        )
+    sys.stdout.write(f"report: {out_path}\noverall: {'PASS' if report.overall_pass else 'FAIL'}\n")
+    return 0 if report.overall_pass else 1
 
 
 if __name__ == "__main__":

@@ -63,5 +63,37 @@ class TopLevelDispatchTests(unittest.TestCase):
         self.assertEqual(upload_main.call_args.args[0], argv_tail)
 
 
+class CompareParserAndExitCodeTests(unittest.TestCase):
+    def test_compare_help_resolves(self) -> None:
+        with self.assertRaises(SystemExit) as ctx:
+            top_cli.main(["compare-data-hosting", "--help"])
+        self.assertEqual(ctx.exception.code, 0)
+
+    def test_compare_required_args(self) -> None:
+        parser = hosting_cli.build_compare_parser()
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["--registry", "r.json"])  # missing channels + origin
+
+    def test_routes_to_compare_main(self) -> None:
+        with mock.patch.object(
+            top_cli.atlas_hosting_cli, "compare_main", return_value=0
+        ) as compare_main:
+            rc = top_cli.main(
+                [
+                    "compare-data-hosting",
+                    "--registry",
+                    "r.json",
+                    "--dropbox-channel",
+                    "prod",
+                    "--r2-channel",
+                    "r2",
+                    "--origin",
+                    "https://abstractatlas.brainkb.org",
+                ]
+            )
+        self.assertEqual(rc, 0)
+        compare_main.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

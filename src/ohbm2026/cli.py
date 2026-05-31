@@ -68,6 +68,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _copy_actions(upload_atlas_package_parser, atlas_hosting_cli.build_upload_parser())
 
+    compare_data_hosting_parser = subparsers.add_parser(
+        "compare-data-hosting",
+        help="Stage 20: compare Dropbox-vs-R2 byte-parity / CORS / Range for the data bundle",
+    )
+    _copy_actions(compare_data_hosting_parser, atlas_hosting_cli.build_compare_parser())
+
     embed_matrix_parser = subparsers.add_parser(
         "embed-matrix",
         help="Stage 3: generate the multi-model embeddings matrix (per-component bundles)",
@@ -263,6 +269,8 @@ def main(argv: list[str] | None = None) -> int:
         return atlas_cli.main(subcommand_argv)
     if command == "upload-atlas-package":
         return atlas_hosting_cli.upload_main(subcommand_argv)
+    if command == "compare-data-hosting":
+        return atlas_hosting_cli.compare_main(subcommand_argv)
     if command == "embed-matrix":
         return embed_stage.main(subcommand_argv)
     if command == "analyze-matrix":
