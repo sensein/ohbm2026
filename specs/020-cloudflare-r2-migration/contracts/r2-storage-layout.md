@@ -55,7 +55,13 @@ MUST provide, equivalently to Dropbox's `dl.dropboxusercontent.com` today:
    - `AllowedOrigins`: the gh-pages production origin (e.g.
      `https://abstractatlas.brainkb.org`) and the preview origin pattern.
    - `AllowedMethods`: `GET`, `HEAD`.
-   - `AllowedHeaders`: `Range`.
+   - `AllowedHeaders`: `Range`, `If-Range`, **`If-None-Match`**, `If-Modified-Since`
+     (or `*`). `If-None-Match` is REQUIRED: the browser cache layer
+     (`site/src/lib/data_package/cache.ts`) revalidates a warm cache with a
+     `HEAD` + `If-None-Match: <etag>`, which triggers a CORS preflight — omit it
+     and the preflight returns 403, the revalidation is blocked, and the loader
+     silently falls back to the stale cached copy (`cache-hit-offline`) while
+     spamming console CORS errors.
    - `ExposeHeaders`: `Content-Range`, `Accept-Ranges`, `ETag`, `Content-Length`.
 3. **Range** — byte-range GET (`206 Partial Content`). R2 supports this on
    public objects by default; the CORS `ExposeHeaders` above make the ranged
