@@ -87,10 +87,10 @@ Web frontend, single SvelteKit project at `site/`. Source in `site/src/`, tests 
 
 ### Implementation for User Story 2
 
-- [ ] T017 [P] [US2] Expose the matched-id set from `site/src/lib/components/NeuroscapeBrowsePanel.svelte` (e.g. `bind:matchedIds` or `dispatch('results', ids)`) sourced from its existing `filtered`.
-- [ ] T018 [P] [US2] Expose the matched-id set from `site/src/lib/components/AtlasRootBrowsePanel.svelte` the same way.
-- [ ] T019 [US2] In `site/src/routes/+page.svelte`, fold the panel's matched-id set into the composed highlight set (search ∩ lasso ∩ cart ∩ facets) and feed it to `UmapPanel` (extend the existing lasso-set props or add a `highlightSet` prop).
-- [ ] T020 [US2] In `site/src/lib/components/UmapPanel.svelte`, ensure the fed highlight set drives the 2D highlight (search matches reuse the same `selectedpoints` path as lasso).
+- [x] T017 [P] [US2] Expose the matched-id set from `site/src/lib/components/NeuroscapeBrowsePanel.svelte` (e.g. `bind:matchedIds` or `dispatch('results', ids)`) sourced from its existing `filtered`.
+- [x] T018 [P] [US2] Expose the matched-id set from `site/src/lib/components/AtlasRootBrowsePanel.svelte` the same way.
+- [x] T019 [US2] In `site/src/routes/+page.svelte`, fold the panel's matched-id set into the composed highlight set (search ∩ lasso ∩ cart ∩ facets) and feed it to `UmapPanel` (extend the existing lasso-set props or add a `highlightSet` prop).
+- [x] T020 [US2] In `site/src/lib/components/UmapPanel.svelte`, ensure the fed highlight set drives the 2D highlight (search matches reuse the same `selectedpoints` path as lasso).
 
 **Checkpoint**: Search highlights on the scatter and feeds the cart on atlas-root + neuroscape.
 

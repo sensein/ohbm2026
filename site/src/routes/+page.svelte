@@ -660,6 +660,26 @@
 		if (kind === 'ohbm2026') return atlasOverlayById.has(id);
 		return false;
 	});
+	// Spec 021 (US2) — matched-id sets the browse panels expose (bound); the
+	// single source of truth for the search-result scatter highlight.
+	let neuroPanelMatched: Set<number> = new Set();
+	let atlasMatchedNeuro: Set<number> = new Set();
+	let atlasMatchedOhbm: Set<number> = new Set();
+	$: searchActiveAtlas = ($debouncedSearchQuery ?? '').trim().length > 0;
+	$: highlightNeuroSet = (() => {
+		const parts: Array<Set<number> | null> = [];
+		if (anyLassoActive) parts.push(atlasLassoNeuroSet);
+		if (searchActiveAtlas) parts.push(SITE_MODE === 'neuroscape' ? neuroPanelMatched : atlasMatchedNeuro);
+		if ($cartOnly) parts.push(shownIds(atlasCartScope, 'neuroscape'));
+		return compose(parts) ?? new Set<number>();
+	})();
+	$: highlightOhbmSet = (() => {
+		const parts: Array<Set<number> | null> = [];
+		if (anyLassoActive) parts.push(atlasLassoOhbmSet);
+		if (searchActiveAtlas) parts.push(atlasMatchedOhbm);
+		if ($cartOnly) parts.push(shownIds(atlasCartScope, 'ohbm2026'));
+		return compose(parts) ?? new Set<number>();
+	})();
 	$: atlasClustersById = new Map(
 		atlasClusters.map((c) => [c.cluster_id, { cluster_id: c.cluster_id, title: c.title, colour_hex: c.colour_hex }])
 	);
@@ -2114,8 +2134,8 @@
 					atlasClusters={atlasClusters}
 					showOverlay={SITE_MODE === 'atlas-root' ? filterShowOhbm : false}
 					backdropOpacity={0.05}
-					lassoOhbmSet={atlasLassoOhbmSet}
-					lassoNeuroSet={atlasLassoNeuroSet}
+					lassoOhbmSet={highlightOhbmSet}
+					lassoNeuroSet={highlightNeuroSet}
 					atlasFocusKind={atlasSelection?.kind ?? null}
 					atlasFocusId={atlasSelection
 						? atlasSelection.kind === 'ohbm2026'
@@ -2247,6 +2267,7 @@
 							loading={atlasCorpusLoading}
 							semanticHits={neuroscapeSemanticHits}
 							searchIndex={titleSearchIndex}
+							bind:matchedIds={neuroPanelMatched}
 							on:focus={(ev) => {
 								// Update the URL so deep-link restore + back-button work,
 								// THEN open the detail panel so the inline third pane
@@ -2272,6 +2293,8 @@
 							loading={atlasCorpusLoading}
 							semanticHits={neuroscapeSemanticHits}
 							searchIndex={titleSearchIndex}
+							bind:matchedNeuroIds={atlasMatchedNeuro}
+							bind:matchedOhbmIds={atlasMatchedOhbm}
 							on:select={(ev) => {
 								onAtlasPointClick(
 									new CustomEvent('pointclick', { detail: ev.detail })
