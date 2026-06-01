@@ -214,7 +214,15 @@ export function loadDataPackage(
 			// the rest of the loader doesn't need to know.
 			const { response, source } = await fetchParquetCached(url, fetcher);
 			if (!response.ok || !response.body) return null;
-			if (source === 'cache-hit-validated' || source === 'cache-hit-offline') {
+			// Dev-only cache-state diagnostic: useful when debugging the
+			// data-channel / Cache-API revalidation path locally, but kept
+			// out of the production console (import.meta.env.DEV is false in
+			// the built site). A cache-hit-validated response is byte-
+			// equivalent to a fresh GET, so this is purely informational.
+			if (
+				import.meta.env.DEV &&
+				(source === 'cache-hit-validated' || source === 'cache-hit-offline')
+			) {
 				console.info(`[ohbm2026] data package served from ${source}`);
 			}
 			// When a progress callback is provided, stream the body via
