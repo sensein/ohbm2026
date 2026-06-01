@@ -20,6 +20,7 @@
 		lexicalSearch,
 		parseQuery,
 		queryForSemantic,
+		searchTitleIndex,
 		seedScores,
 		type InvertedIndex
 	} from '$lib/filter';
@@ -1172,18 +1173,58 @@
 	// counts so unchecking an option doesn't make its count vanish.
 	// Base sources after lasso (the lasso is global — affects every
 	// facet).
+	// Search-match sets for facet counts — so cluster/site/year counts narrow
+	// with the active query (consistent with /ohbm2026/, where facet counts
+	// recompute against the search-narrowed set). `null` = no query → counts
+	// span the full (lasso/facet-filtered) corpus as before. The NeuroScape
+	// match = lexical title hits ∪ semantic-ranker hits; the OHBM-overlay match
+	// (atlas-root only) = lexical title hits over the overlay. Same shared
+	// helpers the browse panels use, so the counts match the result list.
+	$: neuroSearchMatch = (() => {
+		const q = ($debouncedSearchQuery ?? '').trim();
+		if (q.length === 0) return null;
+		const ids = new Set<number>();
+		const res = searchTitleIndex(titleSearchIndex, q);
+		if (res) for (const id of res.ids) ids.add(id);
+		for (const pmid of neuroscapeSemanticHits.keys()) ids.add(pmid);
+		return ids;
+	})();
+	$: ohbmOverlayIndex =
+		SITE_MODE === 'atlas-root'
+			? buildTitleIndex(
+					atlasOverlayPoints,
+					(o) => o.poster_id,
+					(o) => o.title
+				)
+			: null;
+	$: ohbmSearchMatch = (() => {
+		if (SITE_MODE !== 'atlas-root' || !ohbmOverlayIndex) return null;
+		const q = ($debouncedSearchQuery ?? '').trim();
+		if (q.length === 0) return null;
+		const ids = new Set<number>();
+		const res = searchTitleIndex(ohbmOverlayIndex, q);
+		if (res) for (const id of res.ids) ids.add(id);
+		return ids;
+	})();
 	$: lassoBackdropPoints = (() => {
 		// Facet counts over the FULL corpus (`listCorpus`), not the LOD
 		// scatter sample — so cluster/year counts match the full-region
 		// result list. `listCorpus` carries cluster_id + year and is the
 		// whole corpus on both surfaces (identity table on atlas-root,
 		// the same full array as atlasBackdrop on /neuroscape/).
-		if (!anyLassoActive) return listCorpus;
-		return listCorpus.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
+		let base = !anyLassoActive
+			? listCorpus
+			: listCorpus.filter((p) => atlasLassoNeuroSet.has(p.pubmed_id));
+		// Narrow to the active search so facet counts reflect the result set.
+		if (neuroSearchMatch) base = base.filter((p) => neuroSearchMatch.has(p.pubmed_id));
+		return base;
 	})();
 	$: lassoOverlayPoints = (() => {
-		if (!anyLassoActive) return atlasOverlayPoints;
-		return atlasOverlayPoints.filter((p) => atlasLassoOhbmSet.has(p.poster_id));
+		let base = !anyLassoActive
+			? atlasOverlayPoints
+			: atlasOverlayPoints.filter((p) => atlasLassoOhbmSet.has(p.poster_id));
+		if (ohbmSearchMatch) base = base.filter((p) => ohbmSearchMatch.has(p.poster_id));
+		return base;
 	})();
 	// Sites counts (atlas-root) — apply cluster filter, exclude self.
 	$: siteCounts = (() => {
