@@ -100,6 +100,7 @@
 	// otherwise the page keeps the KNN-only fallback below.
 	import {
 		initRanker,
+		updateRankerMaps,
 		searchNeuroscape,
 		expandSearchDepth as rankerExpandSearchDepth,
 		defaultSemanticWorker,
@@ -1296,6 +1297,44 @@
 	 * The maps (pubmed→cluster, pubmed→KNN) are built from the already-
 	 * loaded `atlasBackdrop` rows rather than re-reading the parquet.
 	 */
+	// Build the ranker's pubmed→cluster + pubmed→KNN maps from a FULL-corpus
+	// source (`listCorpus`), NEVER the displayed LOD scatter (`atlasBackdrop`).
+	// Search must not depend on what the UMAP renders: the scatter sample omits
+	// most full-corpus ids the ranker brute-forces, which is what zeroed out
+	// atlas-root semantic search. Identity rows always carry cluster_id;
+	// nearest_pubmed_ids/nearest_distances appear once the neighbours wave folds
+	// the k=20 graph in (neuroscape) — absent on atlas-root, whose knnIndex
+	// stays empty (the ranker still routes + brute-forces + re-ranks).
+	function buildRankerMaps(source: AtlasBackdropPoint[]): {
+		pubmedToCluster: Map<bigint, number>;
+		knnIndex: Map<bigint, KnnEntry>;
+	} {
+		const pubmedToCluster = new Map<bigint, number>();
+		const knnIndex = new Map<bigint, KnnEntry>();
+		for (const a of source) {
+			const pid = BigInt(a.pubmed_id);
+			pubmedToCluster.set(pid, a.cluster_id);
+			if (a.nearest_pubmed_ids && a.nearest_distances) {
+				knnIndex.set(pid, {
+					pubmed_id: pid,
+					nearest_pubmed_ids: a.nearest_pubmed_ids.map((n) => BigInt(n)),
+					nearest_distances: a.nearest_distances
+				});
+			}
+		}
+		return { pubmedToCluster, knnIndex };
+	}
+
+	// Upgrade the live ranker's maps from the current full corpus (no-op until
+	// the ranker is initialised). Called when listCorpus grows to the full
+	// identity table and after the neighbours wave, so routing + KNN-expansion
+	// cover the WHOLE corpus, not the slice resident at init time.
+	function refreshRankerMaps(): void {
+		if (!rankerReady) return;
+		if (SITE_MODE !== 'neuroscape' && SITE_MODE !== 'atlas-root') return;
+		updateRankerMaps(buildRankerMaps(listCorpus));
+	}
+
 	async function initNeuroscapeRanker() {
 		if (SITE_MODE !== 'neuroscape' && SITE_MODE !== 'atlas-root') return;
 		if (rankerReady) return;
@@ -1329,29 +1368,15 @@
 				);
 				return;
 			}
-			// Build the pubmed→cluster + pubmed→KNN maps from the in-memory
-			// articles. atlas-root's backdrop rows don't carry neighbours,
-			// so its knnIndex stays empty — the ranker still routes +
-			// brute-forces + re-ranks; only the KNN-expansion step yields
-			// nothing extra there (acceptable: atlas-root search is a
-			// cross-conference convenience, not the primary surface).
-			const pubmedToCluster = new Map<bigint, number>();
-			const knnIndex = new Map<bigint, KnnEntry>();
-			for (const a of atlasBackdrop) {
-				const pid = BigInt(a.pubmed_id);
-				pubmedToCluster.set(pid, a.cluster_id);
-				if (a.nearest_pubmed_ids && a.nearest_distances) {
-					knnIndex.set(pid, {
-						pubmed_id: pid,
-						nearest_pubmed_ids: a.nearest_pubmed_ids.map((n) => BigInt(n)),
-						nearest_distances: a.nearest_distances
-					});
-				}
-			}
 			const worker = await defaultSemanticWorker({
 				dim: manifest.dim,
 				scale: manifest.scale
 			});
+			// Maps come from the FULL corpus (listCorpus), built AFTER the worker
+			// await so they capture whatever streamed in during the (slow) model
+			// load. refreshRankerMaps() below + at the corpus/neighbours waves
+			// upgrades them again as more lands.
+			const { pubmedToCluster, knnIndex } = buildRankerMaps(listCorpus);
 			initRanker({
 				worker,
 				fetchClusterVectors: (clusterId: number) => loadClusterVectors(vectorsUrl, clusterId),
@@ -1363,6 +1388,8 @@
 				knnIndex
 			});
 			rankerReady = true;
+			// Capture any full-corpus / neighbours rows that landed during init.
+			refreshRankerMaps();
 		} catch (err) {
 			// Loud-but-non-fatal: the page keeps the KNN fallback. Log so
 			// the failure is visible in the console rather than silently
@@ -1449,6 +1476,9 @@
 				}
 				// Search + result list always get the full corpus.
 				listCorpus = articles as unknown as AtlasBackdropPoint[];
+				// Upgrade the ranker's maps from the coarse lod0 snapshot (init)
+				// to the full corpus so routing covers every article.
+				refreshRankerMaps();
 				// Count is now full — stop the inline loading indicator (the
 				// neighbours wave below only powers the detail "similar" list,
 				// not the count).
@@ -1483,6 +1513,9 @@
 					}
 					// Reassign so the detail "similar" reactive picks up neighbours.
 					atlasBackdrop = [...(articles as unknown as AtlasBackdropPoint[])];
+					// Neighbours are now folded onto the listCorpus rows → rebuild
+					// the ranker's knnIndex so KNN-expansion works (fixes knn=0).
+					refreshRankerMaps();
 				}
 			} catch (err) {
 				console.warn('neuroscape progressive background load failed:', err);
@@ -1653,6 +1686,10 @@
 						// corpus now that we have every title (was seeded with the
 						// coarse LOD tier above). Sources `listCorpus`, just set.
 						refreshNeuroscapeTitleLookup();
+						// Upgrade the ranker's pubmed→cluster map to the full 461k
+						// corpus (was the coarse lod0 snapshot) so routing/seed
+						// resolution covers every article — not the LOD scatter.
+						refreshRankerMaps();
 					})
 					.catch((err) => {
 						console.warn(

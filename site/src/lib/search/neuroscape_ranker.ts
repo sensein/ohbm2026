@@ -155,6 +155,23 @@ class NeuroscapeRanker {
 		this.capReleased = true;
 	}
 
+	/**
+	 * Replace the corpus lookup maps WITHOUT recreating the worker or losing
+	 * the warm cluster LRU. Used as the full corpus + its k=20 neighbour graph
+	 * stream in after first paint: the ranker is initialised early (so semantic
+	 * search works ASAP) with whatever corpus slice is resident, then its maps
+	 * are upgraded in place once the full `listCorpus` + `neighbors_neuroscape`
+	 * land. The maps MUST be derived from the full corpus, never the displayed
+	 * LOD scatter (search must not depend on what the UMAP renders).
+	 */
+	updateMaps(maps: {
+		pubmedToCluster?: Map<bigint, number>;
+		knnIndex?: Map<bigint, KnnEntry>;
+	}): void {
+		if (maps.pubmedToCluster) this.cfg.pubmedToCluster = maps.pubmedToCluster;
+		if (maps.knnIndex) this.cfg.knnIndex = maps.knnIndex;
+	}
+
 	private routeToCluster(queryVector: Float32Array): number {
 		// Dense argmax over the ~50 centroids; trivially cheap.
 		let bestId = this.cfg.centroids[0]?.cluster_id ?? 0;
@@ -364,6 +381,15 @@ export function searchNeuroscape(
 
 export function expandSearchDepth(): void {
 	_ranker?.expandSearchDepth();
+}
+
+/** Upgrade the ranker's corpus maps in place (no worker/LRU reset). No-op
+ *  before initRanker. See {@link NeuroscapeRanker.updateMaps}. */
+export function updateRankerMaps(maps: {
+	pubmedToCluster?: Map<bigint, number>;
+	knnIndex?: Map<bigint, KnnEntry>;
+}): void {
+	_ranker?.updateMaps(maps);
 }
 
 /** Exported for tests. */

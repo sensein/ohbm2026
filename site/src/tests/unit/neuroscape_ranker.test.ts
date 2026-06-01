@@ -199,6 +199,26 @@ describe('NeuroscapeRanker — 5-step pipeline (T013)', () => {
 		expect(hits.every((h) => h.score_source === 'cosine')).toBe(true);
 	});
 
+	it('updateMaps upgrades the corpus maps in place (neighbours land after init)', async () => {
+		// Ranker is initialised early (semantic works ASAP) with NO neighbour
+		// graph — the k=20 graph streams in later (neuroscape neighbours wave).
+		// updateMaps installs it without recreating the worker; KNN-expansion
+		// must then reach neighbour-only ids the seeds didn't include.
+		const cfg = makeBaseCfg({ knnIndex: new Map<bigint, KnnEntry>() });
+		const r = new NeuroscapeRanker(cfg);
+		// Seeds (from bruteForceCluster) are 100n,101n; 200n is reachable ONLY
+		// via the neighbour graph we're about to install.
+		r.updateMaps({
+			knnIndex: new Map<bigint, KnnEntry>([
+				[100n, { pubmed_id: 100n, nearest_pubmed_ids: [200n], nearest_distances: [0.2] }]
+			])
+		});
+		const hits = await r.searchNeuroscape(parsedFromText('memory'), 10);
+		const ids = hits.map((h) => h.id);
+		expect(ids).toContain(100n);
+		expect(ids).toContain(200n); // neighbour-only → proves updateMaps took effect
+	});
+
 	it('keeps the default 3 seeds when a KNN graph IS resident', async () => {
 		const cfg = makeBaseCfg();
 		const r = new NeuroscapeRanker(cfg);
