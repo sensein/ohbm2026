@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- Base-path-aware favicon: /pr-59/ohbm2026 resolves to the per-mode
+		     base (/ohbm2026, /neuroscape, or atlas-root), so each deployment
+		     serves its own copy and the bare /favicon.ico request is suppressed. -->
+		<link rel="icon" href="/pr-59/ohbm2026/favicon.svg" type="image/svg+xml" />
+		<!-- Fallback meta description. The per-mode <title> is set by the Svelte
+		     layout (and baked into the prerendered HTML, so no-JS visitors and
+		     crawlers get it too); the layout sets no description, so this single
+		     additive tag covers all modes. No static <title> here — a second
+		     title element would win over the per-mode one (first-in-tree-order). -->
+		<meta
+			name="description"
+			content="Abstract Atlas — an interactive map of OHBM 2026 abstracts within the NeuroScape PubMed neuroscience landscape (1999–2023), with semantic and lexical search and a pannable 2D/3D map."
+		/>
+		<script>
+			// Theme boot — runs before any rendering to avoid FOUC.
+			// Resolves `light` | `dark` | `auto` from localStorage and sets
+			// data-theme on <html> + the CSS color-scheme so native form
+			// controls + scrollbars adopt the right palette immediately.
+			(function () {
+				try {
+					var raw = localStorage.getItem('ohbm2026.ui.theme.v1');
+					var choice = raw === 'light' || raw === 'dark' || raw === 'auto' ? raw : 'auto';
+					var effective =
+						choice === 'auto'
+							? window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+							: choice;
+					document.documentElement.setAttribute('data-theme', effective);
+					document.documentElement.style.colorScheme = effective;
+				} catch (e) {
+					// localStorage might be unavailable; default to system pref.
+					document.documentElement.setAttribute(
+						'data-theme',
+						window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+					);
+				}
+			})();
+		</script>
+		<!-- Google tag (gtag.js) — measurement id G-5LQ42EDHPF.
+		     Boot decision tree, evaluated synchronously here so the
+		     banner that depends on this state doesn't flash and gtag
+		     itself is initialised before any pageview is recorded:
+
+		       1. PR-preview path (/pr-<N>/) → skip entirely. We do not
+		          want reviewer + bot traffic on preview deployments
+		          polluting the production analytics property.
+		       2. DNT (`navigator.doNotTrack === '1'` / `'yes'`) OR GPC
+		          (`navigator.globalPrivacyControl === true`) → skip
+		          entirely. The user has signalled non-consent at the
+		          browser level; we respect that without asking.
+		       3. Saved consent in localStorage → use it: load gtag with
+		          analytics_storage 'granted' on accept, 'denied' on
+		          decline (declined users keep gtag loaded so a future
+		          consent-update can re-enable it without a page reload).
+		       4. No saved choice → 'pending'. Load gtag with consent
+		          defaulted to denied; the ConsentBanner Svelte component
+		          will mount on hydration and call gtag('consent',
+		          'update', …) once the user picks.
+
+		     `window.__ohbmAnalyticsConsent` is the shared variable the
+		     banner reads to decide whether to render. -->
+		<script>
+			(function () {
+				var STORAGE_KEY = 'ohbm2026.analytics.consent.v1';
+				var state = 'no-analytics';
+				try {
+					var p = window.location.pathname || '';
+					if (/^\/pr-\d+(\/|$)/.test(p)) {
+						window.__ohbmAnalyticsConsent = 'pr-preview';
+						return;
+					}
+					var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+					if (dnt === '1' || dnt === 'yes' || dnt === 1) {
+						window.__ohbmAnalyticsConsent = 'blocked-dnt';
+						return;
+					}
+					if (navigator.globalPrivacyControl === true) {
+						window.__ohbmAnalyticsConsent = 'blocked-gpc';
+						return;
+					}
+					var saved = null;
+					try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+					if (saved === 'granted') state = 'granted';
+					else if (saved === 'denied') state = 'denied';
+					else state = 'pending';
+				} catch (e) {
+					window.__ohbmAnalyticsConsent = 'blocked-error';
+					return;
+				}
+				window.__ohbmAnalyticsConsent = state;
+
+				window.dataLayer = window.dataLayer || [];
+				function gtag() { window.dataLayer.push(arguments); }
+				window.gtag = gtag;
+				// Google Consent Mode v2 default — set BEFORE the
+				// library loads so the initial pageview respects it.
+				gtag('consent', 'default', {
+					analytics_storage: state === 'granted' ? 'granted' : 'denied',
+					ad_storage: 'denied',
+					ad_user_data: 'denied',
+					ad_personalization: 'denied',
+					wait_for_update: 500
+				});
+				gtag('js', new Date());
+				gtag('config', 'G-5LQ42EDHPF', { anonymize_ip: true });
+
+				var s = document.createElement('script');
+				s.async = true;
+				s.src = 'https://www.googletagmanager.com/gtag/js?id=G-5LQ42EDHPF';
+				document.head.appendChild(s);
+			})();
+		</script>
+		<link href="/pr-59/ohbm2026/_app/immutable/entry/start.DICxk4Ee.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/BrDe4G9N.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/Db9XsndZ.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/D7_hrAKG.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/entry/app.D11YJiGI.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/DLugvD8-.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/BKT_6NDN.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/B_uEPX93.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/SMgBhM2j.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/nodes/0.Dv387IUx.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/RZfzwb50.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/DdeDTspS.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/A7bTxsrO.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/DLYAVu1x.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/CpPKRz6P.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/nodes/2.BNpSIVG7.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/BJUaPuwd.js" rel="modulepreload">
+		<!--12qhfyh--><!--[-1--><!--]--><!----><title>OHBM 2026 Atlas (beta)</title>
+		<link href="/pr-59/ohbm2026/_app/immutable/assets/0.BIzrgnTf.css" rel="stylesheet">
+		<link href="/pr-59/ohbm2026/_app/immutable/assets/DetailPanel.jzpL67me.css" rel="stylesheet">
+		<link href="/pr-59/ohbm2026/_app/immutable/assets/2.CrjKLzEK.css" rel="stylesheet">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<!-- No-JavaScript landing. The atlas is a client-rendered SPA, so without
+		     JS the app div stays empty — this gives those visitors a real page:
+		     what the atlas is, that it needs JS, and how to enable it. Styled
+		     inline (scoped <style>) so it works with zero app CSS/JS, and
+		     theme-aware via prefers-color-scheme since the data-theme boot
+		     script also never runs without JS. -->
+		<noscript>
+			<style>
+				/* Hide the (empty) app shell so only this card shows without JS. */
+				#svelte,
+				[data-sveltekit-preload-data] > div[style] {
+					display: none !important;
+				}
+				.noscript-wrap {
+					box-sizing: border-box;
+					min-height: 100vh;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					padding: 2rem 1.25rem;
+					font-family:
+						-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+						sans-serif;
+					background: #f8fafc;
+					color: #1e293b;
+				}
+				.noscript-card {
+					max-width: 34rem;
+					width: 100%;
+					background: #ffffff;
+					border: 1px solid #e2e8f0;
+					border-radius: 14px;
+					padding: 2rem 2rem 1.75rem;
+					box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+					text-align: left;
+				}
+				.noscript-card svg {
+					width: 44px;
+					height: 44px;
+					display: block;
+					margin-bottom: 1rem;
+				}
+				.noscript-card h1 {
+					margin: 0 0 0.5rem;
+					font-size: 1.4rem;
+					line-height: 1.2;
+				}
+				.noscript-card .lead {
+					margin: 0 0 1rem;
+					color: #475569;
+					font-size: 1rem;
+					line-height: 1.5;
+				}
+				.noscript-card p {
+					margin: 0 0 1rem;
+					font-size: 0.95rem;
+					line-height: 1.55;
+				}
+				.noscript-card .cta {
+					margin: 0;
+					padding: 0.75rem 1rem;
+					border-radius: 10px;
+					background: #eef4ff;
+					border: 1px solid #cfe0fb;
+					color: #1e3a8a;
+					font-size: 0.95rem;
+					line-height: 1.5;
+				}
+				.noscript-card .how {
+					margin: 0.75rem 0 0;
+					font-size: 0.85rem;
+					color: #64748b;
+				}
+				@media (prefers-color-scheme: dark) {
+					.noscript-wrap {
+						background: #0f172a;
+						color: #e2e8f0;
+					}
+					.noscript-card {
+						background: #1e293b;
+						border-color: #334155;
+						box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+					}
+					.noscript-card .lead {
+						color: #cbd5e1;
+					}
+					.noscript-card .cta {
+						background: #1e3a5f;
+						border-color: #2d4a6b;
+						color: #dbeafe;
+					}
+					.noscript-card .how {
+						color: #94a3b8;
+					}
+				}
+			</style>
+			<div class="noscript-wrap">
+				<div class="noscript-card">
+					<svg viewBox="0 0 32 32" role="img" aria-label="Abstract Atlas" xmlns="http://www.w3.org/2000/svg">
+						<g stroke="#334155" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+							<path d="M5 8 L12.3 6 L19 8 L27 6 L27 24 L19 26 L12.3 24 L5 26 Z" fill="#ffffff" />
+							<path d="M12.3 6 V24 M19 8 V26" stroke="#94a3b8" stroke-width="1.2" fill="none" />
+						</g>
+						<path
+							d="M16 10 a3.3 3.3 0 0 1 3.3 3.3 c0 2.4 -3.3 5.5 -3.3 5.5 s-3.3 -3.1 -3.3 -5.5 a3.3 3.3 0 0 1 3.3 -3.3 Z"
+							fill="#ff5252"
+							stroke="#b3262b"
+							stroke-width="0.8"
+							stroke-linejoin="round"
+						/>
+						<circle cx="16" cy="13.3" r="1.2" fill="#ffffff" />
+					</svg>
+					<h1>Abstract Atlas</h1>
+					<p class="lead">
+						An interactive map of neuroscience research — OHBM 2026 abstracts placed
+						within the NeuroScape PubMed landscape (1999–2023).
+					</p>
+					<p>
+						The atlas runs entirely in your browser: semantic and lexical search, a
+						2D/3D map you can pan, zoom, and lasso-select, and linked abstract detail
+						pages. All of that needs JavaScript, which is currently disabled.
+					</p>
+					<p class="cta">
+						Please enable JavaScript and reload this page to explore the atlas.
+					</p>
+					<p class="how">
+						Most browsers: Settings → Privacy / Site settings → JavaScript → Allowed,
+						then reload.
+					</p>
+				</div>
+			</div>
+		</noscript>
+		<div style="display: contents"><!--[--><!--[0--><!--[--><div class="shell svelte-12qhfyh"><header data-testid="site-header" data-mode="ohbm2026" class="svelte-a8kxe2"><div class="header-row svelte-a8kxe2"><div class="header-text svelte-a8kxe2"><h1 class="svelte-a8kxe2"><!--[0--><a class="home-link svelte-a8kxe2" href="/pr-59" rel="external" title="Abstract Atlas — cross-conference landing" aria-label="Abstract Atlas — cross-conference landing" data-testid="header-home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9.5L12 2l9 7.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"></path></svg></a><!--]--> <span class="title-text svelte-a8kxe2">OHBM 2026 Atlas</span> <span class="beta-tag svelte-a8kxe2">beta</span></h1> <p class="subtitle svelte-a8kxe2">Browse, search, and explore the 2026 accepted abstracts</p></div> <div class="header-controls svelte-a8kxe2"><button type="button" class="header-link header-tour svelte-a8kxe2" title="Take the guided tour" data-testid="header-tour-button">Tour</button> <a class="header-link svelte-a8kxe2" href="/pr-59/ohbm2026/about/" data-testid="header-about-link">About</a> <button type="button" class="header-cart svelte-a8kxe2" aria-label="Open saved list (0 items)" title="Your saved list is empty — click any 🛒 to save an item" data-testid="header-cart">🛒 0</button> <a class="header-feedback svelte-a8kxe2" target="_blank" rel="noopener noreferrer" title="Report a bug or request a feature" aria-label="Report a bug or request a feature on GitHub" data-testid="header-feedback" href="https://github.com/sensein/ohbm2026/issues/new?labels=feedback&amp;title=%5Bfeedback%5D+&amp;body=%3C%21--+Replace+this+template+with+your+bug+report+or+feature+request.+--%3E%0A%0A%23%23+What+were+you+doing%3F%0A%0A%23%23+What+happened%3F%0A%0A%23%23+What+did+you+expect%3F%0A%0A---%0A%0A%23%23+Context+%28auto-filled%3B+please+leave+intact%29%0A%0A-+**page**%3A+http%3A%2F%2Fsveltekit-prerender%2Fpr-59%2Fohbm2026%2F%0A-+**user-agent**%3A+%0A%0A%23%23%23+deploy+build_info%0A-+code_revision_short%3A+%60bfd2dfd%60%0A-+code_revision%3A+%60bfd2dfd78ae1493e86a208f278059ed607ba3aa7%60%0A-+built_at%3A+2026-06-01T03%3A10%3A29Z"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></a> <button type="button" class="theme-toggle svelte-1cmi4dh" aria-label="Theme: auto (currently light)" title="Theme: auto (currently light)" data-testid="theme-toggle" data-theme-choice="auto"><span class="icon svelte-1cmi4dh" aria-hidden="true">◐</span> <span class="label-text svelte-1cmi4dh">auto</span></button><!----></div></div></header><!----> <!--[0--><div class="tour-cta svelte-12qhfyh" data-testid="tour-cta"><span class="svelte-12qhfyh">New here? Take a 60-second tour of the search, map, and saved-list features.</span> <button type="button" class="tour-cta-start svelte-12qhfyh" data-testid="tour-cta-start">Start tour</button> <button type="button" class="tour-cta-skip svelte-12qhfyh" aria-label="Dismiss" data-testid="tour-cta-skip">×</button></div><!--]--> <main class="svelte-12qhfyh"><!--[--><!--[--><!--[-1--><div class="home svelte-1uha8ag"><div class="top-row svelte-1uha8ag"><div class="search-row svelte-1uha8ag"><div class="searchbar svelte-yyldap" role="search" data-corpus="ohbm2026"><label for="search-input" class="visually-hidden svelte-yyldap">Search abstracts</label> <input id="search-input" type="search" value="" placeholder="Search… try &quot;phrase&quot;, -exclude, word OR word, id:1234 (typos OK)" autocomplete="off" spellcheck="false" data-testid="search-input" class="svelte-yyldap"/> <div class="actions svelte-yyldap"><!--[-1--><!--]--> <button type="button" class="icon-btn help-btn svelte-yyldap" aria-label="Search syntax help" aria-expanded="false" title="Search syntax help" data-testid="search-help-toggle">?</button></div> <!--[-1--><!--]--> <!--[-1--><!--]--></div><!----> <span class="kbd-hint svelte-1uha8ag" data-testid="goto-kbd-hint" aria-hidden="true"><kbd class="svelte-1uha8ag">g</kbd> jump to poster id</span> <!--[-1--><!--]--></div> <!--[-1--><!--]--></div> <!--[-1--><!--]--> <!--[0--><p class="status svelte-1uha8ag">Loading…</p><!--]--></div><!--]--><!--]--><!--]--></main> <!----> <!--[-1--><!--]--><!----> <!--[-1--><!--]--><!----> <footer class="build-info svelte-b4k9dg" data-testid="build-info-footer"><!--[0--><button type="button" aria-expanded="false" aria-controls="build-info-detail" class="summary svelte-b4k9dg"><span class="label svelte-b4k9dg">build</span> <code data-testid="build-info-short-sha" class="svelte-b4k9dg">bfd2dfd</code> <!--[0--><span class="sep svelte-b4k9dg">·</span> <time datetime="2026-06-01T03:10:29Z">2026-06-01T03:10:29Z</time><!--]--> <!--[-1--><!--]--> <!--[-1--><!--]--></button> <!--[-1--><!--]--><!--]--></footer><!----></div><!--]--><!--]--> <!--[-1--><!--]--><!--]-->
+			
+			<script>
+				{
+					__sveltekit_1y0eb21 = {
+						base: "/pr-59/ohbm2026",
+						assets: "/pr-59/ohbm2026"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/pr-59/ohbm2026/_app/immutable/entry/start.DICxk4Ee.js"),
+						import("/pr-59/ohbm2026/_app/immutable/entry/app.D11YJiGI.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element, {
+							node_ids: [0, 2],
+							data: [null,null],
+							form: null,
+							error: null
+						});
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>

@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- Base-path-aware favicon: /pr-59/ohbm2026 resolves to the per-mode
+		     base (/ohbm2026, /neuroscape, or atlas-root), so each deployment
+		     serves its own copy and the bare /favicon.ico request is suppressed. -->
+		<link rel="icon" href="/pr-59/ohbm2026/favicon.svg" type="image/svg+xml" />
+		<!-- Fallback meta description. The per-mode <title> is set by the Svelte
+		     layout (and baked into the prerendered HTML, so no-JS visitors and
+		     crawlers get it too); the layout sets no description, so this single
+		     additive tag covers all modes. No static <title> here — a second
+		     title element would win over the per-mode one (first-in-tree-order). -->
+		<meta
+			name="description"
+			content="Abstract Atlas — an interactive map of OHBM 2026 abstracts within the NeuroScape PubMed neuroscience landscape (1999–2023), with semantic and lexical search and a pannable 2D/3D map."
+		/>
+		<script>
+			// Theme boot — runs before any rendering to avoid FOUC.
+			// Resolves `light` | `dark` | `auto` from localStorage and sets
+			// data-theme on <html> + the CSS color-scheme so native form
+			// controls + scrollbars adopt the right palette immediately.
+			(function () {
+				try {
+					var raw = localStorage.getItem('ohbm2026.ui.theme.v1');
+					var choice = raw === 'light' || raw === 'dark' || raw === 'auto' ? raw : 'auto';
+					var effective =
+						choice === 'auto'
+							? window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'dark'
+								: 'light'
+							: choice;
+					document.documentElement.setAttribute('data-theme', effective);
+					document.documentElement.style.colorScheme = effective;
+				} catch (e) {
+					// localStorage might be unavailable; default to system pref.
+					document.documentElement.setAttribute(
+						'data-theme',
+						window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+					);
+				}
+			})();
+		</script>
+		<!-- Google tag (gtag.js) — measurement id G-5LQ42EDHPF.
+		     Boot decision tree, evaluated synchronously here so the
+		     banner that depends on this state doesn't flash and gtag
+		     itself is initialised before any pageview is recorded:
+
+		       1. PR-preview path (/pr-<N>/) → skip entirely. We do not
+		          want reviewer + bot traffic on preview deployments
+		          polluting the production analytics property.
+		       2. DNT (`navigator.doNotTrack === '1'` / `'yes'`) OR GPC
+		          (`navigator.globalPrivacyControl === true`) → skip
+		          entirely. The user has signalled non-consent at the
+		          browser level; we respect that without asking.
+		       3. Saved consent in localStorage → use it: load gtag with
+		          analytics_storage 'granted' on accept, 'denied' on
+		          decline (declined users keep gtag loaded so a future
+		          consent-update can re-enable it without a page reload).
+		       4. No saved choice → 'pending'. Load gtag with consent
+		          defaulted to denied; the ConsentBanner Svelte component
+		          will mount on hydration and call gtag('consent',
+		          'update', …) once the user picks.
+
+		     `window.__ohbmAnalyticsConsent` is the shared variable the
+		     banner reads to decide whether to render. -->
+		<script>
+			(function () {
+				var STORAGE_KEY = 'ohbm2026.analytics.consent.v1';
+				var state = 'no-analytics';
+				try {
+					var p = window.location.pathname || '';
+					if (/^\/pr-\d+(\/|$)/.test(p)) {
+						window.__ohbmAnalyticsConsent = 'pr-preview';
+						return;
+					}
+					var dnt = navigator.doNotTrack || window.doNotTrack || navigator.msDoNotTrack;
+					if (dnt === '1' || dnt === 'yes' || dnt === 1) {
+						window.__ohbmAnalyticsConsent = 'blocked-dnt';
+						return;
+					}
+					if (navigator.globalPrivacyControl === true) {
+						window.__ohbmAnalyticsConsent = 'blocked-gpc';
+						return;
+					}
+					var saved = null;
+					try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+					if (saved === 'granted') state = 'granted';
+					else if (saved === 'denied') state = 'denied';
+					else state = 'pending';
+				} catch (e) {
+					window.__ohbmAnalyticsConsent = 'blocked-error';
+					return;
+				}
+				window.__ohbmAnalyticsConsent = state;
+
+				window.dataLayer = window.dataLayer || [];
+				function gtag() { window.dataLayer.push(arguments); }
+				window.gtag = gtag;
+				// Google Consent Mode v2 default — set BEFORE the
+				// library loads so the initial pageview respects it.
+				gtag('consent', 'default', {
+					analytics_storage: state === 'granted' ? 'granted' : 'denied',
+					ad_storage: 'denied',
+					ad_user_data: 'denied',
+					ad_personalization: 'denied',
+					wait_for_update: 500
+				});
+				gtag('js', new Date());
+				gtag('config', 'G-5LQ42EDHPF', { anonymize_ip: true });
+
+				var s = document.createElement('script');
+				s.async = true;
+				s.src = 'https://www.googletagmanager.com/gtag/js?id=G-5LQ42EDHPF';
+				document.head.appendChild(s);
+			})();
+		</script>
+		<link href="/pr-59/ohbm2026/_app/immutable/entry/start.DICxk4Ee.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/BrDe4G9N.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/Db9XsndZ.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/D7_hrAKG.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/entry/app.D11YJiGI.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/DLugvD8-.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/BKT_6NDN.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/B_uEPX93.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/SMgBhM2j.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/nodes/0.Dv387IUx.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/RZfzwb50.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/DdeDTspS.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/A7bTxsrO.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/DLYAVu1x.js" rel="modulepreload">
+		<link href="/pr-59/ohbm2026/_app/immutable/chunks/CpPKRz6P.js" rel="modulepreload">
+		
+		<link href="/pr-59/ohbm2026/_app/immutable/assets/0.BIzrgnTf.css" rel="stylesheet">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<!-- No-JavaScript landing. The atlas is a client-rendered SPA, so without
+		     JS the app div stays empty — this gives those visitors a real page:
+		     what the atlas is, that it needs JS, and how to enable it. Styled
+		     inline (scoped <style>) so it works with zero app CSS/JS, and
+		     theme-aware via prefers-color-scheme since the data-theme boot
+		     script also never runs without JS. -->
+		<noscript>
+			<style>
+				/* Hide the (empty) app shell so only this card shows without JS. */
+				#svelte,
+				[data-sveltekit-preload-data] > div[style] {
+					display: none !important;
+				}
+				.noscript-wrap {
+					box-sizing: border-box;
+					min-height: 100vh;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					padding: 2rem 1.25rem;
+					font-family:
+						-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+						sans-serif;
+					background: #f8fafc;
+					color: #1e293b;
+				}
+				.noscript-card {
+					max-width: 34rem;
+					width: 100%;
+					background: #ffffff;
+					border: 1px solid #e2e8f0;
+					border-radius: 14px;
+					padding: 2rem 2rem 1.75rem;
+					box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+					text-align: left;
+				}
+				.noscript-card svg {
+					width: 44px;
+					height: 44px;
+					display: block;
+					margin-bottom: 1rem;
+				}
+				.noscript-card h1 {
+					margin: 0 0 0.5rem;
+					font-size: 1.4rem;
+					line-height: 1.2;
+				}
+				.noscript-card .lead {
+					margin: 0 0 1rem;
+					color: #475569;
+					font-size: 1rem;
+					line-height: 1.5;
+				}
+				.noscript-card p {
+					margin: 0 0 1rem;
+					font-size: 0.95rem;
+					line-height: 1.55;
+				}
+				.noscript-card .cta {
+					margin: 0;
+					padding: 0.75rem 1rem;
+					border-radius: 10px;
+					background: #eef4ff;
+					border: 1px solid #cfe0fb;
+					color: #1e3a8a;
+					font-size: 0.95rem;
+					line-height: 1.5;
+				}
+				.noscript-card .how {
+					margin: 0.75rem 0 0;
+					font-size: 0.85rem;
+					color: #64748b;
+				}
+				@media (prefers-color-scheme: dark) {
+					.noscript-wrap {
+						background: #0f172a;
+						color: #e2e8f0;
+					}
+					.noscript-card {
+						background: #1e293b;
+						border-color: #334155;
+						box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+					}
+					.noscript-card .lead {
+						color: #cbd5e1;
+					}
+					.noscript-card .cta {
+						background: #1e3a5f;
+						border-color: #2d4a6b;
+						color: #dbeafe;
+					}
+					.noscript-card .how {
+						color: #94a3b8;
+					}
+				}
+			</style>
+			<div class="noscript-wrap">
+				<div class="noscript-card">
+					<svg viewBox="0 0 32 32" role="img" aria-label="Abstract Atlas" xmlns="http://www.w3.org/2000/svg">
+						<g stroke="#334155" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round">
+							<path d="M5 8 L12.3 6 L19 8 L27 6 L27 24 L19 26 L12.3 24 L5 26 Z" fill="#ffffff" />
+							<path d="M12.3 6 V24 M19 8 V26" stroke="#94a3b8" stroke-width="1.2" fill="none" />
+						</g>
+						<path
+							d="M16 10 a3.3 3.3 0 0 1 3.3 3.3 c0 2.4 -3.3 5.5 -3.3 5.5 s-3.3 -3.1 -3.3 -5.5 a3.3 3.3 0 0 1 3.3 -3.3 Z"
+							fill="#ff5252"
+							stroke="#b3262b"
+							stroke-width="0.8"
+							stroke-linejoin="round"
+						/>
+						<circle cx="16" cy="13.3" r="1.2" fill="#ffffff" />
+					</svg>
+					<h1>Abstract Atlas</h1>
+					<p class="lead">
+						An interactive map of neuroscience research — OHBM 2026 abstracts placed
+						within the NeuroScape PubMed landscape (1999–2023).
+					</p>
+					<p>
+						The atlas runs entirely in your browser: semantic and lexical search, a
+						2D/3D map you can pan, zoom, and lasso-select, and linked abstract detail
+						pages. All of that needs JavaScript, which is currently disabled.
+					</p>
+					<p class="cta">
+						Please enable JavaScript and reload this page to explore the atlas.
+					</p>
+					<p class="how">
+						Most browsers: Settings → Privacy / Site settings → JavaScript → Allowed,
+						then reload.
+					</p>
+				</div>
+			</div>
+		</noscript>
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_1y0eb21 = {
+						base: "/pr-59/ohbm2026",
+						assets: "/pr-59/ohbm2026"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/pr-59/ohbm2026/_app/immutable/entry/start.DICxk4Ee.js"),
+						import("/pr-59/ohbm2026/_app/immutable/entry/app.D11YJiGI.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>
