@@ -423,6 +423,11 @@
 	$: facetCtx = buildFacetCtx(cellShard, cellTopics);
 	$: facetIds = filterByFacets(abstracts, $activeFilters, facetCtx);
 	$: cartIds = $cartOnly ? cartIdsFromStore(abstractsByPosterId, $cartStore) : null;
+	// Spec 021 — OHBM cross-site cart scope for the "Cart only" warning +
+	// empty states. The cart spans sites; on the OHBM home only saved ohbm
+	// items present in the corpus are displayable, so neuroscape (and stale)
+	// items drive the warning. Membership discovered at runtime.
+	$: ohbmCartScope = savedInCorpus($cartItems, (kind, id) => kind === 'ohbm2026' && abstractsByPosterId.has(id));
 	// Build a Map<author_name, poster_ids> on the fly when the chip set
 	// changes, then intersect. Empty chip set → null (no filter).
 	$: authorChipIds = computeAuthorChipIds($authorChips, abstracts, authorsById);
@@ -2397,14 +2402,14 @@
 					type="button"
 					class="control-toggle"
 					class:active={$cartOnly}
-					disabled={$cartStore.size === 0 && !$cartOnly}
+					disabled={$cartItems.length === 0 && !$cartOnly}
 					on:click={() => cartOnly.update((v) => !v)}
 					aria-pressed={$cartOnly}
 					title={$cartOnly
 						? 'Showing cart items only — click to show everything'
-						: $cartStore.size === 0
+						: $cartItems.length === 0
 							? 'Cart-only filter — your cart is empty'
-							: `Filter to the ${$cartStore.size} cart item${$cartStore.size === 1 ? '' : 's'}`}
+							: `Filter to your ${$cartItems.length} cart item${$cartItems.length === 1 ? '' : 's'} available here`}
 					data-testid="toggle-cart-only"
 				>
 					{$cartOnly ? '✓ Cart' : 'Cart only'}
@@ -2451,6 +2456,25 @@
 				<FacetSidebar counts={facetCounts} />
 			</div>
 			<div class="list-pane">
+				<!-- Spec 021 — "Cart only" cross-site notice + empty states (OHBM home). -->
+				{#if $cartOnly}
+					{#if $cartItems.length === 0}
+						<p class="cart-only-note" data-testid="cart-only-empty">
+							Your cart is empty — save abstracts to use “Cart only”.
+						</p>
+					{:else if ohbmCartScope.hiddenCount === $cartItems.length}
+						<p class="cart-only-note" data-testid="cart-only-warning">
+							None of your {$cartItems.length} saved item{$cartItems.length === 1 ? '' : 's'}
+							are available in this site (saved from other collections).
+						</p>
+					{:else if ohbmCartScope.hiddenCount > 0}
+						<p class="cart-only-note" data-testid="cart-only-warning">
+							Cart only — showing only saved items available in this site.
+							{ohbmCartScope.hiddenCount} saved item{ohbmCartScope.hiddenCount === 1 ? '' : 's'}
+							from other collections {ohbmCartScope.hiddenCount === 1 ? 'is' : 'are'} hidden.
+						</p>
+					{/if}
+				{/if}
 				<ResultList
 					{abstracts}
 					{authorsById}

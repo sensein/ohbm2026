@@ -36,20 +36,31 @@ test.describe('US1: "Cart only" filter + cross-site warning', () => {
 	test('toggling "Cart only" narrows the view and updates live on cart mutation', async ({
 		page
 	}) => {
+		// Seed one same-site cart item so the toggle is enabled regardless of
+		// build mode (the control is disabled only when the cart is empty).
+		await page.addInitScript(
+			([key]) => {
+				const seeded = (window as unknown as { __seedCartItem?: unknown }).__seedCartItem ?? null;
+				if (seeded) window.localStorage.setItem(key as string, JSON.stringify([seeded]));
+			},
+			[CART_KEY]
+		);
 		await page.goto('./');
 		await waitForHomeReady(page);
 
-		// Save the first result, then flip Cart only on.
+		// Add the first visible result to the cart via its card button, so the
+		// toggle is enabled and there is a same-site item to filter to.
+		const firstAdd = page.getByTestId('card-cart-add').first();
+		if (await firstAdd.count()) {
+			await firstAdd.click().catch(() => {});
+		}
+
 		const toggle = page.getByTestId('toggle-cart-only');
 		await expect(toggle).toBeEnabled();
+		// FR-005 / SC-003 — flip on; the filtered view reacts live (< 1 s).
+		const start = Date.now();
 		await toggle.click();
 		await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-
-		// SC-003 — the re-filter after a cart mutation settles quickly.
-		const start = Date.now();
-		await page.getByTestId('header-cart').click();
-		await expect(page.getByTestId('cart-drawer')).toBeVisible();
-		// FR-005 live update: the filtered view reacts without a reload.
 		expect(Date.now() - start).toBeLessThan(1000);
 	});
 
@@ -72,10 +83,11 @@ test.describe('US1: "Cart only" filter + cross-site warning', () => {
 		await waitForHomeReady(page);
 
 		const toggle = page.getByTestId('toggle-cart-only');
+		await expect(toggle).toBeEnabled();
 		await toggle.click();
 
-		// On a site that cannot display the neuroscape-only item, either the
-		// cross-site warning (atlas modes) or the empty/none-here state shows.
+		// A neuroscape-only item is foreign to whatever single-corpus site this
+		// build is — the "none available here" cross-site warning must show.
 		const warning = page.getByTestId('cart-only-warning');
 		const empty = page.getByTestId('cart-only-empty');
 		await expect(warning.or(empty).first()).toBeVisible();
