@@ -109,11 +109,20 @@ export interface RankerConfig {
 	knnIndex: Map<bigint, KnnEntry>;
 	/** Default 4 per FR-024. */
 	clusterCap?: number;
+	/** Cosine-distance relevance horizon for the cluster sweep (default 0.8).
+	 *  Once a swept cluster's best hit exceeds this, the nearest-first sweep
+	 *  stops — far/irrelevant clusters are never fetched. Mirrors the caller's
+	 *  SEMANTIC_MAX_DISTANCE. */
+	maxDistance?: number;
 }
 
 const DEFAULT_CLUSTER_CAP = 4;
 const TOP_K_SEEDS = 3;
 const MIN_QUERY_CHARS = 3;
+// Cosine-distance relevance horizon for the progressive sweep — mirrors the
+// caller's SEMANTIC_MAX_DISTANCE. Once a cluster's best hit exceeds this, the
+// (nearest-first) sweep stops.
+const DEFAULT_MAX_DISTANCE = 0.8;
 // How many clusters we keep resident beyond the per-query fetch budget so
 // that consecutive queries about adjacent topics reuse warm clusters (LRU
 // cache hit → no re-fetch) instead of re-ranging the sidecar each time.
@@ -172,21 +181,19 @@ class NeuroscapeRanker {
 		if (maps.knnIndex) this.cfg.knnIndex = maps.knnIndex;
 	}
 
-	private routeToCluster(queryVector: Float32Array): number {
-		// Dense argmax over the ~50 centroids; trivially cheap.
-		let bestId = this.cfg.centroids[0]?.cluster_id ?? 0;
-		let bestScore = -Infinity;
-		for (const c of this.cfg.centroids) {
+	private rankClusters(queryVector: Float32Array): Array<{ cluster_id: number; sim: number }> {
+		// Dense cosine-similarity score for every centroid (~175 dot products,
+		// trivially cheap), sorted descending → the nearest-first order the
+		// progressive sweep visits. Replaces single-cluster argmax routing.
+		const scored = this.cfg.centroids.map((c) => {
 			let s = 0;
 			for (let i = 0; i < queryVector.length; i++) {
 				s += queryVector[i] * c.centroid_vector[i];
 			}
-			if (s > bestScore) {
-				bestScore = s;
-				bestId = c.cluster_id;
-			}
-		}
-		return bestId;
+			return { cluster_id: c.cluster_id, sim: s };
+		});
+		scored.sort((a, b) => b.sim - a.sim);
+		return scored;
 	}
 
 	private async ensureClusterLoaded(
@@ -262,37 +269,65 @@ class NeuroscapeRanker {
 			this.setState('embedding', hooks);
 			const qv = await this.cfg.worker.encodeQuery(queryText);
 
-			// Step 2: route.
+			// Step 2: rank ALL centroids by similarity → nearest-first sweep order.
 			this.setState('routing', hooks);
-			const routedCluster = this.routeToCluster(qv);
+			const rankedClusters = this.rankClusters(qv);
 
-			// Step 3: ensure cluster vectors loaded.
+			// Steps 3-4: relevance-bounded progressive sweep. Visit clusters
+			// nearest-first, brute-forcing seeds in each, and STOP at the
+			// relevance horizon — once a cluster's best hit falls beyond the
+			// distance threshold, less-similar clusters (visited later) cannot
+			// beat it, so there's no need to fetch them. This replaces routing to
+			// a SINGLE cluster, which could never reach a relevant article in a
+			// neighbouring cluster (the non-exhaustiveness gap). The per-query
+			// FR-024 fetch cap (ensureClusterLoaded) bounds bandwidth; "Expand
+			// search depth" lifts it. Step 5's KNN-expansion then reaches near
+			// cross-cluster neighbours cheaply via the graph, without fetching
+			// their vectors.
 			this.setState('fetching-vectors', hooks);
-			const loadStatus = await this.ensureClusterLoaded(routedCluster, hooks);
-			if (loadStatus === 'cap-exceeded') {
-				this.setState('cap-exceeded', hooks);
+			const maxDistance = this.cfg.maxDistance ?? DEFAULT_MAX_DISTANCE;
+			// Per-cluster seed budget: with no KNN graph resident (atlas-root) the
+			// brute-force IS the candidate set, so pull topK from each swept
+			// cluster; with a graph, a smaller per-cluster slice seeds the
+			// cross-cluster KNN expansion.
+			const perCluster =
+				this.cfg.knnIndex.size === 0
+					? Math.max(topK, TOP_K_SEEDS)
+					: Math.max(TOP_K_SEEDS, Math.ceil(topK / 4));
+			const seeds: Array<{ id: bigint; cosine: number }> = [];
+			// Seeds carry their OWN cluster (we just brute-forced them from it), so
+			// they resolve below even when pubmedToCluster omits them (atlas-root's
+			// sparse map — the regression #59 first patched; now structural).
+			const seedClusterById = new Map<bigint, number>();
+			for (const { cluster_id } of rankedClusters) {
+				const status = await this.ensureClusterLoaded(cluster_id, hooks);
+				if (status === 'cap-exceeded') {
+					// Bandwidth cap reached. If nothing gathered yet (first cluster
+					// already over budget) surface cap-exceeded; else keep what we
+					// have and stop sweeping.
+					if (seeds.length === 0) {
+						this.setState('cap-exceeded', hooks);
+						return [];
+					}
+					break;
+				}
+				this.setState('brute-force', hooks);
+				const hits = await this.cfg.worker.bruteForceCluster(cluster_id, qv, perCluster);
+				for (const h of hits) {
+					if (!seedClusterById.has(h.id)) {
+						seeds.push(h);
+						seedClusterById.set(h.id, cluster_id);
+					}
+				}
+				// Relevance horizon (user directive): stop once semantic distance
+				// crosses the threshold — don't visit very far clusters.
+				const bestCosine = hits.reduce((m, h) => Math.max(m, h.cosine), -1);
+				if (1 - bestCosine > maxDistance) break;
+			}
+			if (seeds.length === 0) {
+				this.setState('ready', hooks);
 				return [];
 			}
-
-			// Step 4: brute-force seeds within cluster.
-			// Normally 3 seeds then KNN-expand fans out to the broader
-			// candidate set. But when no KNN graph is resident (atlas-root's
-			// backdrop ships no neighbour table), knnExpandFromSeeds yields
-			// only the seeds themselves — so 3 seeds would cap the result at
-			// 3 rows. Brute-force topK seeds directly in that case so the
-			// routed cluster alone can fill the result list.
-			this.setState('brute-force', hooks);
-			const seedCount =
-				this.cfg.knnIndex.size === 0 ? Math.max(topK, TOP_K_SEEDS) : TOP_K_SEEDS;
-			const seeds = await this.cfg.worker.bruteForceCluster(routedCluster, qv, seedCount);
-			// Seeds were brute-forced FROM `routedCluster`, so their cluster is
-			// known even when `pubmedToCluster` omits them. atlas-root builds that
-			// map from the LOD scatter sample (a few hundred points), which omits
-			// nearly every full-corpus id the brute-force returns — without this,
-			// every seed is dropped below and the routed cluster yields zero
-			// results (the atlas-root semantic regression). Neuroscape's map is
-			// the full corpus, so this fallback never triggers there.
-			const seedClusterById = new Map<bigint, number>(seeds.map((s) => [s.id, routedCluster]));
 
 			// Step 5: KNN-expand.
 			this.setState('knn-expand', hooks);

@@ -219,6 +219,81 @@ describe('NeuroscapeRanker — 5-step pipeline (T013)', () => {
 		expect(ids).toContain(200n); // neighbour-only → proves updateMaps took effect
 	});
 
+	it('progressive sweep reaches a relevant article in a neighbouring cluster (exhaustiveness)', async () => {
+		// Single-cluster routing could only ever return cluster 0's hits. The
+		// sweep visits the next-nearest cluster too, so a relevant article there
+		// (20n, within threshold) is surfaced.
+		const centroids = [
+			{ cluster_id: 0, centroid_vector: new Float32Array([1, 0, 0, 0]) },
+			{ cluster_id: 1, centroid_vector: new Float32Array([0, 1, 0, 0]) }
+		];
+		const perCluster: Record<number, Array<{ id: bigint; cosine: number }>> = {
+			0: [{ id: 10n, cosine: 0.9 }],
+			1: [{ id: 20n, cosine: 0.7 }]
+		};
+		const cfg = makeBaseCfg({
+			centroids,
+			knnIndex: new Map<bigint, KnnEntry>(),
+			pubmedToCluster: new Map<bigint, number>([
+				[10n, 0],
+				[20n, 1]
+			]),
+			worker: {
+				...makeBaseCfg().worker,
+				encodeQuery: vi.fn(async () => new Float32Array([0.9, 0.3, 0, 0])),
+				bruteForceCluster: vi.fn(async (cid: number) => perCluster[cid] ?? []),
+				rerank: vi.fn(async (cands: Array<{ id: bigint; cluster_id: number }>) =>
+					cands.map((c, i) => ({ id: c.id, cosine: 0.9 - i * 0.01 }))
+				)
+			} as WorkerLike
+		});
+		const r = new NeuroscapeRanker(cfg);
+		const ids = (await r.searchNeuroscape(parsedFromText('memory'), 10)).map((h) => h.id);
+		expect(ids).toContain(10n); // nearest cluster
+		expect(ids).toContain(20n); // neighbouring cluster — missed by single-cluster routing
+	});
+
+	it('sweep stops at the distance threshold — far clusters are not fetched', async () => {
+		const centroids = [
+			{ cluster_id: 0, centroid_vector: new Float32Array([1, 0, 0, 0]) },
+			{ cluster_id: 1, centroid_vector: new Float32Array([0, 1, 0, 0]) },
+			{ cluster_id: 2, centroid_vector: new Float32Array([0, 0, 1, 0]) }
+		];
+		// cluster 1's best hit is beyond the 0.8 distance horizon (cosine 0.1 →
+		// dist 0.9), so the sweep stops there; cluster 2 must never be fetched
+		// even though it holds a 0.99 hit (the "no very far clusters" directive).
+		const perCluster: Record<number, Array<{ id: bigint; cosine: number }>> = {
+			0: [{ id: 10n, cosine: 0.95 }],
+			1: [{ id: 20n, cosine: 0.1 }],
+			2: [{ id: 30n, cosine: 0.99 }]
+		};
+		const bf = vi.fn(async (cid: number) => perCluster[cid] ?? []);
+		const cfg = makeBaseCfg({
+			centroids,
+			knnIndex: new Map<bigint, KnnEntry>(),
+			pubmedToCluster: new Map<bigint, number>([
+				[10n, 0],
+				[20n, 1],
+				[30n, 2]
+			]),
+			maxDistance: 0.8,
+			worker: {
+				...makeBaseCfg().worker,
+				encodeQuery: vi.fn(async () => new Float32Array([0.9, 0.5, 0.2, 0])),
+				bruteForceCluster: bf,
+				rerank: vi.fn(async (cands: Array<{ id: bigint; cluster_id: number }>) =>
+					cands.map((c, i) => ({ id: c.id, cosine: 0.9 - i * 0.01 }))
+				)
+			} as WorkerLike
+		});
+		const r = new NeuroscapeRanker(cfg);
+		await r.searchNeuroscape(parsedFromText('memory'), 10);
+		const fetched = bf.mock.calls.map((c) => c[0]);
+		expect(fetched).toContain(0);
+		expect(fetched).toContain(1); // boundary cluster fetched, then stop
+		expect(fetched).not.toContain(2); // beyond the horizon → never fetched
+	});
+
 	it('keeps the default 3 seeds when a KNN graph IS resident', async () => {
 		const cfg = makeBaseCfg();
 		const r = new NeuroscapeRanker(cfg);

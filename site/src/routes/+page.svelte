@@ -1385,7 +1385,10 @@
 					centroid_vector: c.centroid_vector
 				})),
 				pubmedToCluster,
-				knnIndex
+				knnIndex,
+				// Same relevance horizon the KNN-fallback + display gate use, so the
+				// progressive sweep stops fetching clusters at the same distance.
+				maxDistance: SEMANTIC_MAX_DISTANCE
 			});
 			rankerReady = true;
 			// Capture any full-corpus / neighbours rows that landed during init.
