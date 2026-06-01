@@ -9,8 +9,8 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import { base } from '$app/paths';
-	import { searchTitleIndex, type InvertedIndex } from '$lib/filter';
-	import { parseIdOperator } from '$lib/goto_poster';
+	import { type InvertedIndex } from '$lib/filter';
+	import { assembleResults, type CorpusSource } from '$lib/search/assemble';
 	import { cartStore, cartNeuroPubmedIds } from '$lib/stores/cart';
 	import CartIconButton from '$lib/components/CartIconButton.svelte';
 	import InlineLoader from '$lib/components/InlineLoader.svelte';
@@ -67,57 +67,27 @@
 	// /ohbm2026/'s `lexicalSearch`, and fast (vocabulary lookup instead of a
 	// per-keystroke Damerau-Levenshtein scan over all ~461k titles).
 	$: articleById = new Map(articles.map((a) => [a.pubmed_id, a]));
-	$: filtered = (() => {
-		const trimmed = (query ?? '').trim();
-		if (!trimmed) {
-			return [...articles].sort((a, b) => b.year - a.year || a.pubmed_id - b.pubmed_id);
-		}
-		// id:N short-circuit — return the single matching article (or none)
-		// by pubmed_id; ignores the rest of the query per Stage 14's
-		// id-operator semantics on /ohbm2026/.
-		const idPayload = parseIdOperator(trimmed);
-		if (idPayload !== null) {
-			const numeric = Number(idPayload);
-			if (!Number.isFinite(numeric)) return [];
-			return articles.filter((a) => a.pubmed_id === numeric);
-		}
-		const res = searchIndex ? searchTitleIndex(searchIndex, trimmed) : null;
-		// res.ids span the FULL corpus; narrow to the facet-filtered set
-		// (`articleById`) and rank by exact-token count desc (consistent with
-		// /ohbm2026/'s exactness ranking), then year desc. A zero-row lexical
-		// result must NOT short-circuit here: an exact-phrase query like
-		// "corpus callosum disorders" has no adjacent-token title yet still
-		// has valid KNN-expanded semantic hits, so fall through to the
-		// semantic augmentation below with an empty lexical set.
-		const scored: Array<{ a: Article; exact: number }> = [];
-		if (res) {
-			for (const id of res.ids) {
-				const a = articleById.get(id);
-				if (!a) continue;
-				scored.push({ a, exact: res.exactness.get(id) ?? 0 });
-			}
-			scored.sort(
-				(x, y) => y.exact - x.exact || y.a.year - x.a.year || x.a.pubmed_id - y.a.pubmed_id
-			);
-		}
-		const lexicalHits = scored.map((s) => s.a);
-		if (lexicalHits.length === 0 && semanticHits.size === 0) return [];
-		// Spec 019 / FR-002 — augment with KNN-expanded semantic candidates.
-		// semanticHits maps pubmed_id → KNN distance from the nearest lexical
-		// seed; append the ones NOT already in the lexical set (they get the
-		// ✨ badge in the row template), in graph-distance order.
-		if (semanticHits.size === 0) return lexicalHits;
-		const lexicalSet = new Set(lexicalHits.map((a) => a.pubmed_id));
-		const semanticRows: Array<{ a: Article; d: number }> = [];
-		for (const [pmid, d] of semanticHits) {
-			if (lexicalSet.has(pmid)) continue;
-			const a = articleById.get(pmid);
-			if (!a) continue;
-			semanticRows.push({ a, d });
-		}
-		semanticRows.sort((x, y) => x.d - y.d);
-		return [...lexicalHits, ...semanticRows.map((s) => s.a)];
-	})();
+	// Single-corpus case of the shared N-corpus assembly (same algorithm the
+	// cross-conference atlas-root uses): lexical title hits ranked by exact
+	// tokens desc → year desc → pmid asc, then semantic-only KNN/ranker hits by
+	// ascending distance. Identical operators + typo tolerance across surfaces.
+	$: nsSource = {
+		kind: 'neuroscape',
+		index: searchIndex,
+		has: (id: number) => articleById.has(id),
+		allIds: () => articleById.keys(),
+		toRow: (id: number) => articleById.get(id) ?? null,
+		lexicalSortKey: (id: number, exact: number) => {
+			const a = articleById.get(id);
+			return [-exact, -(a?.year ?? 0), a?.pubmed_id ?? 0];
+		},
+		emptySortKey: (id: number) => {
+			const a = articleById.get(id);
+			return [-(a?.year ?? 0), a?.pubmed_id ?? 0];
+		},
+		semanticHits
+	} satisfies CorpusSource<Article>;
+	$: filtered = assembleResults<Article>([nsSource], query);
 	// Lookup for the row template to know which rows are semantic-only
 	// + what distance to show on the badge.
 	$: semanticHitMap = semanticHits;
