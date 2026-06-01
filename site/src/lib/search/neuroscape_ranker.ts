@@ -268,6 +268,14 @@ class NeuroscapeRanker {
 			const seedCount =
 				this.cfg.knnIndex.size === 0 ? Math.max(topK, TOP_K_SEEDS) : TOP_K_SEEDS;
 			const seeds = await this.cfg.worker.bruteForceCluster(routedCluster, qv, seedCount);
+			// Seeds were brute-forced FROM `routedCluster`, so their cluster is
+			// known even when `pubmedToCluster` omits them. atlas-root builds that
+			// map from the LOD scatter sample (a few hundred points), which omits
+			// nearly every full-corpus id the brute-force returns — without this,
+			// every seed is dropped below and the routed cluster yields zero
+			// results (the atlas-root semantic regression). Neuroscape's map is
+			// the full corpus, so this fallback never triggers there.
+			const seedClusterById = new Map<bigint, number>(seeds.map((s) => [s.id, routedCluster]));
 
 			// Step 5: KNN-expand.
 			this.setState('knn-expand', hooks);
@@ -275,7 +283,7 @@ class NeuroscapeRanker {
 			const candidateList: Array<{ id: bigint; cluster_id: number }> = [];
 			const knnDistanceFallback: Map<bigint, number> = new Map();
 			for (const id of candidates) {
-				const cid = this.cfg.pubmedToCluster.get(id);
+				const cid = this.cfg.pubmedToCluster.get(id) ?? seedClusterById.get(id);
 				if (cid === undefined) continue;
 				// Ensure this neighbour's cluster is loaded for re-ranking,
 				// subject to FR-024 cap. The cap-exceeded signal itself

@@ -169,6 +169,36 @@ describe('NeuroscapeRanker — 5-step pipeline (T013)', () => {
 		expect(hits.every((h) => h.score_source === 'cosine')).toBe(true);
 	});
 
+	it('atlas-root: surfaces routed-cluster seeds even when pubmedToCluster omits them (sparse-LOD regression)', async () => {
+		// PROD REGRESSION: atlas-root builds pubmedToCluster from the LOD scatter
+		// sample (a few hundred points), NOT the full corpus — so the full-corpus
+		// ids the brute-force returns from the routed cluster are absent from it.
+		// The seeds were brute-forced FROM the routed cluster, so their cluster is
+		// known regardless; the ranker must still surface them. Before the fix
+		// every seed was dropped (cid === undefined) → 0 results on atlas-root
+		// while neuroscape (full map) worked.
+		const ids = Array.from({ length: 50 }, (_, i) => BigInt(5000 + i));
+		const cfg = makeBaseCfg({
+			knnIndex: new Map<bigint, KnnEntry>(), // atlas-root: no neighbour graph
+			pubmedToCluster: new Map<bigint, number>(), // atlas-root: LOD sample omits these ids
+			worker: {
+				...makeBaseCfg().worker,
+				encodeQuery: vi.fn(async () => new Float32Array([1, 0, 0, 0])),
+				bruteForceCluster: vi.fn(async (_cid: number, _qv: Float32Array, topK: number) =>
+					ids.slice(0, topK).map((id, i) => ({ id, cosine: 0.99 - i * 0.001 }))
+				),
+				rerank: vi.fn(async (candidates: Array<{ id: bigint; cluster_id: number }>) =>
+					candidates.map((c, i) => ({ id: c.id, cosine: 0.99 - i * 0.001 }))
+				)
+			} as WorkerLike
+		});
+		const r = new NeuroscapeRanker(cfg);
+		const hits = await r.searchNeuroscape(parsedFromText('long covid complications'), 50);
+		// Before the fix: 0 (every seed dropped on the empty map). After: all 50.
+		expect(hits.length).toBe(50);
+		expect(hits.every((h) => h.score_source === 'cosine')).toBe(true);
+	});
+
 	it('keeps the default 3 seeds when a KNN graph IS resident', async () => {
 		const cfg = makeBaseCfg();
 		const r = new NeuroscapeRanker(cfg);
