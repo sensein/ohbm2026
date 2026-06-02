@@ -93,6 +93,10 @@ class UploadManifest:
     source_package_dir: str
     artifacts: list[ContentAddressedObject]
     channel_entry: dict
+    #: Spec 022 (FR-010) — the HTTP cache policy applied to every uploaded
+    #: object, recorded so a published bundle's cache policy is auditable from
+    #: provenance without re-reading each object. Uniform per publish.
+    cache_control: str = ""
 
     def __post_init__(self) -> None:
         # CA-008: the recorded package dir MUST be repo-relative. This
@@ -124,6 +128,7 @@ class UploadManifest:
             "source_package_dir": self.source_package_dir,
             "artifacts": [o.to_dict() for o in self.artifacts],
             "channel_entry": self.channel_entry,
+            "cache_control": self.cache_control,
         }
 
     @classmethod
@@ -138,6 +143,7 @@ class UploadManifest:
             source_package_dir=data["source_package_dir"],
             artifacts=[ContentAddressedObject.from_dict(a) for a in data["artifacts"]],
             channel_entry=data["channel_entry"],
+            cache_control=data.get("cache_control", ""),
         )
 
     def write(self, out_dir: Path | str) -> Path:

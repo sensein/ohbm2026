@@ -89,6 +89,7 @@ __all__ = [
     "ContentHashMismatchError",
     "ArtifactDiscoveryError",
     "HostingComparisonError",
+    "DataHostingCacheError",
 ]
 
 
@@ -814,4 +815,31 @@ class HostingComparisonError(Stage20Error):
         super().__init__(message)
         self.url = url
         self.probe = probe
+        self.reason = reason
+
+
+class DataHostingCacheError(Stage20Error):
+    """The R2 host is not edge-cache-effective, or a cached range mismatched.
+
+    Spec 022 (``specs/022-r2-edge-caching/``). Raised by the cache
+    verification when a warm request is still bypassing the edge cache
+    (``cf-cache-status`` DYNAMIC/BYPASS/absent) or when a cached partial
+    (206) response does not byte-match the origin partial for the same
+    range. A *recorded* per-probe flag in the report is the default
+    (Principle VI — surfaced, never silently passed); this is raised only
+    when the caller asks for a hard failure. Carries (``url``, ``kind``,
+    ``reason``).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        url: str | None = None,
+        kind: str | None = None,
+        reason: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.url = url
+        self.kind = kind
         self.reason = reason

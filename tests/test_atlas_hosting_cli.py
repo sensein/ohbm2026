@@ -6,11 +6,57 @@ Spec: ``specs/020-cloudflare-r2-migration/`` —
 
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import mock
 
 from ohbm2026 import cli as top_cli
 from ohbm2026.atlas_hosting import cli as hosting_cli
+from ohbm2026.atlas_hosting.compare import (
+    ArtifactComparison,
+    CacheProbe,
+    ComparisonReport,
+    EndpointProbe,
+)
+
+
+def _report(cache_effective):
+    ep = EndpointProbe(
+        url="https://r2/o.parquet",
+        reachable=True,
+        sha256="a",
+        status=200,
+        range_supported=True,
+        cors_allowed=True,
+        revalidation_cors=True,
+        latency_ms=1.0,
+        error=None,
+    )
+    cp = CacheProbe(
+        url="https://r2/o.parquet",
+        kind="full",
+        cf_cache_status="DYNAMIC" if cache_effective is False else "HIT",
+        age=None,
+        cache_control="public, max-age=31536000, immutable",
+        cached=cache_effective is True,
+        warmed=False,
+        cold_ms=1.0,
+        warm_ms=1.0,
+        range_byte_parity=None,
+        flag=None if cache_effective else "not edge-cached",
+    )
+    art = ArtifactComparison("ohbm2026", ep, ep, True, True, [cp])
+    return ComparisonReport(
+        generated_utc="2026-06-02T00:00:00+00:00",
+        origin="https://abstractatlas.brainkb.org",
+        dropbox_channel="d",
+        r2_channel="r",
+        artifacts=[art],
+        overall_pass=True,
+        cache_effective=cache_effective,
+    )
 
 
 class UploadParserTests(unittest.TestCase):
@@ -93,6 +139,38 @@ class CompareParserAndExitCodeTests(unittest.TestCase):
             )
         self.assertEqual(rc, 0)
         compare_main.assert_called_once()
+
+
+class RequireCacheGateTests(unittest.TestCase):
+    """Spec 022 — `--require-cache` exits non-zero via DataHostingCacheError
+    when the host is not edge-cache-effective (CA-006 loud failure)."""
+
+    def _run(self, cache_effective, extra_args):
+        with TemporaryDirectory() as td:
+            reg = Path(td) / "registry.json"
+            reg.write_text(json.dumps({"d": {"ohbm2026": {"url": "u"}}, "r": {"ohbm2026": {"url": "u"}}}))
+            argv = [
+                "--registry", str(reg),
+                "--dropbox-channel", "d",
+                "--r2-channel", "r",
+                "--origin", "https://abstractatlas.brainkb.org",
+                "--report-out", td,
+                *extra_args,
+            ]
+            with mock.patch.object(
+                hosting_cli.compare, "compare_channels", return_value=_report(cache_effective)
+            ):
+                return hosting_cli.compare_main(argv)
+
+    def test_require_cache_fails_when_not_effective(self) -> None:
+        self.assertEqual(self._run(False, ["--verify-cache", "--require-cache"]), 3)
+
+    def test_require_cache_passes_when_effective(self) -> None:
+        self.assertEqual(self._run(True, ["--verify-cache", "--require-cache"]), 0)
+
+    def test_require_cache_without_probe_fails(self) -> None:
+        # --require-cache but no --verify-cache → cache_effective is None → gate fails.
+        self.assertEqual(self._run(None, ["--require-cache"]), 3)
 
 
 if __name__ == "__main__":

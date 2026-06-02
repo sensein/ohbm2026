@@ -16,7 +16,8 @@
     "uploaded_utc",
     "source_package_dir",
     "artifacts",
-    "channel_entry"
+    "channel_entry",
+    "cache_control"
   ],
   "properties": {
     "schema_version": { "const": "atlas_upload_manifest.v1" },
@@ -37,7 +38,12 @@
       "minItems": 4,
       "items": { "$ref": "#/$defs/contentAddressedObject" }
     },
-    "channel_entry": { "$ref": "#/$defs/channelEntry" }
+    "channel_entry": { "$ref": "#/$defs/channelEntry" },
+    "cache_control": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Spec 022 (FR-010): the HTTP Cache-Control policy applied to every uploaded object, e.g. 'public, max-age=31536000, immutable'."
+    }
   },
   "$defs": {
     "contentAddressedObject": {

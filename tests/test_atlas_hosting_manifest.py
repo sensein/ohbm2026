@@ -57,6 +57,7 @@ def _manifest() -> UploadManifest:
         source_package_dir="data/outputs/atlas-package__x",
         artifacts=objs,
         channel_entry=build_channel_entry(objs),
+        cache_control="public, max-age=31536000, immutable",
     )
 
 
@@ -80,6 +81,23 @@ class UploadStateKeyTests(unittest.TestCase):
         self.assertEqual(m.upload_state_key, expected)
         # Stable across reconstruction.
         self.assertEqual(m.upload_state_key, _manifest().upload_state_key)
+
+
+class CachePolicyProvenanceTests(unittest.TestCase):
+    """Spec 022 (US2 / FR-010) — the applied cache policy is recorded."""
+
+    def test_to_dict_records_cache_control(self) -> None:
+        d = _manifest().to_dict()
+        self.assertEqual(d["cache_control"], "public, max-age=31536000, immutable")
+
+    def test_cache_control_roundtrips(self) -> None:
+        again = UploadManifest.from_dict(_manifest().to_dict())
+        self.assertEqual(again.cache_control, "public, max-age=31536000, immutable")
+
+    def test_from_dict_defaults_cache_control_for_legacy_manifests(self) -> None:
+        raw = _manifest().to_dict()
+        del raw["cache_control"]  # a pre-spec-022 manifest
+        self.assertEqual(UploadManifest.from_dict(raw).cache_control, "")
 
 
 class RoundTripTests(unittest.TestCase):

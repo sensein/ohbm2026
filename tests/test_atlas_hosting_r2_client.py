@@ -108,5 +108,30 @@ class ObjectExistsTests(unittest.TestCase):
         self.assertEqual(ctx.exception.bucket, "aadata")
 
 
+class UploadCachePolicyTests(unittest.TestCase):
+    """Spec 022 (US2) — every uploaded object carries the immutable
+    Cache-Control. boto3 ``upload_file`` applies ``ExtraArgs`` to BOTH
+    single-part and multipart transfers, so this one assertion covers all
+    object sizes (the vectors sidecar uploads multipart via TransferConfig)."""
+
+    def test_upload_sets_immutable_cache_control_extraargs(self) -> None:
+        client = mock.Mock()
+        r2 = r2_client.R2Client(client, "aadata")
+        with TemporaryDirectory() as td:
+            path = Path(td) / "ohbm2026.parquet"
+            path.write_bytes(b"hello world")
+            r2.upload("9f/ohbm2026.parquet", path)
+
+        client.upload_file.assert_called_once()
+        extra = client.upload_file.call_args.kwargs["ExtraArgs"]
+        self.assertEqual(extra["CacheControl"], "public, max-age=31536000, immutable")
+        self.assertEqual(extra["CacheControl"], r2_client.DEFAULT_CACHE_CONTROL)
+        self.assertIn("ContentType", extra)
+        # multipart threshold/chunk are configured so large files go multipart
+        # with the SAME ExtraArgs (no separate uncached path).
+        cfg = client.upload_file.call_args.kwargs.get("Config")
+        self.assertIsNotNone(cfg)
+
+
 if __name__ == "__main__":
     unittest.main()

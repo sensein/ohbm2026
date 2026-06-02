@@ -266,5 +266,122 @@ class UnattemptableProbeTests(unittest.TestCase):
             )
 
 
+class CacheProbeTests(unittest.TestCase):
+    """Spec 022 (US3) — edge-cache evidence: cf-cache-status classification,
+    cold→warm timing, BYPASS flagging, and range byte-parity."""
+
+    def _seq_http(self, statuses, bodies=None):
+        """A stateful mock returning responses in call order, with a
+        per-call cf-cache-status (and optional body)."""
+
+        calls = {"i": 0}
+
+        def http_request(method, url, headers):
+            i = calls["i"]
+            calls["i"] += 1
+            st = statuses[min(i, len(statuses) - 1)]
+            body = (bodies[i] if bodies and i < len(bodies) else b"DATA")
+            code = 206 if "Range" in headers else 200
+            hdrs = {
+                "cf-cache-status": st,
+                "age": "7",
+                "cache-control": "public, max-age=31536000, immutable",
+            }
+            return FakeResp(code, hdrs, body)
+
+        return http_request
+
+    def test_warm_hit_is_cached_warmed_and_parity_clean(self) -> None:
+        # call order: full cold, full warm, range cold, range warm
+        http = self._seq_http(["MISS", "HIT", "MISS", "HIT"])
+        full, rng = compare.probe_cache("https://h/x", origin=ORIGIN, http_request=http)
+        self.assertTrue(full.cached)
+        self.assertTrue(full.warmed)
+        self.assertIsNone(full.flag)
+        self.assertIsNotNone(full.cold_ms)
+        self.assertIsNotNone(full.warm_ms)
+        self.assertTrue(rng.cached)
+        self.assertTrue(rng.range_byte_parity)
+        self.assertIsNone(rng.flag)
+        self.assertEqual(full.cache_control, "public, max-age=31536000, immutable")
+
+    def test_bypass_is_flagged_not_cached(self) -> None:
+        http = self._seq_http(["DYNAMIC", "DYNAMIC", "BYPASS", "BYPASS"])
+        full, rng = compare.probe_cache("https://h/x", origin=ORIGIN, http_request=http)
+        self.assertFalse(full.cached)
+        self.assertIsNotNone(full.flag)
+        self.assertFalse(rng.cached)
+        self.assertIsNotNone(rng.flag)
+
+    def test_unexpected_status_is_flagged_not_cached(self) -> None:
+        # A range request that returns 200 (not 206) — even cached as HIT — is
+        # not a valid range cache hit and must flag (PR #62 review).
+        def http(method, url, headers):
+            return FakeResp(200, {"cf-cache-status": "HIT"}, b"DATA")
+
+        full, rng = compare.probe_cache("https://h/x", origin=ORIGIN, http_request=http)
+        self.assertTrue(full.cached)  # full expected 200, got 200 + HIT → ok
+        self.assertFalse(rng.cached)  # range expected 206, got 200 → not a hit
+        self.assertIn("unexpected status", rng.flag or "")
+
+    def test_range_byte_mismatch_is_flagged(self) -> None:
+        # full cold/warm fine; range cold vs warm bodies DIFFER → parity False
+        http = self._seq_http(
+            ["HIT", "HIT", "HIT", "HIT"],
+            bodies=[b"AAAA", b"AAAA", b"COLDBYTES", b"WARMBYTES"],
+        )
+        _full, rng = compare.probe_cache("https://h/x", origin=ORIGIN, http_request=http)
+        self.assertFalse(rng.range_byte_parity)
+        self.assertIsNotNone(rng.flag)
+
+    def test_compare_channels_cache_effective_aggregate(self) -> None:
+        d_url, r_url = "https://dropbox.example/o.parquet", "https://aadata.cirrusscience.org/abc/o.parquet"
+        content = b"SAME"
+        hit = {
+            "cf-cache-status": "HIT",
+            "cache-control": "public, max-age=31536000, immutable",
+        }
+        r_range = FakeResp(
+            206,
+            {"Content-Range": "bytes 0-99/12345", "Access-Control-Allow-Origin": ORIGIN, **hit},
+            content,
+        )
+        r_full = FakeResp(200, {**hit}, content)
+        table = {
+            d_url: {"range": _ok_range(), "full": FakeResp(200, {}, content)},
+            r_url: {"range": r_range, "full": r_full},
+        }
+        report = compare.compare_channels(
+            dropbox_channel={"ohbm2026": _channel(d_url, "x")},
+            r2_channel={"ohbm2026": _channel(r_url, "x")},
+            origin=ORIGIN,
+            generated_utc="2026-05-31T12:00:00+00:00",
+            cache_probe=True,
+            http_request=_make_http(table),
+        )
+        self.assertTrue(report.cache_effective)
+        self.assertIn("cache_effective", report.to_dict())
+        self.assertIsNotNone(report.artifacts[0].r2_cache)
+
+    def test_cache_effective_absent_by_default(self) -> None:
+        # cache_probe defaults False → no cache section (Stage-20 shape kept).
+        d_url, r_url = "https://dropbox.example/o.parquet", "https://aadata.cirrusscience.org/abc/o.parquet"
+        content = b"SAME"
+        table = {
+            d_url: {"range": _ok_range(), "full": FakeResp(200, {}, content)},
+            r_url: {"range": _ok_range(), "full": FakeResp(200, {}, content)},
+        }
+        report = compare.compare_channels(
+            dropbox_channel={"ohbm2026": _channel(d_url, "x")},
+            r2_channel={"ohbm2026": _channel(r_url, "x")},
+            origin=ORIGIN,
+            generated_utc="2026-05-31T12:00:00+00:00",
+            http_request=_make_http(table),
+        )
+        self.assertIsNone(report.cache_effective)
+        self.assertNotIn("cache_effective", report.to_dict())
+        self.assertNotIn("r2_cache", report.to_dict()["artifacts"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

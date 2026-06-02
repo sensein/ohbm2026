@@ -29,7 +29,11 @@ REQUIRED_VARS = (
 )
 
 # Objects are content-addressed, so a long immutable cache is always safe.
-_DEFAULT_CACHE_CONTROL = "public, max-age=31536000, immutable"
+# Public name (spec 022) so the uploader can record the applied policy in the
+# upload-manifest provenance (FR-010); `_DEFAULT_CACHE_CONTROL` stays as a
+# private back-compat alias for existing references.
+DEFAULT_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_DEFAULT_CACHE_CONTROL = DEFAULT_CACHE_CONTROL
 _PARQUET_CONTENT_TYPE = "application/vnd.apache.parquet"
 # Multipart kicks in above this size so the large vectors sidecar
 # uploads in parts without loading whole into memory.

@@ -74,3 +74,16 @@ missing a required artifact) raises `HostingComparisonError`.
 - Report JSON at `--report-out/data-hosting-comparison__<ts>.json`
   (schema: `comparison-report.schema.json`).
 - A human summary table to stdout (per-artifact ✓/✗ for parity/Range/CORS).
+
+## Spec 022 — `--verify-cache` (edge-cache evidence)
+
+With `--verify-cache`, the command additionally probes the R2 host for edge-cache
+effectiveness: for each artifact it issues a cold→warm full GET and inner-table
+Range request, records `cf-cache-status` / `age` / `cache-control` plus cold/warm
+timings, flags responses that BYPASS the edge, and checks range byte-parity
+(cached 206 == origin 206). The report gains a per-artifact `r2_cache` section and
+a top-level `cache_effective` verdict; stdout prints per-probe cache status +
+`edge-cache-effective: YES|NO`. This is a SEPARATE verdict from `overall_pass`
+(parity/Range/CORS), so a pre-cache-rule run is flagged without failing the parity
+check. See `specs/022-r2-edge-caching/` (the Cloudflare host cache rule lives in
+`specs/022-r2-edge-caching/contracts/cloudflare-cache-rule.md`).

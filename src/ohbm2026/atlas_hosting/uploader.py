@@ -30,7 +30,7 @@ from .manifest import (
     UploadManifest,
     build_channel_entry,
 )
-from .r2_client import R2Client, R2Settings
+from .r2_client import DEFAULT_CACHE_CONTROL, R2Client, R2Settings
 
 logger = logging.getLogger(__name__)
 
@@ -293,6 +293,7 @@ def upload_atlas_package(
             source_package_dir=str(package_dir),
             artifacts=objects,
             channel_entry=channel_entry,
+            cache_control=DEFAULT_CACHE_CONTROL,
         )
         manifest_path = manifest.write(manifest_out)
 

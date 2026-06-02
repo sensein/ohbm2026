@@ -169,7 +169,27 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/021-atlas-cart-lasso/plan.md`. Stage 21 is a UI-only change in
+at `specs/022-r2-edge-caching/plan.md`. Stage 22 (Track A,
+`src/ohbm2026/atlas_hosting/`) makes the R2 data host
+(`aadata.cirrusscience.org`) actually edge-cached — the dashboard showed a
+0% cache rate. Key finding: the uploader ALREADY sets
+`Cache-Control: public, max-age=31536000, immutable` on every object via
+boto3 `upload_file` ExtraArgs (single + multipart, `r2_client.py:185`), so
+the real fix is the **Cloudflare host cache rule** (R2 custom domains aren't
+edge-cached by default; Range/206 often bypasses) plus **verification**.
+Repo deliverables: extend `compare.py`/`compare-data-hosting` to capture
+`cf-cache-status`/`age`/`cache-control` for full + range (cold→warm double
+request, flag BYPASS, assert range byte-parity); record the cache policy in
+the upload manifest (provenance, FR-010); a regression test for the upload
+ExtraArgs. The host cache rule is documented config
+(`contracts/cloudflare-cache-rule.md`) — manual by default, optional
+Cloudflare-API automation behind a `.env` token. Production channel stays
+Dropbox (no change). Companions: `research.md`, `data-model.md`,
+`contracts/{cache-evidence-report,cloudflare-cache-rule}.md`, `quickstart.md`.
+
+The immediately-prior Stage 21 plan is at
+`specs/021-atlas-cart-lasso/plan.md` (shipped via PR #61). Stage 21 was a
+UI-only change in
 `site/` (no Python, no parquet rebuild): rename "Saved only" → **"Cart
 only"** on all three sibling builds and add it to atlas-root + neuroscape;
 switch filter composition from cart-dominant to a true **intersection**
