@@ -313,6 +313,17 @@ class CacheProbeTests(unittest.TestCase):
         self.assertFalse(rng.cached)
         self.assertIsNotNone(rng.flag)
 
+    def test_unexpected_status_is_flagged_not_cached(self) -> None:
+        # A range request that returns 200 (not 206) — even cached as HIT — is
+        # not a valid range cache hit and must flag (PR #62 review).
+        def http(method, url, headers):
+            return FakeResp(200, {"cf-cache-status": "HIT"}, b"DATA")
+
+        full, rng = compare.probe_cache("https://h/x", origin=ORIGIN, http_request=http)
+        self.assertTrue(full.cached)  # full expected 200, got 200 + HIT → ok
+        self.assertFalse(rng.cached)  # range expected 206, got 200 → not a hit
+        self.assertIn("unexpected status", rng.flag or "")
+
     def test_range_byte_mismatch_is_flagged(self) -> None:
         # full cold/warm fine; range cold vs warm bodies DIFFER → parity False
         http = self._seq_http(

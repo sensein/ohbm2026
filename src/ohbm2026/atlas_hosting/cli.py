@@ -21,6 +21,7 @@ from ohbm2026.artifacts import utc_now_isoformat
 from ohbm2026.exceptions import (
     ArtifactDiscoveryError,
     ContentHashMismatchError,
+    DataHostingCacheError,
     HostingComparisonError,
     R2CredentialsError,
     R2UploadError,
@@ -156,6 +157,14 @@ def build_compare_parser() -> argparse.ArgumentParser:
             "and report a cache_effective verdict. Does not change the parity exit code."
         ),
     )
+    parser.add_argument(
+        "--require-cache",
+        action="store_true",
+        help=(
+            "With --verify-cache, exit non-zero (DataHostingCacheError) if the R2 host "
+            "is NOT edge-cache-effective. Use in CI/gates once the cache rule is live."
+        ),
+    )
     return parser
 
 
@@ -222,6 +231,27 @@ def compare_main(argv: list[str] | None = None) -> int:
             f"edge-cache-effective: {'YES' if report.cache_effective else 'NO'}\n"
         )
     sys.stdout.write(f"report: {out_path}\noverall: {'PASS' if report.overall_pass else 'FAIL'}\n")
+
+    # Spec 022 — optional hard gate: surface a bypassing host as a non-zero
+    # exit via the typed loud-failure path (CA-006), without changing the
+    # default parity exit semantics.
+    if args.require_cache:
+        try:
+            if report.cache_effective is None:
+                raise DataHostingCacheError(
+                    "--require-cache needs --verify-cache (no cache probe was run)",
+                    reason="not_probed",
+                )
+            if report.cache_effective is not True:
+                raise DataHostingCacheError(
+                    "R2 host is not edge-cache-effective (warm requests bypass the edge "
+                    "or a range failed byte-parity)",
+                    reason="not_effective",
+                )
+        except DataHostingCacheError as exc:
+            sys.stderr.write(f"compare-data-hosting: {type(exc).__name__}: {exc}\n")
+            return 3
+
     return 0 if report.overall_pass else 1
 
 

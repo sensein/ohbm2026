@@ -326,6 +326,9 @@ def _cache_probe_one(
         warm = http_request("GET", url, headers)
         warm_ms = (time.perf_counter() - t1) * 1000.0
 
+        cold_code = int(getattr(cold, "status_code", 0) or 0)
+        warm_code = int(getattr(warm, "status_code", 0) or 0)
+        expected = 206 if range_bytes is not None else 200
         cold_status = _norm_status(_header(cold.headers, "cf-cache-status"))
         warm_status = _norm_status(_header(warm.headers, "cf-cache-status"))
         cf = _header(warm.headers, "cf-cache-status")
@@ -333,7 +336,16 @@ def _cache_probe_one(
         cc = _header(warm.headers, "cache-control")
         cached = warm_status in _EDGE_HIT
         warmed = cold_status not in _EDGE_HIT and warm_status in _EDGE_HIT
-        if not cached:
+        # PR #62 review: an error/unexpected status is NOT a valid cache hit even
+        # if the edge cached it (a cached 403/404/500 must flag, not pass). Force
+        # `cached=False` so the aggregate verdict fails too.
+        if cold_code != expected or warm_code != expected:
+            cached = False
+            flag = (
+                f"unexpected status ({kind}: cold={cold_code}, warm={warm_code}, "
+                f"expected={expected})"
+            )
+        elif not cached:
             flag = f"not edge-cached ({kind}: cf-cache-status={cf!r})"
         if range_bytes is not None:
             cold_body = getattr(cold, "content", None)
@@ -343,6 +355,9 @@ def _cache_probe_one(
                 if not parity:
                     pmsg = "range byte mismatch (cached 206 != origin 206)"
                     flag = f"{flag} | {pmsg}" if flag else pmsg
+            else:
+                pmsg = "missing response content for range parity check"
+                flag = f"{flag} | {pmsg}" if flag else pmsg
     except Exception as exc:  # noqa: BLE001 — recorded verdict, not raised
         flag = f"cache probe failed: {type(exc).__name__}: {exc}"
 
