@@ -103,6 +103,18 @@
 	 */
 	export let lassoOhbmSet: Set<number> = new Set();
 	export let lassoNeuroSet: Set<number> = new Set();
+	/** Spec 021 (US3) — full coordinates of the active selection (cart ∩
+	 *  search ∩ lasso), supplied by the parent from the FULL corpus coords so a
+	 *  selected article that isn't in the rendered LOD sample (e.g. a cart-only
+	 *  item) still pops. Rendered as a bright "selection-highlight" trace on top
+	 *  of the dimmed backdrop, in 2D (rebuilt per render) and 3D (restyled in
+	 *  place — no Plotly.react). Empty ⇒ no highlight trace. */
+	export let highlightCoords2d: { x: number[]; y: number[] } = { x: [], y: [] };
+	export let highlightCoords3d: { x: number[]; y: number[]; z: number[] } = {
+		x: [],
+		y: [],
+		z: []
+	};
 	/** Focus halo — when the inline detail panel is open on atlas-root
 	 *  / neuroscape, the parent passes the selected point's kind + id
 	 *  so the chart can render a bigger outlined marker at the
@@ -246,6 +258,9 @@
 	// each render so `applyFocus3dHalo` can `restyle` them in place (cheap)
 	// instead of rebuilding the scene on every click.
 	let focus3dTraceIndices: number[] = [];
+	// Spec 021 (US3) — index of the persistent 3D selection-highlight trace,
+	// positioned by `applyHighlight3d` via in-place restyle (no Plotly.react).
+	let highlight3dTraceIdx = -1;
 
 	// Authoritative camera eye for the 3D chart, kept in sync with both
 	// programmatic rotation frames AND user mouse interactions via the
@@ -523,6 +538,7 @@
 		// Track the 2D focus override so a late-arriving coord (atlas-root
 		// lazy full-coords fetch) re-renders the focus halo + camera-snap.
 		void atlasFocusUmap2d;
+		void highlightCoords2d;
 		void renderAtlasChart2D(
 			plotly,
 			chart2dEl,
@@ -536,7 +552,8 @@
 			lassoNeuroSet,
 			atlasFocusKind,
 			atlasFocusId,
-			theme
+			theme,
+			highlightCoords2d
 		);
 	}
 
@@ -587,6 +604,15 @@
 		void atlasFocusId;
 		void atlasFocusUmap3d;
 		if (mode !== 'ohbm' && chart3dInitialized) applyFocus3dHalo();
+	}
+
+	// Spec 021 (US3) — reflect the selection in 3D via the SAME cheap-restyle
+	// path: when the highlight coords change, reposition the persistent
+	// highlight trace in place (no Plotly.react), so 3D shows the selection
+	// without the trace-count-change WebGL leak.
+	$: {
+		void highlightCoords3d;
+		if (mode !== 'ohbm' && chart3dInitialized) applyHighlight3d();
 	}
 
 	// Paul Tol's "bright" qualitative palette — high-contrast, deuteranopia /
@@ -1423,7 +1449,8 @@
 		neuroLassoSet: Set<number>,
 		focusKind: 'ohbm2026' | 'neuroscape' | null,
 		focusId: number | null,
-		t: 'light' | 'dark'
+		t: 'light' | 'dark',
+		highlightHi: { x: number[]; y: number[] } = { x: [], y: [] }
 	) {
 		if (!api || !el) return;
 		const c = themedColors(t);
@@ -1579,6 +1606,29 @@
 				showlegend: false,
 				customdata: ovr.customdata,
 				...overlaySelectedConfig
+			});
+		}
+		// Spec 021 (US3) — selection-highlight trace. Drawn from the FULL
+		// coordinates of the active selection (cart ∩ search ∩ lasso) the parent
+		// supplies, so a selected article that ISN'T in the rendered LOD sample
+		// (the cart-only case) still pops. Bright accent fill + contrasting
+		// outline on top of the dimmed backdrop. Always last-but-one so the
+		// focus halo (below) stays topmost.
+		if (highlightHi.x.length > 0) {
+			traces.push({
+				type: 'scattergl' as const,
+				mode: 'markers' as const,
+				x: highlightHi.x,
+				y: highlightHi.y,
+				name: 'selection-highlight',
+				marker: {
+					size: 7,
+					color: t === 'dark' ? '#ffd400' : '#c77f00',
+					opacity: 1,
+					line: { color: t === 'dark' ? '#1a1a1a' : '#ffffff', width: 1 }
+				},
+				hoverinfo: 'skip' as const,
+				showlegend: false
 			});
 		}
 		// Focus halo — TWO concentric magenta rings at the focused
@@ -1929,6 +1979,25 @@
 		);
 	}
 
+	// Spec 021 (US3) — position the 3D selection-highlight trace via an in-place
+	// `restyle` of its x/y/z (no Plotly.react, no trace-count change). scatter3d
+	// ignores per-point marker.opacity arrays, so the selection is shown as a
+	// dedicated bright trace rather than by dimming the backdrop. Empties the
+	// trace when nothing is selected.
+	function applyHighlight3d() {
+		if (!plotly || !chart3dEl || highlight3dTraceIdx < 0) return;
+		const restyle = (
+			plotly as unknown as {
+				restyle: (e: HTMLDivElement, u: Record<string, unknown[]>, idx: number[]) => Promise<unknown>;
+			}
+		).restyle;
+		void restyle(
+			chart3dEl,
+			{ x: [highlightCoords3d.x], y: [highlightCoords3d.y], z: [highlightCoords3d.z] },
+			[highlight3dTraceIdx]
+		);
+	}
+
 	function renderAtlasChart3D(
 		api: PlotlyApi | null,
 		el: HTMLDivElement | null,
@@ -1989,6 +2058,23 @@
 		traces.push(haloArm('focus-y', '#33cc33'));
 		traces.push(haloArm('focus-z', '#4488ff'));
 		focus3dTraceIndices = [traces.length - 3, traces.length - 2, traces.length - 1];
+		// Spec 021 (US3) — persistent selection-highlight trace. Built EMPTY and
+		// positioned by `applyHighlight3d` via an in-place `restyle` so a
+		// selection change never rebuilds this scene or changes the trace count
+		// (the plotly.js#6365 leak guard). Bright accent markers on top so the
+		// selection (incl. cart-only items, drawn from full coords) pops in 3D.
+		traces.push({
+			type: 'scatter3d' as const,
+			mode: 'markers' as const,
+			x: [] as number[],
+			y: [] as number[],
+			z: [] as number[],
+			name: 'selection-highlight-3d',
+			marker: { size: 4, color: t === 'dark' ? '#ffd400' : '#c77f00', opacity: 1 },
+			hoverinfo: 'skip' as const,
+			showlegend: false
+		});
+		highlight3dTraceIdx = traces.length - 1;
 		// On lasso, we DON'T touch the 3D camera — the previous
 		// attempt to zoom (explicit axis range) clipped unselected
 		// context points against the scene volume edge, and the
@@ -2028,6 +2114,7 @@
 				// (Re)position the focus halo for the current focus after a
 				// backdrop render reset the halo traces to empty.
 				applyFocus3dHalo();
+				applyHighlight3d();
 				// `webglcontextlost` — handle gracefully. Sustained
 				// scatter3d interaction at 461k points on a mobile
 				// GPU hits thermal / memory pressure and the browser

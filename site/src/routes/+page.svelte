@@ -680,6 +680,52 @@
 		if ($cartOnly) parts.push(shownIds(atlasCartScope, 'ohbm2026'));
 		return compose(parts) ?? new Set<number>();
 	})();
+	// Spec 021 (US3) — full coordinates of the active selection so the scatter
+	// can highlight EVERY selected article (incl. cart-only items not in the
+	// rendered LOD sample). Looked up from the full corpus coords: neuroscape
+	// from atlasBackdropById (full on /neuroscape/) or the lazy atlasFullCoords
+	// (atlas-root); OHBM overlay from atlasOverlayById.
+	$: highlightCoords2d = (() => {
+		const x: number[] = [];
+		const y: number[] = [];
+		for (const id of highlightNeuroSet) {
+			const p = atlasBackdropById.get(id) ?? atlasFullCoordsById.get(id);
+			if (p?.umap_2d) {
+				x.push(p.umap_2d[0]);
+				y.push(p.umap_2d[1]);
+			}
+		}
+		for (const id of highlightOhbmSet) {
+			const p = atlasOverlayById.get(id);
+			if (p?.umap_2d) {
+				x.push(p.umap_2d[0]);
+				y.push(p.umap_2d[1]);
+			}
+		}
+		return { x, y };
+	})();
+	$: highlightCoords3d = (() => {
+		const x: number[] = [];
+		const y: number[] = [];
+		const z: number[] = [];
+		for (const id of highlightNeuroSet) {
+			const p = atlasBackdropById.get(id) ?? atlasFullCoordsById.get(id);
+			if (p?.umap_3d) {
+				x.push(p.umap_3d[0]);
+				y.push(p.umap_3d[1]);
+				z.push(p.umap_3d[2]);
+			}
+		}
+		for (const id of highlightOhbmSet) {
+			const p = atlasOverlayById.get(id);
+			if (p?.umap_3d) {
+				x.push(p.umap_3d[0]);
+				y.push(p.umap_3d[1]);
+				z.push(p.umap_3d[2]);
+			}
+		}
+		return { x, y, z };
+	})();
 	$: atlasClustersById = new Map(
 		atlasClusters.map((c) => [c.cluster_id, { cluster_id: c.cluster_id, title: c.title, colour_hex: c.colour_hex }])
 	);
@@ -2136,6 +2182,8 @@
 					backdropOpacity={0.05}
 					lassoOhbmSet={highlightOhbmSet}
 					lassoNeuroSet={highlightNeuroSet}
+					{highlightCoords2d}
+					{highlightCoords3d}
 					atlasFocusKind={atlasSelection?.kind ?? null}
 					atlasFocusId={atlasSelection
 						? atlasSelection.kind === 'ohbm2026'
