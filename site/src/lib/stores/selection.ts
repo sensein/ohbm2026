@@ -43,9 +43,13 @@ export const lassoSelection = writable<Set<number> | null>(null);
  *  form; now matches AbstractRecord.poster_id's number type. */
 export const focusedAbstract = writable<number | null>(null);
 
-/** "Show only saved" — restricts the result list to items currently in the
- *  cart. Pairs with the bulk-add affordance: save a set, flip this on,
- *  refine. Default off. Not persisted; resets per session. */
+/** "Cart only" (spec 021; formerly labeled "Saved only") — narrows the result
+ *  list, facet counts, and visualization to items currently in the cart.
+ *  Spec 021 changes its semantics: it is now ONE MORE intersecting filter
+ *  (composed via `$lib/selection/compose` with search/facets/lasso), NOT a
+ *  dominant override. Available on all three sibling sites. Pairs with the
+ *  bulk-add affordance: save a set, flip this on, refine. Default off. Not
+ *  persisted; resets per session. */
 export const cartOnly = writable<boolean>(false);
 
 /** Active author-name chips. Clicking an author name in any detail view

@@ -55,6 +55,10 @@
 
 	const dispatch = createEventDispatcher<{
 		focus: { pubmed_id: number; cluster_id: number };
+		// Spec 021 (US2) — emit the matched pubmed_ids for the active query so
+		// the parent can highlight them on the scatter. Empty when no query.
+		// Single source of truth: the same `filtered` rows the list renders.
+		matched: { ids: number[] };
 	}>();
 
 	let limit = 100;
@@ -91,6 +95,13 @@
 	// Lookup for the row template to know which rows are semantic-only
 	// + what distance to show on the badge.
 	$: semanticHitMap = semanticHits;
+
+	// Spec 021 (US2) — emit the matched pubmed_ids for scatter highlighting,
+	// but only when a query is active (an empty query = no selection, so the
+	// scatter shows no highlight rather than "everything selected").
+	$: dispatch('matched', {
+		ids: (query ?? '').trim() ? filtered.map((a) => a.pubmed_id) : []
+	});
 
 	$: visible = filtered.slice(0, limit);
 

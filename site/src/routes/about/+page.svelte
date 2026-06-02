@@ -816,11 +816,12 @@
 									</li>
 									<li>
 										<strong>Filter pipeline.</strong>
-										<code>filteredIds = $cartOnly ? cartIds : (searchIds ∩ lasso ∩
-										facetIds ∩ authorChipIds)</code>. Saved-only is a dominant
-										filter (overrides the other three) so the user always sees
-										their full saved set; the other stores remain in their state
-										so toggling Saved-only off restores them.
+										<code>filteredIds = compose([searchIds, lasso, facetIds,
+										authorChipIds, cartIds])</code> — the intersection of every
+										ACTIVE filter (an inactive one contributes no constraint).
+										"Cart only" is one more intersecting filter, not a dominant
+										override, so it composes with search / facets / lasso like a
+										facet selection, consistently across all three sibling sites.
 									</li>
 									<li>
 										<strong>UMAP.</strong> 2D scatter + 3D scatter3d in Plotly,

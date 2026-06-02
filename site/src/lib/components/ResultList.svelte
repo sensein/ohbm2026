@@ -91,7 +91,7 @@
 
 	// Visible poster_ids in the current filter/result state, used by the
 	// bulk add control. The control is ADD-ONLY now — "Remove N from list"
-	// was a foot-gun in Saved-only mode (one click wipes the cart) and
+	// was a foot-gun in Cart-only mode (one click wipes the cart) and
 	// adding/removing in bulk should only ever grow the cart. Use the
 	// drawer's per-item × or the "Clear" footer button to remove.
 	$: visiblePosterIds = visible.map((r) => r.poster_id).filter(Boolean);

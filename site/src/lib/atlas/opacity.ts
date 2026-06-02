@@ -65,6 +65,38 @@ export function backdropOpacity(renderedCount: number, zoomFactor: number): numb
 	return clampOpacity(densityOpacity(renderedCount) * Math.pow(z, BACKDROP_ZOOM_EXP));
 }
 
+/**
+ * Spec 021 (US3) — selection contrast.
+ *
+ * When a lasso/search selection is active, the SELECTED points render at
+ * opacity 1.0 while UNSELECTED points must stay visibly dimmer so the
+ * highlight survives zoom-in. The bug being fixed: `applyAtlasZoomOpacity`
+ * tied `unselected.marker.opacity` to the base backdrop opacity, which
+ * `backdropOpacity` raises toward the CAP (0.9) as you zoom in — so the
+ * unselected cloud climbs to nearly match the selected points and the
+ * selection washes out. Capping the unselected opacity below the selected
+ * opacity preserves a contrast gap at every zoom level.
+ *
+ * With NO selection active, the unselected opacity stays equal to the base
+ * (today's behaviour) so an un-lassoed cloud still reads at every zoom.
+ */
+/** Ceiling on unselected-point opacity while a selection is active. Selected
+ *  points are 1.0, so this guarantees a strong contrast gap so the selection
+ *  pops at every zoom level. Kept low (the surrounding cloud fades back to a
+ *  faint context layer, like a focus/dim highlight) — 0.5 was too gentle to
+ *  read against a dense, same-coloured cloud (spec 021 US3 feedback). */
+export const SELECTION_UNSELECTED_MAX = 0.15;
+
+/**
+ * Unselected-point opacity given the current base (density+zoom) opacity and
+ * whether a selection is active. Active ⇒ capped below the selected opacity
+ * (1.0); inactive ⇒ the base unchanged. Monotonic + clamped by `base`.
+ */
+export function unselectedOpacity(base: number, selectionActive: boolean): number {
+	if (!selectionActive) return base;
+	return Math.min(base, SELECTION_UNSELECTED_MAX);
+}
+
 /** OHBM overlay marker size at full zoom-out (the size that reads clearly
  *  against the fully-zoomed-out backdrop). */
 export const OVERLAY_SIZE_BASE = 5;

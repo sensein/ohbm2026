@@ -169,7 +169,35 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/020-cloudflare-r2-migration/plan.md`. Stage 20 publishes the UI
+at `specs/021-atlas-cart-lasso/plan.md`. Stage 21 is a UI-only change in
+`site/` (no Python, no parquet rebuild): rename "Saved only" → **"Cart
+only"** on all three sibling builds and add it to atlas-root + neuroscape;
+switch filter composition from cart-dominant to a true **intersection**
+(`search ∩ lasso ∩ facets ∩ cart-only`), changing the OHBM home behavior so
+all three sites match; add a facet-style **cross-site warning** when saved
+items aren't present in the current site's loaded corpus (hidden-count
+discovered by corpus-index membership, not a hardcoded kind→site table);
+and **fix the scatter highlight visibility** (per the 2026-06-01
+clarification): in **2D** keep the existing `selectedpoints` mechanism and
+just cap the *unselected* opacity below the selected opacity when a
+selection is active (the highlight currently washes out at zoom because
+`applyAtlasZoomOpacity` ties unselected opacity to the brightening base);
+in **3D** add the selection highlight (today absent) via an in-place
+`Plotly.restyle` of a per-point opacity/colour array — no `Plotly.react`,
+no trace-count change (avoids the WebGL-context leak plotly.js#6365),
+reusing the cheap-restyle pattern from the 3D-focus fix (commit
+`dba3d7cf`). Core
+touchpoints: `site/src/routes/+page.svelte` (composition + per-mode Cart-only
+state + highlight-set feed), `site/src/lib/components/UmapPanel.svelte` +
+`site/src/lib/atlas/opacity.ts` (2D unselected-opacity gap + 3D restyle
+highlight), the two browse panels (expose matched-id set + warning),
+and NEW pure helpers `site/src/lib/selection/{compose,cart_scope}.ts`.
+Companions: `research.md`, `data-model.md`,
+`contracts/{selection-composition,cart-only-filter,selection-highlight}.md`,
+`quickstart.md`.
+
+The immediately-prior Stage 20 plan is at
+`specs/020-cloudflare-r2-migration/plan.md`. Stage 20 publishes the UI
 data bundle (the four atlas-package parquets) to Cloudflare R2
 (S3-compatible) under content-addressed, immutable keys
 (`<sha256>/<filename>`) via a new local `ohbmcli upload-atlas-package`
