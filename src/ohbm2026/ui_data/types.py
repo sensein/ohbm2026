@@ -125,6 +125,12 @@ class FacetValues(TypedDict, total=False):
     brain_regions: list[str]
     brain_networks: list[str]
     accepted_for: list[str]
+    # Stage 23 (spec 023) — research-classification dimensions, joined in from
+    # the slim dimensions file. Multi-valued, peers of the lists above.
+    focus: list[str]
+    research_modality: list[str]
+    theory_scope: list[str]
+    epistemic_basis: list[str]
 
 
 class AbstractRow(TypedDict, total=False):

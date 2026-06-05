@@ -91,6 +91,11 @@ def _facets_to_arrow(facets: Mapping[str, Any]) -> dict[str, list[str]]:
         "brain_regions",
         "brain_networks",
         "accepted_for",
+        # Stage 23 (spec 023) — research-classification dimensions.
+        "focus",
+        "research_modality",
+        "theory_scope",
+        "epistemic_basis",
     )
     return {k: list(facets.get(k, []) or []) for k in keys}
 

@@ -74,6 +74,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "at the FINAL listing under data/primary/."
         ),
     )
+    parser.add_argument(
+        "--dimensions",
+        dest="dimensions",
+        type=Path,
+        default=None,
+        help=(
+            "Optional slim research-classification dimensions file "
+            "(dimensions.slim.json), keyed by Oxford submission id, produced by "
+            "scripts/distill_dimensions.py. When supplied, each exported "
+            "abstract is left-joined with its focus / research_modality / "
+            "theory_scope / epistemic_basis lists (Stage 23 / spec 023). When "
+            "omitted, those four facets are empty."
+        ),
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
         "--output-format",
@@ -126,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
                 if args.standby_final_csv and args.standby_final_csv.exists()
                 else None
             ),
+            dimensions_path=args.dimensions,
         )
     except Stage6BuildError as exc:
         print(f"build_ui_data.py: {exc}", file=sys.stderr)

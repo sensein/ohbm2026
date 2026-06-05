@@ -78,6 +78,32 @@ class TestManifestShape(unittest.TestCase):
         self.assertIn(("communities", "neuroscape", "abstract"), triples)
         self.assertIn(("neuroscape_clusters", "neuroscape", "abstract"), triples)
 
+    def test_research_dimensions_appear_as_facets(self) -> None:
+        """Stage 23 (spec 023) — the four dimensions are discovered as facets
+        with options pulled from the per-record `facets` block."""
+        with TemporaryDirectory() as tmp:
+            paths = write_fixtures(Path(tmp))
+            normalized = [
+                {
+                    "abstract_id": 1001,
+                    "accepted_for": "Poster",
+                    "topics": {"primary": "", "secondary": ""},
+                    "facets": {
+                        "focus": ["Translational", "Clinical"],
+                        "research_modality": ["Computational"],
+                        "theory_scope": ["Domain Framework"],
+                        "epistemic_basis": ["Data-driven"],
+                    },
+                }
+            ]
+            m = build_manifest(abstracts=normalized, rollup_db=paths["rollup"], build_info=BUILD_INFO)
+        by_key = {f["key"]: f for f in m["facets"]}
+        for key in ("focus", "research_modality", "theory_scope", "epistemic_basis"):
+            self.assertIn(key, by_key, key)
+        self.assertEqual(by_key["focus"]["label"], "Focus")
+        self.assertEqual(by_key["focus"]["options"], ["Clinical", "Translational"])  # alphabetical
+        self.assertEqual(by_key["epistemic_basis"]["options"], ["Data-driven"])
+
 
 class TestNoHardcodedFacets(unittest.TestCase):
     """CA-007 — the facet *options* in the manifest are discovered, not hardcoded.

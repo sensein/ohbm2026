@@ -108,6 +108,34 @@ AUTHORS_PAYLOAD = {
 }
 
 
+# Stage 23 — slim dimensions fixture (spec 023). Keyed by submission id.
+# 1001 (exported, poster 101): all four dimensions. 1003 (exported, poster
+# 103): missing theory_scope. 9999: not in the export → unmatched_in_file.
+DIMENSIONS_SLIM_PAYLOAD = {
+    "schema_version": "dimensions.slim.v1",
+    "dimensions": {
+        "1001": {
+            "focus": ["Translational", "Clinical"],
+            "research_modality": ["Observational", "Computational"],
+            "theory_scope": ["Domain Framework"],
+            "epistemic_basis": ["Data-driven"],
+        },
+        "1003": {
+            "focus": ["Fundamental"],
+            "research_modality": ["Experimental"],
+            "theory_scope": [],
+            "epistemic_basis": ["Hypothesis-driven"],
+        },
+        "9999": {
+            "focus": ["Clinical"],
+            "research_modality": ["Computational"],
+            "theory_scope": ["Micro Theory"],
+            "epistemic_basis": ["Data-driven"],
+        },
+    },
+}
+
+
 def _create_rollup(path: Path) -> None:
     conn = sqlite3.connect(path)
     cur = conn.cursor()
@@ -204,11 +232,14 @@ def write_fixtures(root: Path) -> dict[str, Path]:
     authors.write_text(json.dumps(AUTHORS_PAYLOAD))
     rollup = root / "annotations__test12345678.sqlite"
     _create_rollup(rollup)
+    dimensions = root / "dimensions.slim.json"
+    dimensions.write_text(json.dumps(DIMENSIONS_SLIM_PAYLOAD))
     return {
         "corpus": corpus,
         "withdrawn": withdrawn,
         "authors": authors,
         "rollup": rollup,
+        "dimensions": dimensions,
         "analysis_root": root,
     }
 

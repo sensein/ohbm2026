@@ -274,9 +274,10 @@ classes:
         inlined_as_list: true
       facets:
         description: >-
-          Per-record facet values (the 11 keyword/method/etc. lists). Stored
-          as a `facet_key → list-or-string` JSON object; LinkML can't tighten
-          this further so it stays `Any`.
+          Per-record facet values (the 15 keyword/method/dimension lists —
+          Stage 23 / spec 023 added focus, research_modality, theory_scope,
+          epistemic_basis). Stored as a `facet_key → list-or-string` JSON
+          object; LinkML can't tighten this further so it stays `Any`.
         range: Any
         required: true
       author_ids:

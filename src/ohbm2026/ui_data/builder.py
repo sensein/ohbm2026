@@ -22,6 +22,10 @@ DETERMINISTIC_MTIME = 1767225600  # 2026-01-01T00:00:00Z
 from ohbm2026.ui_data.abstracts import build_abstract_to_poster_map, build_abstracts
 from ohbm2026.ui_data.authors import build_authors
 from ohbm2026.ui_data.cells import build_cells
+from ohbm2026.ui_data.dimensions import (
+    compute_dimension_coverage,
+    load_research_dimensions,
+)
 from ohbm2026.ui_data.enrichment import build_enrichment
 from ohbm2026.ui_data.manifest import build_manifest, make_build_info
 from ohbm2026.ui_data.neighbors import build_neighbors
@@ -34,6 +38,18 @@ from ohbm2026.ui_data.vectors import build_minilm_vectors
 
 
 __all__ = ["build_ui_data_package", "Stage6BuildError"]
+
+
+def _sha256_file(path: Path) -> str:
+    """Streamed sha256 of a file (provenance — keeps the slim-file identity)."""
+
+    import hashlib
+
+    h = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -107,6 +123,7 @@ def build_ui_data_package(
     output_format: str = "parquet-single",
     proposal_listing_path: Path | None = None,
     standby_final_csv_path: Path | None = None,
+    dimensions_path: Path | None = None,
 ) -> int:
     """Run the full Stage 6 build.
 
@@ -146,6 +163,18 @@ def build_ui_data_package(
         withdrawn_path=Path(withdrawn_path) if withdrawn_path else None,
     )
 
+    # Stage 23 (spec 023): optionally load the slim research-classification
+    # dimensions. Opt-in per build — when --dimensions is omitted the four
+    # facets are simply empty (logged, not a silent fallback). When the flag
+    # is passed but the file is missing/malformed, load_research_dimensions
+    # raises DimensionInputError (FR-011). The coverage/provenance block is
+    # computed after the abstracts are built (it needs the exported ids).
+    research_dimensions: dict[int, dict[str, list[str]]] | None = None
+    if dimensions_path is not None:
+        research_dimensions = load_research_dimensions(Path(dimensions_path))
+    else:
+        print("dimensions: not supplied — research-classification facets will be empty")
+
     # Build authors first to derive the raw→synthetic id remap; the abstracts
     # builder uses it so `author_ids` references match the authors shard
     # directly (closes invariant 4).
@@ -169,15 +198,37 @@ def build_ui_data_package(
             Path(standby_final_csv_path) if standby_final_csv_path else None
         ),
         abstract_to_poster=abstract_to_poster,
+        research_dimensions=research_dimensions,
     )
     abstract_records = abstracts_envelope["abstracts"]
     abstract_ids = [r["abstract_id"] for r in abstract_records]
+
+    # Stage 23 (spec 023): per-dimension join coverage + provenance for the
+    # manifest (FR-010 / FR-012 / CA-008). Records the slim-file basename +
+    # sha256 (never an absolute/home path) and matched/no_value per dimension.
+    dimension_coverage: dict[str, Any] | None = None
+    if research_dimensions is not None and dimensions_path is not None:
+        dimension_coverage = compute_dimension_coverage(
+            research_dimensions,
+            abstract_ids,
+            source_file=Path(dimensions_path).name,
+            source_sha256=_sha256_file(Path(dimensions_path)),
+        )
+        print(
+            "dimensions: coverage "
+            + ", ".join(
+                f"{k}={v['matched']}/{len(abstract_ids)}"
+                for k, v in dimension_coverage["dimensions"].items()
+            )
+            + f"; unmatched_in_file={dimension_coverage['unmatched_in_file']}"
+        )
 
     # Manifest discovers cells/inputs/models/facets from the rollup + records.
     manifest = build_manifest(
         abstracts=abstract_records,
         rollup_db=rollup_db,
         build_info=build_info,
+        dimension_coverage=dimension_coverage,
     )
 
     cells_envelopes = build_cells(

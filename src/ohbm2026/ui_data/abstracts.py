@@ -26,6 +26,7 @@ from ohbm2026.ui_data.questions import (
     topic_pair_from_questions,
     topic_subcategory,
 )
+from ohbm2026.ui_data.dimensions import DIMENSION_KEYS
 from ohbm2026.ui_data.state_key import Stage6BuildError
 
 
@@ -452,6 +453,7 @@ def iter_abstracts(
     standby_times_path: Path | None = None,
     standby_final_csv_path: Path | None = None,
     abstract_to_poster: Mapping[int, int] | None = None,
+    research_dimensions: Mapping[int, Mapping[str, list[str]]] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Yield per-abstract rows (accepted-only, poster_id-keyed).
 
@@ -570,6 +572,18 @@ def iter_abstracts(
         # supplied or this submission isn't in it. Each window is
         # always 1 hour, so the end is implicit (start + 1h).
         standby = standby_by_sid.get(int(abstract_id), {})
+
+        # Stage 23 (spec 023): left-join the four research-classification
+        # dimensions into the facets block, keyed by Oxford submission id.
+        # Only abstracts already in this (exported) stream are enriched;
+        # dimension-file entries with no matching abstract are never visited
+        # here, so they are inherently never added (Clarification 1). Each
+        # missing dimension defaults to an empty list.
+        facets = _facets(raw, questions, enriched)
+        dims_for_record = (research_dimensions or {}).get(int(abstract_id), {})
+        for _dim_key in DIMENSION_KEYS:
+            facets[_dim_key] = list(dims_for_record.get(_dim_key) or [])
+
         yield {
             # `abstract_id` is the Oxford submission id. It stays on the
             # yielded record so the rest of the build pipeline can join
@@ -594,7 +608,7 @@ def iter_abstracts(
             "methods_checklist": parse_string_list_value(
                 questions.get(QUESTION_MAP["methods"])
             ),
-            "facets": _facets(raw, questions, enriched),
+            "facets": facets,
             "author_ids": author_ids,
             "reference_dois": dois,
             "reference_urls": urls,
@@ -627,6 +641,7 @@ def build_abstracts_records(
     standby_times_path: Path | None = None,
     standby_final_csv_path: Path | None = None,
     abstract_to_poster: Mapping[int, int] | None = None,
+    research_dimensions: Mapping[int, Mapping[str, list[str]]] | None = None,
 ) -> list[dict[str, Any]]:
     """List-materialising wrapper around ``iter_abstracts`` for backward compat.
 
@@ -645,6 +660,7 @@ def build_abstracts_records(
             standby_times_path=standby_times_path,
             standby_final_csv_path=standby_final_csv_path,
             abstract_to_poster=abstract_to_poster,
+            research_dimensions=research_dimensions,
         )
     )
 
@@ -660,6 +676,7 @@ def build_abstracts(
     standby_times_path: Path | None = None,
     standby_final_csv_path: Path | None = None,
     abstract_to_poster: Mapping[int, int] | None = None,
+    research_dimensions: Mapping[int, Mapping[str, list[str]]] | None = None,
 ) -> dict[str, Any]:
     """Return the abstracts shard envelope per data-model.md §2.
 
@@ -676,6 +693,7 @@ def build_abstracts(
         standby_times_path=standby_times_path,
         standby_final_csv_path=standby_final_csv_path,
         abstract_to_poster=abstract_to_poster,
+        research_dimensions=research_dimensions,
     )
     return {
         "schema_version": SCHEMA_VERSION,

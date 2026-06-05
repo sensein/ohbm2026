@@ -118,5 +118,68 @@ class TestEveryShardCarriesBuildInfo(unittest.TestCase):
                 )
 
 
+class TestResearchDimensionsProvenance(unittest.TestCase):
+    """Stage 23 (spec 023) — dimension provenance + determinism + opt-in."""
+
+    def _manifest(self, output: Path) -> dict:
+        import io
+
+        import pyarrow.parquet as pq
+
+        outer = pq.read_table(output / "ohbm2026.parquet")
+        tables = dict(zip(outer.column("table_name").to_pylist(), outer.column("table_bytes").to_pylist()))
+        man = pq.read_table(io.BytesIO(tables["manifest"])).to_pylist()[0]
+        return json.loads(man["manifest_json"])
+
+    def _build(self, paths, output, *, dimensions):
+        return build_ui_data_package(
+            corpus_path=paths["corpus"],
+            withdrawn_path=paths["withdrawn"],
+            authors_path=paths["authors"],
+            enriched_path=None,
+            references_path=None,
+            analysis_root=None,
+            rollup=paths["rollup"],
+            discover_rollup=False,
+            output_dir=output,
+            build_info=BUILD_INFO,
+            output_format="parquet-single",
+            dimensions_path=dimensions,
+        )
+
+    def test_provenance_block_recorded(self) -> None:
+        with TemporaryDirectory() as tmp:
+            paths = write_fixtures(Path(tmp) / "inputs")
+            out = Path(tmp) / "b" / "data"
+            self.assertEqual(self._build(paths, out, dimensions=paths["dimensions"]), 0)
+            rd = self._manifest(out)["research_dimensions"]
+            self.assertEqual(rd["source_file"], "dimensions.slim.json")  # basename only
+            self.assertNotIn("/", rd["source_file"])  # CA-008 no path
+            self.assertEqual(len(rd["source_sha256"]), 64)
+            # exported fixture corpus = poster 101 (1001) + 103 (1003) = 2.
+            self.assertEqual(rd["dimensions"]["focus"]["matched"], 2)  # both have focus
+            self.assertEqual(rd["dimensions"]["theory_scope"]["matched"], 1)  # only 1001
+            self.assertEqual(rd["unmatched_in_file"], 1)  # 9999 not exported
+
+    def test_omitting_dimensions_succeeds_with_no_block(self) -> None:
+        with TemporaryDirectory() as tmp:
+            paths = write_fixtures(Path(tmp) / "inputs")
+            out = Path(tmp) / "b" / "data"
+            self.assertEqual(self._build(paths, out, dimensions=None), 0)  # D4
+            self.assertNotIn("research_dimensions", self._manifest(out))
+
+    def test_build_with_dimensions_is_byte_identical(self) -> None:
+        with TemporaryDirectory() as tmp:
+            paths = write_fixtures(Path(tmp) / "inputs")
+            out1 = Path(tmp) / "b1" / "data"
+            out2 = Path(tmp) / "b2" / "data"
+            for out in (out1, out2):
+                self.assertEqual(self._build(paths, out, dimensions=paths["dimensions"]), 0)
+            self.assertEqual(
+                hashlib.sha256((out1 / "ohbm2026.parquet").read_bytes()).hexdigest(),
+                hashlib.sha256((out2 / "ohbm2026.parquet").read_bytes()).hexdigest(),
+            )  # SC-005 / D5
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

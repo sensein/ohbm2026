@@ -42,6 +42,11 @@ FACET_KEYS: tuple[str, ...] = (
     "recording_technology",
     "brain_regions",
     "brain_networks",
+    # Stage 23 (spec 023) — research-classification dimensions.
+    "focus",
+    "research_modality",
+    "theory_scope",
+    "epistemic_basis",
 )
 
 # Human-readable labels — keep parallel with FACET_KEYS so the discovery
@@ -61,6 +66,10 @@ FACET_LABELS: Mapping[str, str] = {
     "recording_technology": "Recording technology",
     "brain_regions": "Brain regions",
     "brain_networks": "Brain networks",
+    "focus": "Focus",
+    "research_modality": "Research modality",
+    "theory_scope": "Theory scope",
+    "epistemic_basis": "Epistemic basis",
 }
 
 
@@ -181,11 +190,17 @@ def build_manifest(
     abstracts: list[dict[str, Any]],
     rollup_db: Path,
     build_info: Mapping[str, str],
+    dimension_coverage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the manifest dict per data-model.md §1.
 
     Discovers cells + topic kinds from the rollup; discovers facet options
     from the corpus. The output is JSON-serializable.
+
+    Stage 23 (spec 023): when ``dimension_coverage`` is supplied, embed it as
+    the ``research_dimensions`` provenance block (slim-file basename + sha256 +
+    per-dimension matched/no_value + unmatched_in_file). Omitted entirely when
+    no dimension file was used (FR-010 / CA-008).
     """
 
     cells = discover_cells(rollup_db)
@@ -223,7 +238,7 @@ def build_manifest(
         for key in FACET_KEYS
     ]
 
-    return {
+    manifest: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "build_info": dict(build_info),
         "corpus_count": len(abstracts),
@@ -240,3 +255,6 @@ def build_manifest(
             "minilm_dtype": "int8",
         },
     }
+    if dimension_coverage is not None:
+        manifest["research_dimensions"] = dict(dimension_coverage)
+    return manifest

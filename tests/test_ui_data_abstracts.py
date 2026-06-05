@@ -59,6 +59,57 @@ class TestAcceptedOnlyInvariant(unittest.TestCase):
             self.assertNotIn("submission_id", r)
 
 
+class TestResearchDimensionsJoin(unittest.TestCase):
+    """Stage 23 — the four dimensions are left-joined into each exported
+    record's `facets` block, keyed by Oxford submission id."""
+
+    def _records(self, tmp, research_dimensions):
+        paths = write_fixtures(Path(tmp))
+        return build_abstracts_records(
+            corpus_path=paths["corpus"],
+            enriched_path=None,
+            references_path=None,
+            withdrawn_path=paths["withdrawn"],
+            research_dimensions=research_dimensions,
+        )
+
+    def test_dimensions_injected_into_facets(self) -> None:
+        from ohbm2026.ui_data.dimensions import load_research_dimensions
+
+        with TemporaryDirectory() as tmp:
+            paths = write_fixtures(Path(tmp))
+            dims = load_research_dimensions(paths["dimensions"])
+            records = build_abstracts_records(
+                corpus_path=paths["corpus"],
+                enriched_path=None,
+                references_path=None,
+                withdrawn_path=paths["withdrawn"],
+                research_dimensions=dims,
+            )
+        by_poster = {r["poster_id"]: r for r in records}
+        # 1001 → poster 101: all four present.
+        self.assertEqual(by_poster[101]["facets"]["focus"], ["Translational", "Clinical"])
+        self.assertEqual(by_poster[101]["facets"]["epistemic_basis"], ["Data-driven"])
+        # 1003 → poster 103: theory_scope empty, focus present.
+        self.assertEqual(by_poster[103]["facets"]["theory_scope"], [])
+        self.assertEqual(by_poster[103]["facets"]["focus"], ["Fundamental"])
+
+    def test_abstract_absent_from_map_gets_empty_lists(self) -> None:
+        # Map only has 1001; 1003 must come back with empty dimension lists.
+        with TemporaryDirectory() as tmp:
+            records = self._records(tmp, {1001: {"focus": ["Clinical"]}})
+        by_poster = {r["poster_id"]: r for r in records}
+        for key in ("focus", "research_modality", "theory_scope", "epistemic_basis"):
+            self.assertEqual(by_poster[103]["facets"][key], [])
+
+    def test_no_map_means_all_four_empty(self) -> None:
+        with TemporaryDirectory() as tmp:
+            records = self._records(tmp, None)
+        for r in records:
+            for key in ("focus", "research_modality", "theory_scope", "epistemic_basis"):
+                self.assertEqual(r["facets"][key], [])
+
+
 class TestHtmlToTextSupSub(unittest.TestCase):
     """Stage 12.2 — `<sup>` / `<sub>` survive `_html_to_text` as
     Unicode super/subscript glyphs instead of being flattened to
