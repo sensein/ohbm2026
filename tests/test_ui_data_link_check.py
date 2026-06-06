@@ -110,6 +110,37 @@ class LinkCheckTests(unittest.TestCase):
         self.assertIsNone(results[0].status)
         self.assertFalse(results[0].ok)
 
+    @responses.activate
+    def test_403_bot_block_is_soft_warn_not_fatal(self) -> None:
+        # openalex.org-style: HEAD 403, GET fallback also 403 (datacenter-IP /
+        # bot block). The host responded so the link resolves — it must NOT fail
+        # the build; it's a WARN, exit 0.
+        body = """references:
+- section: x
+  title: bot-blocked
+  url: https://example.org/blocked
+"""
+        responses.add(responses.HEAD, "https://example.org/blocked", status=403)
+        responses.add(responses.GET, "https://example.org/blocked", status=403)
+        code, results = link_check(self._write_yaml(body))
+        self.assertEqual(code, 0)
+        self.assertEqual(results[0].status, 403)
+        self.assertFalse(results[0].ok)
+        self.assertTrue(results[0].warn)
+
+    @responses.activate
+    def test_429_rate_limit_is_soft_warn_not_fatal(self) -> None:
+        body = """references:
+- section: x
+  title: rate-limited
+  url: https://example.org/throttled
+"""
+        responses.add(responses.HEAD, "https://example.org/throttled", status=429)
+        code, results = link_check(self._write_yaml(body))
+        self.assertEqual(code, 0)
+        self.assertEqual(results[0].status, 429)
+        self.assertTrue(results[0].warn)
+
     def test_missing_yaml_is_fatal(self) -> None:
         code, _ = link_check(Path("/tmp/does-not-exist.yaml"))
         self.assertEqual(code, 3)
