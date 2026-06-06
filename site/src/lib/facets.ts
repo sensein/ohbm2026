@@ -90,6 +90,19 @@ export const FACET_LABELS: Record<FacetKey, string> = {
 };
 
 /**
+ * Facets whose values are AI-computed (Stage 23 / spec 023 — the NeuroScape
+ * dimension analysis) rather than submitter-provided or regex-derived. The
+ * sidebar tags these with a ✨ AI pill and starts them collapsed so the
+ * provenance distinction is visible without adding vertical noise.
+ */
+export const AI_FACET_KEYS: ReadonlySet<FacetKey> = new Set<FacetKey>([
+	'focus',
+	'research_modality',
+	'theory_scope',
+	'epistemic_basis'
+]);
+
+/**
  * Per-(model, input) cell-specific context for facets that derive their
  * options from the active UMAP layout rather than the abstract record alone.
  * Currently just the cluster facet — `clusterLabelByPosterId` maps each

@@ -231,3 +231,14 @@ describe('research-classification dimensions as facets', () => {
 		expect(eb).toEqual({ 'Data-driven': 1 });
 	});
 });
+
+// Stage 23 — AI_FACET_KEYS marks exactly the four AI-computed dimensions
+// (drives the sidebar ✨ AI pill + collapse-by-default).
+describe('AI_FACET_KEYS', () => {
+	it('contains exactly the four research-classification dimensions', async () => {
+		const { AI_FACET_KEYS } = await import('$lib/facets');
+		expect([...AI_FACET_KEYS].sort()).toEqual(
+			['epistemic_basis', 'focus', 'research_modality', 'theory_scope']
+		);
+	});
+});

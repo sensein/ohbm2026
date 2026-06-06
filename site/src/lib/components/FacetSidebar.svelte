@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { activeFilters } from '$lib/stores/selection';
 	import {
+		AI_FACET_KEYS,
 		FACET_KEYS_ORDERED,
 		FACET_LABELS,
 		clearAllFilters,
@@ -29,6 +30,10 @@
 		'recording_technology',
 		'brain_regions',
 		'brain_networks',
+		'focus',
+		'research_modality',
+		'theory_scope',
+		'epistemic_basis',
 		'keywords',
 		'standby_block',
 		'accepted_for'
@@ -83,6 +88,9 @@
 				>
 					<span class="caret">{isOpen ? '▾' : '▸'}</span>
 					<span class="facet-label">{FACET_LABELS[key]}</span>
+					{#if AI_FACET_KEYS.has(key)}
+						<span class="ai-pill" title="AI-computed dimension (NeuroScape analysis)">✨ AI</span>
+					{/if}
 					<span class="facet-count">{options.length}</span>
 				</button>
 				{#if isOpen}
@@ -180,6 +188,19 @@
 	.facet-count {
 		font-size: 0.7rem;
 		color: var(--text-faint);
+	}
+	/* Stage 23 — mirrors DetailPanel's `.ai-pill-inline` so AI-computed
+	   dimension facets are visually tagged consistently across the app. */
+	.ai-pill {
+		display: inline-block;
+		font-size: 0.6rem;
+		font-weight: 600;
+		color: var(--accent-soft-text);
+		background: var(--accent-soft-bg);
+		padding: 0 0.35rem;
+		border-radius: 999px;
+		letter-spacing: 0.03em;
+		vertical-align: middle;
 	}
 	.options {
 		list-style: none;
