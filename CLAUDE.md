@@ -169,7 +169,37 @@ Current canonical defaults (the UI consumes these):
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at `specs/023-atlas-research-dimensions/plan.md`. Stage 23 (Track A,
+at `specs/024-fix-ios-safari-load/plan.md`. Stage 24 (Track A, UI-only,
+`site/`) fixes the `/ohbm2026/` atlas failing to load on iPhone Safari
+(blank screen / endless spinner). Root cause is NOT a JS build-target
+issue (the SvelteKit default `modules` target parses on modern iOS) but a
+non-resilient bootstrap that hides WebKit-specific failures: (R1) there is
+no `+error.svelte` and `+page.svelte` only sets `loaded=true` AFTER its
+awaits (`:278,308`), so any thrown await leaves the render stuck on
+`{#if !loaded}Loading…` (`:2589`) — the amplifier; (R2) OHBM mode mounts ~3
+simultaneous auto-rotating WebGL contexts (2D scattergl + 3D scatter3d +
+HUD) via `show3dPane = mode==='ohbm' || hasWebGL` (`UmapPanel.svelte:232`)
++ `autoRotate = mode==='ohbm'` (`:247`), which iOS WebKit's tight
+GL-context cap kills — the trigger; (R3) the ONNX/WASM semantic worker is
+warmed eagerly on every load (`+page.svelte:317 warmSemantic()`) adding
+memory pressure; (R4) the 25 MB parquet is buffered ~2x and decoded on the
+main thread (`loader.ts`). Fix order = visibility first (add
+`+error.svelte` + try/catch → explicit `failed(reason)` state), then a
+runtime DeviceCapability gate (NEW `site/src/lib/device/capability.ts`,
+detected at runtime per CA-007 — NOT a UA/iOS allow-list) that on
+mobile/low-budget mounts 2D-only, disables auto-rotate, and defers 3D
+behind an explicit toggle, then lazy/on-demand semantic warm, then
+(contingent) off-main-thread decode. Verified via a failing-first
+Playwright WebKit/iPhone load check + `vitest run` unit tests for the
+capability gate and load-state machine; physical-iPhone Web-Inspector pass
+is the final sign-off. Client-side only; no corpus/pipeline rerun and no
+data-package re-publish expected (byte-identical guarantee preserved).
+Companions: `research.md`, `data-model.md`,
+`contracts/{error-visibility,mobile-rendering,lazy-semantic-warm,load-verification}.md`,
+`quickstart.md`.
+
+The immediately-prior Stage 23 plan is at
+`specs/023-atlas-research-dimensions/plan.md`. Stage 23 (Track A,
 `src/ohbm2026/ui_data/`) ingests four externally-computed research-
 classification dimensions (`focus`, `research_modality`, `theory_scope`,
 `epistemic_basis`) from an operator-supplied `abstracts.detail.json`
