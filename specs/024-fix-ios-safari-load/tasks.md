@@ -105,7 +105,7 @@ remain independently deliverable.
 **Purpose**: Docs sync, sibling-site scope decision, regression, and constitution gates.
 
 - [X] T018 [P] Docs sync (CA-003): add a browser-support note (supported iOS/Safari range + mobile render behavior) to `README.md` and reference it from this spec; note the `/ohbm2026/`-primary scope.
-- [ ] T019 Sibling-site scope check (spec Assumptions): run the WebKit/iPhone harness against atlas-root (`/`) and `/neuroscape/`; if they exhibit the same blank/spinner (they share the bootstrap + `UmapPanel`), apply the same R1/R2 guards there. If not affected, record that they are out of scope in the PR.
+- [X] T019 Sibling-site scope check (spec Assumptions): run the WebKit/iPhone harness against atlas-root (`/`) and `/neuroscape/`; if they exhibit the same blank/spinner (they share the bootstrap + `UmapPanel`), apply the same R1/R2 guards there. If not affected, record that they are out of scope in the PR.
 - [X] T020 Regression check (SC-005): run the existing desktop + (if present) Android/Chrome checks and the desktop Playwright path to confirm 2D+3D mount + auto-rotate are unchanged on desktop-class devices.
 - [X] T021 [P] Run the full `site/` `vitest run` suite + the Playwright WebKit suite green; confirm T005/T006/T013/T014 now pass and none were skipped/`xfail`'d to go green (CA-006).
 - [X] T022 [P] Verify no data, caches, exports, or downloaded assets were committed and that any test-data path used is gitignored (`site/static/data/`, `data/`, `tmp/`); run `.specify/scripts/bash/constitution-check.sh --full`.
