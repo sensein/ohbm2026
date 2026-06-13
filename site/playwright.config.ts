@@ -62,6 +62,18 @@ export default defineConfig({
 				...devices['Pixel 5'],
 				viewport: { width: 360, height: 640 }
 			}
+		},
+		{
+			// Stage 24 (specs/024-fix-ios-safari-load) — iPhone Safari is a
+			// WebKit engine with a tight WebGL-context cap + per-tab memory
+			// ceiling that the Chromium-based 'mobile' (Pixel 5) project does
+			// NOT reproduce. This project drives the REAL WebKit engine on an
+			// iPhone descriptor so the iOS load-failure regression is actually
+			// exercised (FR-006). Requires `playwright install webkit`.
+			name: 'iphone-webkit',
+			use: {
+				...devices['iPhone 13']
+			}
 		}
 	]
 });
