@@ -79,7 +79,9 @@ test.describe('iPhone Safari: no crash under navigation (WebKit)', () => {
 		// 3) In-app navigation to the About route and back to home, exercising a
 		//    real route change (home +page → about +page → home +page re-mount).
 		await page.getByTestId('header-about-link').click();
-		await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 15_000 });
+		// Assert the route actually changed (robust across viewports — the page
+		// has more than one h1, so a heading locator is ambiguous on desktop).
+		await expect(page).toHaveURL(/\/about\/?(\?|#|$)/, { timeout: 15_000 });
 		expect(crashed, 'tab crashed navigating to About').toBe(false);
 
 		// 4) Deep-link route navigation: load an abstract permalink directly.
