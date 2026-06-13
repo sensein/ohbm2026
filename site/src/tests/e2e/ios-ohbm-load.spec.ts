@@ -90,21 +90,30 @@ test.describe('US1: OHBM atlas loads on iPhone Safari (WebKit)', () => {
 		await expect(page.getByTestId('detail-panel')).toBeVisible({ timeout: 5_000 });
 	});
 
-	test('mobile rendering: 3D is deferred (WebGL) or the map degrades gracefully (no WebGL)', async ({
+	test('rendering gate: 3D deferred on mobile, mounted on desktop, degrades w/o WebGL', async ({
 		page
 	}) => {
 		await page.goto('./');
 		await waitForInteractive(page);
-		if (await hasWebGL(page)) {
+		const webgl = await hasWebGL(page);
+		// The capability gate keys on viewport width (< 1024 = mobile). Assert the
+		// behavior matching THIS project's descriptor so the spec is correct under
+		// every Playwright project (iphone-webkit, mobile, desktop chromium).
+		const width = page.viewportSize()?.width ?? 1280;
+		const isMobile = width < 1024;
+		if (!webgl) {
+			// No WebGL (e.g. headless WebKit): the map degrades to a clear note and
+			// the list/search still work (FR-001 / T011) — never a blank pane.
+			await expect(page.getByTestId('umap-unavailable')).toBeVisible();
+		} else if (isMobile) {
 			// Phone WITH WebGL: 2D mounts, 3D is NOT auto-mounted — the opt-in CTA is.
 			await expect(page.getByTestId('umap-chart-3d')).toHaveCount(0);
 			await expect(page.getByTestId('umap-show-3d')).toBeVisible();
 			await page.getByTestId('umap-show-3d').click();
 			await expect(page.getByTestId('umap-chart-3d')).toBeVisible({ timeout: 10_000 });
 		} else {
-			// No WebGL (e.g. headless WebKit): the map degrades to a clear note
-			// and the list/search still work (FR-001 / T011) — never a blank pane.
-			await expect(page.getByTestId('umap-unavailable')).toBeVisible();
+			// Desktop unchanged (FR-005 / SC-005): the 3D pane mounts by default.
+			await expect(page.getByTestId('umap-chart-3d')).toBeVisible({ timeout: 10_000 });
 		}
 	});
 });

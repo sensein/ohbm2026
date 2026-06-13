@@ -121,7 +121,13 @@ export function detectCapability(): DeviceCapability {
 			prefersReducedMotion: false
 		});
 	}
-	const dm = (navigator as unknown as { deviceMemory?: unknown }).deviceMemory;
+	// Guard `navigator` independently of `window`: some test/SSR setups define
+	// `window` but not `navigator` (partial global mocks). Absent → treat as
+	// unknown memory, which the conservative gate handles safely.
+	const dm =
+		typeof navigator !== 'undefined'
+			? (navigator as unknown as { deviceMemory?: unknown }).deviceMemory
+			: undefined;
 	const deviceMemoryGb = typeof dm === 'number' ? dm : null;
 	const prefersReducedMotion =
 		typeof window.matchMedia === 'function'
