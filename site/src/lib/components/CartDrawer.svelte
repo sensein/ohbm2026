@@ -377,6 +377,12 @@
 	}
 	.items {
 		flex: 1;
+		/* min-height:0 is REQUIRED in a flex column: without it the default
+		   min-height:auto keeps this list at its full content height, so with
+		   enough saved items it grows past the drawer and pushes the footer
+		   (action buttons) off-screen instead of scrolling. (Stage 24 follow-up
+		   — reported as "cart buttons not visible / drawer taller than screen".) */
+		min-height: 0;
 		overflow-y: auto;
 		list-style: none;
 		padding: 0.5rem;
@@ -458,6 +464,9 @@
 		gap: 0.5rem;
 		padding: 0.7rem 0.85rem;
 		border-top: 1px solid var(--border);
+		/* Always keep the action buttons visible at the bottom — never let the
+		   footer be squeezed or pushed off-screen by a long item list. */
+		flex-shrink: 0;
 	}
 	.footer-row {
 		display: flex;
