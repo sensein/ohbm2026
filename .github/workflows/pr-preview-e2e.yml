@@ -86,7 +86,10 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: site
-        run: pnpm exec playwright install chromium --with-deps
+        # webkit is needed for the Stage-24 iphone-webkit regression guard
+        # (specs/024-fix-ios-safari-load) — iPhone Safari is a WebKit engine
+        # that the chromium project can't reproduce.
+        run: pnpm exec playwright install chromium webkit --with-deps
 
       - name: Wait for PR preview to be live
         env:
@@ -126,6 +129,18 @@ jobs:
           PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org/pr-${{ steps.pr.outputs.number }}/ohbm2026/
           UI_DATA_AVAILABLE: '1'
         run: pnpm exec playwright test --project=chromium
+
+      - name: Run Stage-24 WebKit/iPhone regression guard against the preview
+        working-directory: site
+        # specs/024-fix-ios-safari-load (FR-006): the iPhone-Safari load +
+        # navigation-crash fix is WebKit-specific, so guard it on the REAL
+        # WebKit engine. Scoped to the four Stage-24 specs so the existing
+        # chromium suite is untouched. Runs against the same deployed preview
+        # (R2 data-host CORS resolves on this origin, not on localhost).
+        env:
+          PLAYWRIGHT_BASE_URL: https://abstractatlas.brainkb.org/pr-${{ steps.pr.outputs.number }}/ohbm2026/
+          UI_DATA_AVAILABLE: '1'
+        run: pnpm exec playwright test --project=iphone-webkit ios-ohbm-load ios-load-failure ios-navigation ios-siblings
 
       - name: Upload Playwright report on failure
         if: failure()
